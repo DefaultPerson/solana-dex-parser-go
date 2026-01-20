@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/solana-dex-parser-go/utils"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 func TestBinaryReaderU64(t *testing.T) {

@@ -11,9 +11,9 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/joho/godotenv"
-	dexparser "github.com/solana-dex-parser-go"
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/types"
+	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 func init() {

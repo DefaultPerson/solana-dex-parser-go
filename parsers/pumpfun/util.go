@@ -3,8 +3,8 @@ package pumpfun
 import (
 	"math/big"
 
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // tradeInfoParams holds parameters for creating trade info

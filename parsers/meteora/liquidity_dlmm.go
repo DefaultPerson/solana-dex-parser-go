@@ -3,9 +3,9 @@ package meteora
 import (
 	"bytes"
 
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // MeteoraDLMMPoolParser parses Meteora DLMM pool events

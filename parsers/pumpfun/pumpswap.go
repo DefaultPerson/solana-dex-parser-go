@@ -1,9 +1,9 @@
 package pumpfun
 
 import (
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/parsers"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // PumpswapParser parses Pumpswap transactions

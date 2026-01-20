@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/mr-tron/base58"
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // DecodeInstructionData decodes instruction data from various formats

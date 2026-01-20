@@ -1,10 +1,10 @@
 package meteora
 
 import (
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/parsers"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // MeteoraDBCParser parses Meteora Dynamic Bonding Curve transactions

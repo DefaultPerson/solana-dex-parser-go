@@ -3,9 +3,9 @@ package parsers
 import (
 	"bytes"
 
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/types"
-	"github.com/solana-dex-parser-go/utils"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // TradeParser interface for DEX trade parsers

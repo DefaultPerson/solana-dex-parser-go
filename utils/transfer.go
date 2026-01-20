@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // IsTransferCheck checks if instruction is a transferChecked instruction

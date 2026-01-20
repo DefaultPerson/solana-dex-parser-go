@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
-	dexparser "github.com/solana-dex-parser-go"
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/types"
-	"github.com/solana-dex-parser-go/utils"
+	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // Sample transaction JSON for benchmarks (Pumpfun BUY)

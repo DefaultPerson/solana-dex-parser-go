@@ -4,7 +4,7 @@ import (
 	"math/big"
 
 	"github.com/mr-tron/base58"
-	"github.com/solana-dex-parser-go/utils"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // TradeDirection represents the direction of a trade

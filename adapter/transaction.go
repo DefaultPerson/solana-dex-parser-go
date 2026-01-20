@@ -6,8 +6,8 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/mr-tron/base58"
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // SolanaTransaction represents a generic Solana transaction interface

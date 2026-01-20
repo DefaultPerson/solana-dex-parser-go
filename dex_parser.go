@@ -3,18 +3,18 @@ package dexparser
 import (
 	"fmt"
 
-	"github.com/solana-dex-parser-go/adapter"
-	"github.com/solana-dex-parser-go/classifier"
-	"github.com/solana-dex-parser-go/constants"
-	"github.com/solana-dex-parser-go/parsers"
-	"github.com/solana-dex-parser-go/parsers/jupiter"
-	"github.com/solana-dex-parser-go/parsers/meme"
-	"github.com/solana-dex-parser-go/parsers/meteora"
-	"github.com/solana-dex-parser-go/parsers/orca"
-	"github.com/solana-dex-parser-go/parsers/pumpfun"
-	"github.com/solana-dex-parser-go/parsers/raydium"
-	"github.com/solana-dex-parser-go/types"
-	"github.com/solana-dex-parser-go/utils"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/jupiter"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/meme"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/meteora"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/orca"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/pumpfun"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // DexParser is the main parser class for Solana DEX transactions
