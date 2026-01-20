@@ -117,7 +117,8 @@ type PoolCreateEventLayout struct {
 
 // ParsePoolCreateEventLayout parses pool creation event from bytes
 func ParsePoolCreateEventLayout(data []byte) (*PoolCreateEventLayout, error) {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	poolState, _ := reader.ReadFixedArray(32)
 	creator, _ := reader.ReadFixedArray(32)
@@ -247,7 +248,8 @@ type RaydiumLCPTradeLayout struct {
 //   tradeDirection   u8        byte 128
 //   poolStatus       u8        byte 129
 func ParseRaydiumLCPTradeLayout(data []byte) (*RaydiumLCPTradeLayout, error) {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	poolState, _ := reader.ReadFixedArray(32)
 
@@ -326,7 +328,8 @@ type RaydiumLCPTradeV2Layout struct {
 
 // ParseRaydiumLCPTradeV2Layout parses trade v2 layout from bytes
 func ParseRaydiumLCPTradeV2Layout(data []byte) (*RaydiumLCPTradeV2Layout, error) {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	poolState, _ := reader.ReadFixedArray(32)
 
@@ -454,7 +457,8 @@ func DecodeRaydiumLog(data []byte) interface{} {
 	}
 
 	logType := LogType(data[0])
-	reader := utils.NewBinaryReader(data[1:])
+	reader := utils.GetBinaryReader(data[1:])
+	defer reader.Release()
 
 	switch logType {
 	case LogTypeDeposit:

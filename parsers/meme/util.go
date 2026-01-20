@@ -1,7 +1,7 @@
 package meme
 
-import "fmt"
+import "github.com/solana-dex-parser-go/utils"
 
 func formatIdx(outerIndex int, innerIndex int) string {
-	return fmt.Sprintf("%d-%d", outerIndex, innerIndex)
+	return utils.FormatIdx(outerIndex, innerIndex)
 }

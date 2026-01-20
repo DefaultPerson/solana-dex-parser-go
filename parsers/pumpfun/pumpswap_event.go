@@ -314,7 +314,8 @@ func (p *PumpswapEventParser) ParseInstructions(instructions []types.ClassifiedI
 
 // decodeBuyEvent decodes a buy event
 func (p *PumpswapEventParser) decodeBuyEvent(data []byte) *PumpswapBuyEventData {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	timestamp, _ := reader.ReadI64()
 	baseAmountOut, _ := reader.ReadU64()
@@ -380,7 +381,8 @@ func (p *PumpswapEventParser) decodeBuyEvent(data []byte) *PumpswapBuyEventData 
 
 // decodeSellEvent decodes a sell event
 func (p *PumpswapEventParser) decodeSellEvent(data []byte) *PumpswapSellEventData {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	timestamp, _ := reader.ReadI64()
 	baseAmountIn, _ := reader.ReadU64()
@@ -446,7 +448,8 @@ func (p *PumpswapEventParser) decodeSellEvent(data []byte) *PumpswapSellEventDat
 
 // decodeAddLiquidity decodes an add liquidity event
 func (p *PumpswapEventParser) decodeAddLiquidity(data []byte) *PumpswapDepositEventData {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	timestamp, _ := reader.ReadI64()
 	lpTokenAmountOut, _ := reader.ReadU64()
@@ -491,7 +494,8 @@ func (p *PumpswapEventParser) decodeAddLiquidity(data []byte) *PumpswapDepositEv
 
 // decodeCreateEvent decodes a create pool event
 func (p *PumpswapEventParser) decodeCreateEvent(data []byte) *PumpswapCreatePoolEventData {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	timestamp, _ := reader.ReadI64()
 	index, _ := reader.ReadU16()
@@ -542,7 +546,8 @@ func (p *PumpswapEventParser) decodeCreateEvent(data []byte) *PumpswapCreatePool
 
 // decodeRemoveLiquidity decodes a remove liquidity event
 func (p *PumpswapEventParser) decodeRemoveLiquidity(data []byte) *PumpswapWithdrawEventData {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	timestamp, _ := reader.ReadI64()
 	lpTokenAmountIn, _ := reader.ReadU64()

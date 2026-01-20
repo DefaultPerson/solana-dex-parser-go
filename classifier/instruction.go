@@ -72,7 +72,7 @@ func (ic *InstructionClassifier) GetInstructions(programId string) []types.Class
 
 // GetMultiInstructions returns all instructions for multiple program IDs
 func (ic *InstructionClassifier) GetMultiInstructions(programIds []string) []types.ClassifiedInstruction {
-	var result []types.ClassifiedInstruction
+	result := make([]types.ClassifiedInstruction, 0, len(programIds)*4)
 	for _, programId := range programIds {
 		result = append(result, ic.GetInstructions(programId)...)
 	}

@@ -4,9 +4,17 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/big"
+	"sync"
 
 	"github.com/mr-tron/base58"
 )
+
+// binaryReaderPool is a sync.Pool for BinaryReader instances
+var binaryReaderPool = sync.Pool{
+	New: func() interface{} {
+		return &BinaryReader{}
+	},
+}
 
 // BinaryReader provides methods for reading binary data with offset tracking
 type BinaryReader struct {
@@ -21,6 +29,21 @@ func NewBinaryReader(buffer []byte) *BinaryReader {
 		buffer: buffer,
 		offset: 0,
 	}
+}
+
+// GetBinaryReader gets a BinaryReader from the pool and initializes it
+func GetBinaryReader(buffer []byte) *BinaryReader {
+	r := binaryReaderPool.Get().(*BinaryReader)
+	r.buffer = buffer
+	r.offset = 0
+	r.err = nil
+	return r
+}
+
+// Release returns the BinaryReader to the pool
+func (r *BinaryReader) Release() {
+	r.buffer = nil // Release buffer reference to allow GC
+	binaryReaderPool.Put(r)
 }
 
 // ReadFixedArray reads a fixed-length byte array

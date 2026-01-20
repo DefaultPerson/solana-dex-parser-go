@@ -163,7 +163,9 @@ func (p *SugarEventParser) decodeBuyEvent(data []byte, instruction interface{}, 
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	inputAmount := reader.ReadU64AsBigInt()
 	outputAmount := reader.ReadU64AsBigInt()
 
@@ -208,7 +210,9 @@ func (p *SugarEventParser) decodeSellEvent(data []byte, instruction interface{},
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	inputAmount := reader.ReadU64AsBigInt()
 	outputAmount := reader.ReadU64AsBigInt()
 
@@ -253,7 +257,9 @@ func (p *SugarEventParser) decodeCreateEvent(data []byte, instruction interface{
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	name, err := reader.ReadString()
 	if err != nil {
 		return nil

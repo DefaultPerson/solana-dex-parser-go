@@ -2,7 +2,6 @@ package parsers
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/solana-dex-parser-go/adapter"
 	"github.com/solana-dex-parser-go/types"
@@ -56,10 +55,7 @@ func NewBaseParser(
 
 // GetTransfersForInstruction returns transfers for a specific instruction
 func (bp *BaseParser) GetTransfersForInstruction(programId string, outerIndex int, innerIndex int, extraTypes []string) []types.TransferData {
-	key := fmt.Sprintf("%s:%d", programId, outerIndex)
-	if innerIndex >= 0 {
-		key += fmt.Sprintf("-%d", innerIndex)
-	}
+	key := utils.FormatTransferKey(programId, outerIndex, innerIndex)
 
 	transfers, ok := bp.TransferActions[key]
 	if !ok {
@@ -114,10 +110,7 @@ func NewBaseLiquidityParser(
 
 // GetTransfersForInstruction returns transfers for a specific instruction
 func (bp *BaseLiquidityParser) GetTransfersForInstruction(programId string, outerIndex int, innerIndex int, filterTypes []string) []types.TransferData {
-	key := fmt.Sprintf("%s:%d", programId, outerIndex)
-	if innerIndex >= 0 {
-		key += fmt.Sprintf("-%d", innerIndex)
-	}
+	key := utils.FormatTransferKey(programId, outerIndex, innerIndex)
 
 	transfers, ok := bp.TransferActions[key]
 	if !ok {
@@ -182,10 +175,7 @@ func NewBaseEventParser(
 
 // GetTransfersForInstruction returns transfers for a specific instruction
 func (bp *BaseEventParser) GetTransfersForInstruction(programId string, outerIndex int, innerIndex int) []types.TransferData {
-	key := fmt.Sprintf("%s:%d", programId, outerIndex)
-	if innerIndex >= 0 {
-		key += fmt.Sprintf("-%d", innerIndex)
-	}
+	key := utils.FormatTransferKey(programId, outerIndex, innerIndex)
 
 	transfers, ok := bp.TransferActions[key]
 	if !ok {

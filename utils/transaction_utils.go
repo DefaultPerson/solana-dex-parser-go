@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
@@ -68,18 +67,18 @@ func (tu *TransactionUtils) GetTransferActions(extraTypes []string) map[string][
 		if constants.IsSystemProgram(outerProgramId) {
 			continue
 		}
-		groupKey = fmt.Sprintf("%s:%d", outerProgramId, outerIndex)
+		groupKey = FormatTransferKey(outerProgramId, outerIndex, -1)
 
 		for innerIndex, ix := range set.Instructions {
 			innerProgramId := tu.adapter.GetInstructionProgramId(ix)
 
 			// Special case for meteora vault
 			if !constants.IsSystemProgram(innerProgramId) && !tu.isIgnoredProgram(innerProgramId) {
-				groupKey = fmt.Sprintf("%s:%d-%d", innerProgramId, outerIndex, innerIndex)
+				groupKey = FormatTransferKey(innerProgramId, outerIndex, innerIndex)
 				continue
 			}
 
-			idx := fmt.Sprintf("%d-%d", outerIndex, innerIndex)
+			idx := FormatIdx(outerIndex, innerIndex)
 			transferData := tu.ParseInstructionAction(ix, idx, extraTypes)
 			if transferData != nil {
 				if constants.IsFeeAccount(transferData.Info.Destination) ||
@@ -306,7 +305,7 @@ func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inpu
 			continue
 		}
 
-		key := fmt.Sprintf("%f-%s", tokenInfo.Amount, tokenInfo.Mint)
+		key := tokenInfo.AmountRaw + "-" + tokenInfo.Mint
 		if seenTransfers[key] {
 			continue
 		}
@@ -564,10 +563,7 @@ func (tu *TransactionUtils) GetTransfersForInstruction(transferActions map[strin
 
 // FilterTransfersForInstruction filters transfers for a specific instruction
 func (tu *TransactionUtils) FilterTransfersForInstruction(transferActions map[string][]types.TransferData, programId string, outerIndex int, innerIndex int, filterTypes []string) []types.TransferData {
-	key := fmt.Sprintf("%s:%d", programId, outerIndex)
-	if innerIndex >= 0 {
-		key += fmt.Sprintf("-%d", innerIndex)
-	}
+	key := FormatTransferKey(programId, outerIndex, innerIndex)
 
 	transfers, ok := transferActions[key]
 	if !ok {
@@ -604,7 +600,7 @@ func (tu *TransactionUtils) ProcessTransferInstructions(outerIndex int, extraTyp
 			continue
 		}
 		for idx, instruction := range set.Instructions {
-			idxStr := fmt.Sprintf("%d-%d", outerIndex, idx)
+			idxStr := FormatIdx(outerIndex, idx)
 			transferData := tu.ParseInstructionAction(instruction, idxStr, extraTypes)
 			if transferData != nil {
 				result = append(result, *transferData)

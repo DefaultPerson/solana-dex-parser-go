@@ -2,9 +2,9 @@ package adapter
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"math/big"
 
+	"github.com/goccy/go-json"
 	"github.com/mr-tron/base58"
 	"github.com/solana-dex-parser-go/constants"
 	"github.com/solana-dex-parser-go/types"
@@ -158,8 +158,8 @@ func NewTransactionAdapter(tx *SolanaTransaction, config *types.ParseConfig) *Tr
 	adapter := &TransactionAdapter{
 		tx:             tx,
 		Config:         config,
-		SPLTokenMap:    make(map[string]types.TokenInfo),
-		SPLDecimalsMap: make(map[string]uint8),
+		SPLTokenMap:    make(map[string]types.TokenInfo, 32),
+		SPLDecimalsMap: make(map[string]uint8, 16),
 	}
 	adapter.AccountKeys = adapter.extractAccountKeys()
 	adapter.extractTokenInfo()

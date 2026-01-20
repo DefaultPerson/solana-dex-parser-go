@@ -2,11 +2,11 @@ package tests
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
 
+	"github.com/goccy/go-json"
 	dexparser "github.com/solana-dex-parser-go"
 	"github.com/solana-dex-parser-go/adapter"
 	"github.com/solana-dex-parser-go/types"

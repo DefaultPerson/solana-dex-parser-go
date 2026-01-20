@@ -97,7 +97,9 @@ func (p *MeteoraDBCEventParser) decodeTradeEvent(data []byte, instruction interf
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	inputAmount := reader.ReadU64AsBigInt()
 	outputAmount := reader.ReadU64AsBigInt()
 
@@ -161,7 +163,8 @@ func (p *MeteoraDBCEventParser) decodeTradeEvent(data []byte, instruction interf
 
 // decodeCreateEvent decodes a create event
 func (p *MeteoraDBCEventParser) decodeCreateEvent(data []byte, instruction interface{}) *types.MemeEvent {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	name, err := reader.ReadString()
 	if err != nil {

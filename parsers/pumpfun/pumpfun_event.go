@@ -94,7 +94,8 @@ func (p *PumpfunEventParser) decodeTradeEvent(data []byte) *types.MemeEvent {
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	mint, _ := reader.ReadPubkey()
 	quoteMint := constants.TOKENS.SOL
@@ -181,7 +182,8 @@ func (p *PumpfunEventParser) decodeTradeEvent(data []byte) *types.MemeEvent {
 
 // decodeCreateEvent decodes a create event
 func (p *PumpfunEventParser) decodeCreateEvent(data []byte) *types.MemeEvent {
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 
 	name, err := reader.ReadString()
 	if err != nil {
@@ -231,7 +233,8 @@ func (p *PumpfunEventParser) decodeCompleteEvent(data []byte) *types.MemeEvent {
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	user, _ := reader.ReadPubkey()
 	mint, _ := reader.ReadPubkey()
 	bondingCurve, _ := reader.ReadPubkey()
@@ -258,7 +261,8 @@ func (p *PumpfunEventParser) decodeMigrateEvent(data []byte) *types.MemeEvent {
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	user, _ := reader.ReadPubkey()
 	mint, _ := reader.ReadPubkey()
 	reader.Skip(24) // mintAmount, solAmount, poolMigrateFee

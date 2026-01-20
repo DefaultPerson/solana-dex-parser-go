@@ -93,7 +93,9 @@ func (p *MoonitEventParser) decodeBuyEvent(data []byte, ci types.ClassifiedInstr
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 13 {
 		return nil
@@ -191,7 +193,9 @@ func (p *MoonitEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedIn
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 4 {
 		return nil

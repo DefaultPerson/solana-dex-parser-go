@@ -189,7 +189,9 @@ func (p *HeavenEventParser) decodeBuyEvent(data []byte, instruction interface{},
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	solAmount := reader.ReadU64AsBigInt()
 	tokenAmount := reader.ReadU64AsBigInt()
 
@@ -234,7 +236,9 @@ func (p *HeavenEventParser) decodeSellEvent(data []byte, instruction interface{}
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	tokenAmount := reader.ReadU64AsBigInt()
 	solAmount := reader.ReadU64AsBigInt()
 

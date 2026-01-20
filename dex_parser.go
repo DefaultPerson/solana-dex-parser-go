@@ -64,10 +64,10 @@ type MemeEventParserFactory func(
 // NewDexParser creates a new DexParser instance
 func NewDexParser() *DexParser {
 	dp := &DexParser{
-		tradeParserFactories:     make(map[string]TradeParserFactory),
-		liquidityParserFactories: make(map[string]LiquidityParserFactory),
-		transferParserFactories:  make(map[string]TransferParserFactory),
-		memeEventParserFactories: make(map[string]MemeEventParserFactory),
+		tradeParserFactories:     make(map[string]TradeParserFactory, 20),
+		liquidityParserFactories: make(map[string]LiquidityParserFactory, 10),
+		transferParserFactories:  make(map[string]TransferParserFactory, 5),
+		memeEventParserFactories: make(map[string]MemeEventParserFactory, 10),
 	}
 
 	// Register default parsers
@@ -469,10 +469,10 @@ func keyStartsWith(key, prefix string) bool {
 }
 
 func deduplicateTrades(trades []types.TradeInfo) []types.TradeInfo {
-	seen := make(map[string]bool)
-	var result []types.TradeInfo
+	seen := make(map[string]bool, len(trades))
+	result := make([]types.TradeInfo, 0, len(trades))
 	for _, trade := range trades {
-		key := fmt.Sprintf("%s-%s", trade.Idx, trade.Signature)
+		key := utils.FormatDedupeKey(trade.Idx, trade.Signature)
 		if !seen[key] {
 			seen[key] = true
 			result = append(result, trade)

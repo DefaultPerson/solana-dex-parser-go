@@ -240,7 +240,7 @@ func (p *PumpfunInstructionParser) parseInstructions(instructions []types.Classi
 				Slot:      p.adapter.Slot(),
 				Timestamp: p.adapter.BlockTime(),
 				Signature: p.adapter.Signature(),
-				Idx:       fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx),
+				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
 				Signer:    p.adapter.Signers(),
 			}
 			events = append(events, event)
@@ -263,7 +263,8 @@ func (p *PumpfunInstructionParser) decodeBuyInstruction(instruction interface{},
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	tokenAmount, _ := reader.ReadU64()
 	solAmount, _ := reader.ReadU64()
 
@@ -286,7 +287,8 @@ func (p *PumpfunInstructionParser) decodeSellInstruction(instruction interface{}
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	tokenAmount, _ := reader.ReadU64()
 	solAmount, _ := reader.ReadU64()
 
@@ -309,7 +311,8 @@ func (p *PumpfunInstructionParser) decodeCreateInstruction(instruction interface
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	name, err := reader.ReadString()
 	if err != nil {
 		return nil
@@ -504,7 +507,7 @@ func (p *PumpswapInstructionParser) parseInstructions(instructions []types.Class
 				Slot:      p.adapter.Slot(),
 				Timestamp: p.adapter.BlockTime(),
 				Signature: p.adapter.Signature(),
-				Idx:       fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx),
+				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
 				Signer:    p.adapter.Signers(),
 			}
 			events = append(events, event)
@@ -527,7 +530,8 @@ func (p *PumpswapInstructionParser) decodeBuyInstruction(instruction interface{}
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	baseAmountOut, _ := reader.ReadU64()
 	maxQuoteAmountIn, _ := reader.ReadU64()
 
@@ -555,7 +559,8 @@ func (p *PumpswapInstructionParser) decodeSellInstruction(instruction interface{
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	baseAmountIn, _ := reader.ReadU64()
 	minQuoteAmountOut, _ := reader.ReadU64()
 
@@ -583,7 +588,8 @@ func (p *PumpswapInstructionParser) decodeAddLiquidityInstruction(instruction in
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	lpTokenAmountOut, _ := reader.ReadU64()
 	maxBaseAmountIn, _ := reader.ReadU64()
 	maxQuoteAmountIn, _ := reader.ReadU64()
@@ -615,7 +621,8 @@ func (p *PumpswapInstructionParser) decodeRemoveLiquidityInstruction(instruction
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	lpTokenAmountIn, _ := reader.ReadU64()
 	minBaseAmountOut, _ := reader.ReadU64()
 	minQuoteAmountOut, _ := reader.ReadU64()
@@ -647,7 +654,8 @@ func (p *PumpswapInstructionParser) decodeCreateInstruction(instruction interfac
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	reader.Skip(2) // skip first u16 (index)
 	baseAmountIn, _ := reader.ReadU64()
 	quoteAmountOut, _ := reader.ReadU64()

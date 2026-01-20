@@ -154,7 +154,9 @@ func (p *BoopfunEventParser) decodeBuyEvent(data []byte, instruction interface{}
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	solAmount := reader.ReadU64AsBigInt()
 
 	if reader.HasError() {
@@ -212,7 +214,9 @@ func (p *BoopfunEventParser) decodeSellEvent(data []byte, instruction interface{
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	tokenAmount := reader.ReadU64AsBigInt()
 
 	if reader.HasError() {
@@ -270,7 +274,9 @@ func (p *BoopfunEventParser) decodeCreateEvent(data []byte, instruction interfac
 		return nil
 	}
 
-	reader := utils.NewBinaryReader(data)
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+
 	reader.Skip(8) // skip first u64
 
 	name, err := reader.ReadString()
