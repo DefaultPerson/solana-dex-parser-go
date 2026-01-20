@@ -7,12 +7,6 @@ A Go library for parsing Solana DEX swap transactions. This is a Go port of the 
 
 Supports multiple DEX protocols including Jupiter, Raydium, Meteora, Orca, PumpFun, Pumpswap, Moonit, and more.
 
-## Support Development
-
-If you find this project useful, consider donating at:
-
-**SOL**: `879mxY5QKJH1J8x8suzB3rrV2YPVsoauaSJ7nT85YLU7`
-
 ## Contents
 
 - [Features](#features)
@@ -250,11 +244,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - **[solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser)** - Original TypeScript implementation that this Go library is ported from
-- **Solana Foundation** - Blockchain infrastructure and documentation
-- **DEX Protocol Teams** - Jupiter, Raydium, Orca, Meteora, and others for public APIs
-- **Go Community** - Excellent tooling and libraries
-- **[solanaswap-go](https://github.com/franco-bianco/solanaswap-go)** - Inspiration for Go implementation patterns
-
----
-
-**Built with Go for the Solana ecosystem**
