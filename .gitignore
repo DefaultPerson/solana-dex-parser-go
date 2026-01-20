@@ -1,0 +1,53 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Test data and fixtures
+testdata/trades/
+testdata/fixtures/
+
+# Build output
+dist/
+build/
+bin/
+
+# Claude AI notes (private)
+CLAUDE.md
+.claude/
+
+# TypeScript source (reference only)
+solana-dex-parser-ts/
+
+# Logs
+*.log
