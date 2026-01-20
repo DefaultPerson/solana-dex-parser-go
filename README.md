@@ -31,33 +31,47 @@ Supports multiple DEX protocols including Jupiter, Raydium, Meteora, Orca, PumpF
 ## Supported Protocols
 
 ### DEX Aggregators & Routers
-| Protocol | Trades | Liquidity | Transfers |
-|----------|--------|-----------|-----------|
-| **Jupiter** (All versions) | ✅ | ❌ | ✅ |
-| **OKX DEX** | ✅ | ❌ | ✅ |
+| Protocol | Trades | Liquidity | Transfers | Notes |
+|----------|--------|-----------|-----------|-------|
+| **Jupiter** (All versions) | ✅ | ❌ | ✅ | Priority parsing, aggregated trades |
+| **OKX DEX** | ✅ | ❌ | ✅ | Route aggregator |
 
 ### Major AMMs
-| Protocol | Trades | Liquidity | Transfers |
-|----------|--------|-----------|-----------|
-| **PumpSwap** | ✅ | ✅ | ✅ |
-| **Raydium V4** | ✅ | ✅ | ✅ |
-| **Raydium CPMM** | ✅ | ✅ | ✅ |
-| **Raydium CL** | ✅ | ✅ | ✅ |
-| **Orca Whirlpool** | ✅ | ✅ | ✅ |
-| **Meteora DLMM** | ✅ | ✅ | ✅ |
-| **Meteora Pools** | ✅ | ✅ | ✅ |
-| **Meteora DAMM V2** | ✅ | ✅ | ✅ |
+| Protocol | Trades | Liquidity | Transfers | Notes |
+|----------|--------|-----------|-----------|-------|
+| **PumpSwap** | ✅ | ✅ | ✅ | Pumpfun AMM |
+| **Raydium V4** | ✅ | ✅ | ✅ | Classic AMM |
+| **Raydium CPMM** | ✅ | ✅ | ✅ | Constant product |
+| **Raydium CL** | ✅ | ✅ | ✅ | Concentrated liquidity |
+| **Orca Whirlpool** | ✅ | ✅ | ✅ | CL pools |
+| **Meteora DLMM** | ✅ | ✅ | ✅ | Dynamic liquidity |
+| **Meteora Pools** | ✅ | ✅ | ✅ | Multi-token AMM |
+| **Meteora DAMM V2** | ✅ | ✅ | ✅ | Dynamic AMM |
+| **Sanctum** | ✅ | ❌ | ✅ | LST swaps |
+| **Phoenix** | ✅ | ❌ | ✅ | Order book DEX |
+| **Lifinity** | ✅ | ❌ | ✅ | Proactive market maker |
 
 ### Meme & Launch Platforms
-| Protocol | Trades | Create | Migrate |
-|----------|--------|--------|---------|
-| **Pumpfun** | ✅ | ✅ | ✅ |
-| **Raydium Launchpad** | ✅ | ✅ | ✅ |
-| **Meteora DBC** | ✅ | ✅ | ✅ |
-| **Moonit** | ✅ | ✅ | ✅ |
-| **Heaven.xyz** | ✅ | ✅ | ✅ |
-| **Sugar.money** | ✅ | ✅ | ✅ |
-| **BoopFun** | ✅ | ✅ | ✅ |
+| Protocol | Trades | Create | Migrate | Notes |
+|----------|--------|--------|---------|-------|
+| **Pumpfun** | ✅ | ✅ | ✅ | Bonding curve |
+| **Raydium Launchpad** | ✅ | ✅ | ✅ | Meme launcher |
+| **Meteora DBC** | ✅ | ✅ | ✅ | Meme launcher |
+| **Moonit** | ✅ | ✅ | ✅ | Meme launcher |
+| **Heaven.xyz** | ✅ | ✅ | ✅ | Meme launcher |
+| **Sugar.money** | ✅ | ✅ | ✅ | Meme launcher |
+| **Bonk** | ✅ | ✅ | ✅ | Meme launcher |
+| **BoopFun** | ✅ | ✅ | ✅ | Meme launcher |
+
+### Trading Bots
+| Bot | Trades | Notes |
+|-----|--------|-------|
+| **BananaGun** | ✅ | MEV bot |
+| **Maestro** | ✅ | Trading bot |
+| **Nova** | ✅ | Sniper bot |
+| **Bloom** | ✅ | Copy trading |
+| **Mintech** | ✅ | Trading bot |
+| **Apepro** | ✅ | Trading bot |
 
 ## Installation
 

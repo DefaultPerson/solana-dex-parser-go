@@ -230,13 +230,28 @@ type RaydiumLCPTradeLayout struct {
 }
 
 // ParseRaydiumLCPTradeLayout parses trade layout from bytes
+// V1 layout (130 bytes total):
+//   poolState        [32]byte  bytes 0-31
+//   totalBaseSell    u64       bytes 32-39
+//   virtualBase      u64       bytes 40-47
+//   virtualQuote     u64       bytes 48-55
+//   realBaseBefore   u64       bytes 56-63
+//   realQuoteBefore  u64       bytes 64-71
+//   realBaseAfter    u64       bytes 72-79
+//   realQuoteAfter   u64       bytes 80-87
+//   amountIn         u64       bytes 88-95
+//   amountOut        u64       bytes 96-103
+//   protocolFee      u64       bytes 104-111
+//   platformFee      u64       bytes 112-119
+//   shareFee         u64       bytes 120-127
+//   tradeDirection   u8        byte 128
+//   poolStatus       u8        byte 129
 func ParseRaydiumLCPTradeLayout(data []byte) (*RaydiumLCPTradeLayout, error) {
 	reader := utils.NewBinaryReader(data)
 
 	poolState, _ := reader.ReadFixedArray(32)
-	tradeDir, _ := reader.ReadU8()
-	poolStatus, _ := reader.ReadU8()
 
+	// Read all u64 fields first (12 fields × 8 bytes = 96 bytes)
 	layout := &RaydiumLCPTradeLayout{
 		PoolState:       poolState,
 		TotalBaseSell:   reader.ReadU64AsBigInt(),
@@ -251,9 +266,11 @@ func ParseRaydiumLCPTradeLayout(data []byte) (*RaydiumLCPTradeLayout, error) {
 		ProtocolFee:     reader.ReadU64AsBigInt(),
 		PlatformFee:     reader.ReadU64AsBigInt(),
 		ShareFee:        reader.ReadU64AsBigInt(),
-		TradeDirection:  tradeDir,
-		PoolStatus:      poolStatus,
 	}
+
+	// tradeDirection and poolStatus are at the END (bytes 128-129)
+	layout.TradeDirection, _ = reader.ReadU8()
+	layout.PoolStatus, _ = reader.ReadU8()
 
 	if reader.HasError() {
 		return nil, reader.Error()
@@ -272,7 +289,7 @@ func (l *RaydiumLCPTradeLayout) ToObject() *RaydiumLCPTradeEvent {
 		RealBaseBefore:  l.RealBaseBefore,
 		RealQuoteBefore: l.RealQuoteBefore,
 		RealBaseAfter:   l.RealBaseAfter,
-		RealQuoteAfter:  new(big.Int),
+		RealQuoteAfter:  l.RealQuoteAfter,
 		AmountIn:        l.AmountIn,
 		AmountOut:       l.AmountOut,
 		ProtocolFee:     l.ProtocolFee,

@@ -245,15 +245,105 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
 	},
-	// TODO: Raydium Launchpad trades need more investigation
-	// The event parser decodes binary event data which may need additional debugging
-	// {
-	// 	Name:              "Raydium Launchpad BUY",
-	// 	Signature:         "61AN23VGPknSqskF6CvtZqrD4LtL2CNGYKeyFc5nLVcfaUaHV5LsQe6HTnRFM6pNX8qf7fkqZ5tEZfnNEF73H8MX",
-	// 	ExpectedAMM:       "RaydiumLaunchpad",
-	// 	ExpectedType:      "BUY",
-	// 	ExpectedInputMint: "So11111111111111111111111111111111111111112",
-	// },
+	{
+		Name:               "Pumpswap SELL",
+		Signature:          "36Q2tYo1CPa42GF51bzA493nYQCG8fPbpQJEzRhZQURYuBcRKpj97HWBCLCzDwgQJ8tnVrW9fDZKWaPBdADEsxTE",
+		ExpectedAMM:        "Pumpswap",
+		ExpectedType:       "SELL",
+		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+	},
+	// Boopfun trades (boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4)
+	{
+		Name:              "Boopfun BUY",
+		Signature:         "28S2MakapF1zTrnqYHdMxdnN9uqAfKV2fa5ez9HpE466L3xWz8AXwsz4eKXXnpvX8p49Ckbp26doG5fgW5f6syk9",
+		ExpectedAMM:       "Boopfun",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:               "Boopfun SELL",
+		Signature:          "3Lyh3wAPkcLGKydqT6VdjMsorLUJqEuDeppxh79sQjGxuLiMqMgB75aSJyZsM3y3jJRqdLJYZhNUBaLeKQ8vL4An",
+		ExpectedAMM:        "Boopfun",
+		ExpectedType:       "SELL",
+		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+	},
+	// Jupiter V6 trades (JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4)
+	{
+		Name:              "Jupiter V6 via Moonit",
+		Signature:         "3TZKJLxy4H2wQiYenuSVoQ2ox7xveRoG5bxr7yfmEdtMPqKmdHWcf5Q9B8uUBi6ystp2gQsZdP5qxiYK4JnUpm7",
+		ExpectedAMM:       "Moonit", // Jupiter routes through Moonit
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	// OKX trades (6m2CDdhRgxpH4WjvdzxAYbGxwdGUz5MziiL5jek2kBma)
+	{
+		Name:        "OKX via RaydiumV4",
+		Signature:   "5xaT2SXQUyvyLGsnyyoKMwsDoHrx1enCKofkdRMdNaL5MW26gjQBM3AWebwjTJ49uqEqnFu5d9nXJek6gUSGCqbL",
+		ExpectedAMM: "RaydiumV4", // OKX routes through Raydium V4
+	},
+	{
+		Name:               "OKX SELL",
+		Signature:          "53tdwmNWEp9KsyegiDk7Z3DXVfSQoBXpAJfZbpAUTwzCtDkfrbdCN17ksQnKdH2p9yBTrYHGhTvHrckaPCSshBkU",
+		ExpectedType:       "SELL",
+		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+	},
+	// Raydium Launchpad trades
+	{
+		Name:              "Raydium Launchpad BUY",
+		Signature:         "61AN23VGPknSqskF6CvtZqrD4LtL2CNGYKeyFc5nLVcfaUaHV5LsQe6HTnRFM6pNX8qf7fkqZ5tEZfnNEF73H8MX",
+		ExpectedAMM:       "RaydiumLaunchpad",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:              "Raydium Launchpad BUY_EXACT_IN",
+		Signature:         "Gi44zBwsd8eUGEVPS1jstts457hKLbm8SSMLrRVHVK2McrhJjosiszb65U1LdrjsF1WfCXoesLMhm8RX3dchx4s",
+		ExpectedAMM:       "RaydiumLaunchpad",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:               "Raydium Launchpad SELL_EXACT_IN",
+		Signature:          "36n8GMHRMSyX8kRSgaUfcE5jpjWNWhjAu7YPeYFX2fMVzirJT4YhvYMo4dS5VoCVj5H47qZ8FzSEDLc6ui78HcAh",
+		ExpectedAMM:        "RaydiumLaunchpad",
+		ExpectedType:       "SELL",
+		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+	},
+	// Additional coverage tests - SELL operations
+	{
+		Name:               "Meteora DLMM SELL",
+		Signature:          "7YPF21r7JBDeoXuMJn6KSqDVYGrm821U87Cnje3xPvZpMUVaAEAvCGJPP6va2b5oMLAzGku5s3TcNAsN6zdXPRn",
+		ExpectedAMM:        "MeteoraDLMM",
+		ExpectedType:       "SELL",
+		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:         "Jupiter DCA SELL via RaydiumV4",
+		Signature:    "4mxr44yo5Qi7Rabwbknkh8MNUEWAMKmzFQEmqUVdx5JpHEEuh59TrqiMCjZ7mgZMozRK1zW8me34w8Myi8Qi1tWP",
+		ExpectedAMM:  "RaydiumV4",
+		ExpectedType: "SELL",
+	},
+	// Additional coverage tests - BUY operations
+	{
+		Name:              "Raydium V4 BUY via Maestro",
+		Signature:         "mWaH4FELcPj4zeY4Cgk5gxUirQDM7yE54VgMEVaqiUDQjStyzwNrxLx4FMEaKEHQoYsgCRhc1YdmBvhGDRVgRrq",
+		ExpectedAMM:       "RaydiumV4",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:              "Raydium CL BUY",
+		Signature:         "4MSVpVBwxnYTQSF3bSrAB99a3pVr6P6bgoCRDsrBbDMA77WeQqoBDDDXqEh8WpnUy5U4GeotdCG9xyExjNTjYE1u",
+		ExpectedAMM:       "RaydiumCL",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:        "Meteora DLMM SELL via OKX",
+		Signature:   "33VnDBtrFawBRYwDqomdsH57GL83B7eWTQN5mnga9F1whyMzcpdmURnPkAjqDte8Ja9EcsGcejhDYcUKkA9sE4HG",
+		ExpectedAMM: "MeteoraDLMM",
+		ExpectedType: "SELL",
+	},
 }
 
 func TestIntegrationParseTrades(t *testing.T) {
@@ -302,7 +392,9 @@ func TestIntegrationParseTrades(t *testing.T) {
 			}
 
 			// Find the best matching trade
+			// Priority: 1) matches AMM + Type, 2) matches AMM only, 3) first trade
 			var matchingTrade *types.TradeInfo
+			var ammOnlyMatch *types.TradeInfo
 			for i := range trades {
 				trade := &trades[i]
 				t.Logf("Trade[%d]: Type=%s, AMM=%s, Input=%s (%.6f), Output=%s (%.6f)",
@@ -310,12 +402,18 @@ func TestIntegrationParseTrades(t *testing.T) {
 					trade.InputToken.Mint, trade.InputToken.Amount,
 					trade.OutputToken.Mint, trade.OutputToken.Amount)
 
-				// Prefer trades with matching AMM
-				if tc.ExpectedAMM == "" || trade.AMM == tc.ExpectedAMM {
-					if matchingTrade == nil || trade.AMM != "" {
-						matchingTrade = trade
-					}
+				ammMatches := tc.ExpectedAMM == "" || trade.AMM == tc.ExpectedAMM
+				typeMatches := tc.ExpectedType == "" || string(trade.Type) == tc.ExpectedType
+
+				if ammMatches && typeMatches && matchingTrade == nil {
+					matchingTrade = trade
+				} else if ammMatches && ammOnlyMatch == nil {
+					ammOnlyMatch = trade
 				}
+			}
+			// Fallback: AMM-only match, then first trade
+			if matchingTrade == nil {
+				matchingTrade = ammOnlyMatch
 			}
 
 			if matchingTrade == nil {

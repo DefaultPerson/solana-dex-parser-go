@@ -198,6 +198,7 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 
 		// For outer instructions (InnerIndex = -1), track that state
 		innerIdx := ci.InnerIndex
+		isOuterInstruction := innerIdx < 0
 		effectiveInnerIdx := innerIdx
 		if effectiveInnerIdx < 0 {
 			effectiveInnerIdx = 0
@@ -205,19 +206,21 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 
 		var event *types.MemeEvent
 
-		// Check for trade discriminators
+		// Check for trade instruction discriminators (8 bytes)
+		// This approach searches for TRADE_EVENT in inner instructions and uses the
+		// trade instruction's accounts (which have correct BaseMint/QuoteMint)
 		if len(data) >= 8 {
 			disc := data[:8]
 			if bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_IN) ||
 				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_OUT) ||
 				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_IN) ||
 				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_OUT) {
-				event = p.decodeTradeInstruction(ci.Instruction, ci.OuterIndex, effectiveInnerIdx)
+				event = p.decodeTradeInstruction(ci.Instruction, ci.OuterIndex, effectiveInnerIdx, isOuterInstruction)
 			}
 		}
 
 		// Check for create event
-		if len(data) >= 16 {
+		if event == nil && len(data) >= 16 {
 			disc := data[:16]
 			if bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.CREATE_EVENT) {
 				event = p.decodeCreateEvent(data, ci.OuterIndex)
@@ -245,36 +248,142 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 	return events
 }
 
-// decodeTradeInstruction decodes a trade instruction
-func (p *RaydiumLaunchpadEventParser) decodeTradeInstruction(instruction interface{}, outerIndex int, innerIndex int) *types.MemeEvent {
-	// Find inner instruction for event data
-	eventInstruction := p.adapter.GetInnerInstruction(outerIndex, innerIndex+1)
-	if eventInstruction == nil {
+// decodeTradeEvent decodes a trade event directly from instruction data (when TRADE_EVENT discriminator is found)
+func (p *RaydiumLaunchpadEventParser) decodeTradeEvent(eventData []byte, instruction interface{}) *types.MemeEvent {
+	if len(eventData) < 100 {
 		return nil
 	}
 
-	eventData := p.adapter.GetInstructionData(eventInstruction)
-	if len(eventData) < 16 {
-		return nil
-	}
-	eventData = eventData[16:]
-
-	// Determine version based on data length
-	isNewVersion := len(eventData) > 130
-
+	// Always try V2 layout first (TradeDir at end), fall back to V1 if parsing fails
+	// Most recent Launchpad events use V2 format
 	var evt *RaydiumLCPTradeEvent
-	if isNewVersion {
-		layout, err := ParseRaydiumLCPTradeV2Layout(eventData)
-		if err != nil {
-			return nil
-		}
+	layout, err := ParseRaydiumLCPTradeV2Layout(eventData)
+	if err == nil && layout != nil {
 		evt = layout.ToObject()
 	} else {
-		layout, err := ParseRaydiumLCPTradeLayout(eventData)
-		if err != nil {
+		// Fall back to V1 if V2 fails
+		layoutV1, errV1 := ParseRaydiumLCPTradeLayout(eventData)
+		if errV1 != nil {
 			return nil
 		}
+		evt = layoutV1.ToObject()
+	}
+
+	// Try to get mints from instruction accounts
+	accounts := p.adapter.GetInstructionAccounts(instruction)
+	if len(accounts) >= 11 {
+		evt.User = accounts[0]
+		evt.BaseMint = accounts[9]
+		evt.QuoteMint = accounts[10]
+	}
+
+	// If we couldn't get mints from accounts, use transfers to infer them
+	if evt.BaseMint == "" || evt.QuoteMint == "" {
+		// Default QuoteMint to SOL
+		if evt.QuoteMint == "" {
+			evt.QuoteMint = "So11111111111111111111111111111111111111112"
+		}
+	}
+
+	var inputMint, outputMint string
+	var inputAmount, outputAmount *big.Int
+	var inputDecimals, outputDecimals uint8
+
+	if evt.TradeDirection == TradeDirectionBuy {
+		inputMint = evt.QuoteMint
+		inputAmount = evt.AmountIn
+		inputDecimals = 9
+		outputMint = evt.BaseMint
+		outputAmount = evt.AmountOut
+		outputDecimals = 6
+	} else {
+		inputMint = evt.BaseMint
+		inputAmount = evt.AmountIn
+		inputDecimals = 6
+		outputMint = evt.QuoteMint
+		outputAmount = evt.AmountOut
+		outputDecimals = 9
+	}
+
+	eventType := types.TradeTypeSell
+	if evt.TradeDirection == TradeDirectionBuy {
+		eventType = types.TradeTypeBuy
+	}
+
+	inputUIAmount := types.ConvertToUIAmount(inputAmount, inputDecimals)
+	outputUIAmount := types.ConvertToUIAmount(outputAmount, outputDecimals)
+
+	// Convert big.Int fees to float64
+	protocolFee := bigIntToFloat64(evt.ProtocolFee, 9)
+	platformFee := bigIntToFloat64(evt.PlatformFee, 9)
+	shareFee := bigIntToFloat64(evt.ShareFee, 9)
+	creatorFee := bigIntToFloat64(evt.CreatorFee, 9)
+
+	return &types.MemeEvent{
+		Protocol:     constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+		Type:         eventType,
+		BondingCurve: evt.PoolState,
+		BaseMint:     evt.BaseMint,
+		QuoteMint:    evt.QuoteMint,
+		User:         evt.User,
+		InputToken: &types.TokenInfo{
+			Mint:      inputMint,
+			AmountRaw: inputAmount.String(),
+			Amount:    inputUIAmount,
+			Decimals:  inputDecimals,
+		},
+		OutputToken: &types.TokenInfo{
+			Mint:      outputMint,
+			AmountRaw: outputAmount.String(),
+			Amount:    outputUIAmount,
+			Decimals:  outputDecimals,
+		},
+		ProtocolFee: &protocolFee,
+		PlatformFee: &platformFee,
+		ShareFee:    &shareFee,
+		CreatorFee:  &creatorFee,
+	}
+}
+
+// decodeTradeInstruction decodes a trade instruction
+func (p *RaydiumLaunchpadEventParser) decodeTradeInstruction(instruction interface{}, outerIndex int, innerIndex int, isOuterInstruction bool) *types.MemeEvent {
+	// Find inner instruction with TRADE_EVENT discriminator
+	// Search through inner instructions starting from the expected position
+	var eventData []byte
+
+	startIndex := innerIndex + 1
+	if isOuterInstruction {
+		startIndex = 0
+	}
+
+	// Search for the trade event instruction by checking discriminator
+	for i := startIndex; i < startIndex+5; i++ { // Check up to 5 inner instructions
+		innerIx := p.adapter.GetInnerInstruction(outerIndex, i)
+		if innerIx == nil {
+			continue
+		}
+		data := p.adapter.GetInstructionData(innerIx)
+		if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.RAYDIUM_LCP.TRADE_EVENT) {
+			eventData = data[16:]
+			break
+		}
+	}
+
+	if eventData == nil || len(eventData) < 16 {
+		return nil
+	}
+
+	// Always try V2 layout first (TradeDir at end), fall back to V1 if parsing fails
+	var evt *RaydiumLCPTradeEvent
+	layout, err := ParseRaydiumLCPTradeV2Layout(eventData)
+	if err == nil && layout != nil {
 		evt = layout.ToObject()
+	} else {
+		layoutV1, errV1 := ParseRaydiumLCPTradeLayout(eventData)
+		if errV1 != nil {
+			return nil
+		}
+		evt = layoutV1.ToObject()
 	}
 
 	// Get instruction accounts
