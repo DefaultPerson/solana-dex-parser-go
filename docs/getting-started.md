@@ -1,9 +1,3 @@
----
-layout: default
-title: Getting Started
-nav_order: 2
----
-
 # Getting Started
 
 ## Prerequisites
@@ -74,6 +68,6 @@ result := parser.ParseAll(&tx, config)
 
 ## Next Steps
 
-- [Examples](examples/) - Code examples for specific use cases
+- [Examples](examples/index.md) - Code examples for specific use cases
 - [Supported Protocols](protocols.md) - Full list of supported DEXes
-- [API Reference](api/) - Detailed API documentation
+- [API Reference](api/index.md) - Detailed API documentation

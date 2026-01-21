@@ -1,10 +1,8 @@
----
-layout: default
-title: Home
-nav_order: 1
----
-
 # Solana DEX Parser (Go)
+
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://go.dev/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/DefaultPerson/solana-dex-parser-go/blob/main/LICENSE)
+[![Tests](https://github.com/DefaultPerson/solana-dex-parser-go/actions/workflows/test.yml/badge.svg)](https://github.com/DefaultPerson/solana-dex-parser-go/actions/workflows/test.yml)
 
 A high-performance Go library for parsing Solana DEX transactions. Port of [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser) TypeScript library.
 
@@ -36,10 +34,10 @@ fmt.Printf("Liquidities: %d\n", len(result.Liquidities))
 
 - [Getting Started](getting-started.md) - Installation and first steps
 - [Supported Protocols](protocols.md) - Full list of DEXes and platforms
-- [Examples](examples/) - Code examples for all use cases
-- [API Reference](api/) - Detailed API documentation
+- [Examples](examples/index.md) - Code examples for all use cases
+- [API Reference](api/index.md) - Detailed API documentation
 - [Development](development.md) - Contributing and testing
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/defaultperson/solana-dex-parser-go/blob/main/LICENSE)
+MIT License - see [LICENSE](https://github.com/DefaultPerson/solana-dex-parser-go/blob/main/LICENSE)

@@ -1,10 +1,3 @@
----
-layout: default
-title: Parse Trades
-parent: Examples
-nav_order: 1
----
-
 # Parse DEX Trades
 
 ## Basic Trade Parsing

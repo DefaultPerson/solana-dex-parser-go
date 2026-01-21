@@ -1,10 +1,3 @@
----
-layout: default
-title: API Reference
-nav_order: 5
-has_children: true
----
-
 # API Reference
 
 Detailed documentation for all public APIs.

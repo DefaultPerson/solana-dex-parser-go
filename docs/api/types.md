@@ -1,10 +1,3 @@
----
-layout: default
-title: Types
-parent: API Reference
-nav_order: 3
----
-
 # Type Definitions
 
 ## TradeInfo

@@ -1,10 +1,3 @@
----
-layout: default
-title: ShredParser
-parent: API Reference
-nav_order: 2
----
-
 # ShredParser
 
 Parser for raw transaction data from gRPC streams (Helius/Triton).
@@ -28,6 +21,7 @@ func (p *ShredParser) ParseAll(tx *SolanaTransaction, config *types.ParseConfig)
 Parse raw instructions from a transaction.
 
 **Parameters:**
+
 - `tx` - Solana transaction
 - `config` - Optional configuration
 

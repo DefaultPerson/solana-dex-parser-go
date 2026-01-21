@@ -1,10 +1,3 @@
----
-layout: default
-title: Parse Meme Events
-parent: Examples
-nav_order: 3
----
-
 # Parse Meme Events
 
 Parse events from meme coin platforms like Pumpfun, Raydium Launchpad, Meteora DBC, etc.
@@ -110,11 +103,13 @@ for _, event := range result.MemeEvents {
 
 ## Supported Platforms
 
-- **Pumpfun** - Original bonding curve platform
-- **Raydium Launchpad** - Raydium's meme launcher
-- **Meteora DBC** - Meteora's dynamic bonding curve
-- **Moonit** - DEXScreener's platform
-- **Heaven.xyz** - Heaven launcher
-- **Sugar.money** - Sugar launcher
-- **BoopFun** - Boop launcher
-- **Bonk** - Bonk launcher
+| Platform | Description |
+|----------|-------------|
+| **Pumpfun** | Original bonding curve platform |
+| **Raydium Launchpad** | Raydium's meme launcher |
+| **Meteora DBC** | Meteora's dynamic bonding curve |
+| **Moonit** | DEXScreener's platform |
+| **Heaven.xyz** | Heaven launcher |
+| **Sugar.money** | Sugar launcher |
+| **BoopFun** | Boop launcher |
+| **Bonk** | Bonk launcher |

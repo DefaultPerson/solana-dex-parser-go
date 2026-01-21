@@ -1,9 +1,3 @@
----
-layout: default
-title: Development
-nav_order: 6
----
-
 # Development
 
 ## Prerequisites
@@ -14,7 +8,7 @@ nav_order: 6
 ## Setup
 
 ```bash
-git clone https://github.com/defaultperson/solana-dex-parser-go.git
+git clone https://github.com/DefaultPerson/solana-dex-parser-go.git
 cd solana-dex-parser-go
 go mod download
 ```
@@ -38,6 +32,10 @@ go test ./... -v
 Integration tests use real Solana transactions via Helius RPC:
 
 ```bash
+# Set environment variable
+export HELIUS_API_KEY=your-api-key
+
+# Run tests
 go test ./tests -v -run TestIntegration
 ```
 

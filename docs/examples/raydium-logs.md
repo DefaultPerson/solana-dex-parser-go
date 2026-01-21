@@ -1,10 +1,3 @@
----
-layout: default
-title: Raydium Logs
-parent: Examples
-nav_order: 5
----
-
 # Raydium Logs Decode
 
 Decode Raydium swap logs from transaction logs.
@@ -49,6 +42,7 @@ type SwapOperation struct {
 ## Log Format
 
 Raydium logs are base64-encoded and contain:
+
 - Log discriminator
 - Swap direction (buy/sell)
 - Input/output amounts

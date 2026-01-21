@@ -1,10 +1,3 @@
----
-layout: default
-title: DexParser
-parent: API Reference
-nav_order: 1
----
-
 # DexParser
 
 Main class for parsing Solana DEX transactions.
@@ -28,6 +21,7 @@ func (p *DexParser) ParseAll(tx *SolanaTransaction, config *types.ParseConfig) *
 Parse all data types from a transaction.
 
 **Parameters:**
+
 - `tx` - Solana transaction (JSON-RPC format)
 - `config` - Optional configuration (can be nil)
 

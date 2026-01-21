@@ -1,10 +1,3 @@
----
-layout: default
-title: Parse Liquidity
-parent: Examples
-nav_order: 2
----
-
 # Parse Liquidity Events
 
 ## Basic Liquidity Parsing

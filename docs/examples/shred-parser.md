@@ -1,10 +1,3 @@
----
-layout: default
-title: ShredParser
-parent: Examples
-nav_order: 4
----
-
 # ShredParser for gRPC Streams
 
 ShredParser is designed for parsing raw transaction data from Helius/Triton gRPC streams.

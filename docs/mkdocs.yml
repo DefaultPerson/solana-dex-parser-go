@@ -1,0 +1,80 @@
+site_name: Solana DEX Parser Go
+site_url: https://defaultperson.github.io/solana-dex-parser-go/
+site_description: High-performance Go library for parsing Solana DEX transactions
+site_author: DefaultPerson
+repo_name: DefaultPerson/solana-dex-parser-go
+repo_url: https://github.com/DefaultPerson/solana-dex-parser-go
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Supported Protocols: protocols.md
+  - Examples:
+    - Overview: examples/index.md
+    - Parse Trades: examples/parse-trades.md
+    - Parse Liquidity: examples/parse-liquidity.md
+    - Parse Meme Events: examples/parse-meme.md
+    - ShredParser: examples/shred-parser.md
+    - Raydium Logs: examples/raydium-logs.md
+  - API Reference:
+    - Overview: api/index.md
+    - DexParser: api/dex-parser.md
+    - ShredParser: api/shred-parser.md
+    - Types: api/types.md
+  - Development: development.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/DefaultPerson/solana-dex-parser-go

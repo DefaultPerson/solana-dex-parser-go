@@ -1,57 +1,51 @@
----
-layout: default
-title: Supported Protocols
-nav_order: 3
----
-
 # Supported Protocols
 
 ## DEX Aggregators & Routers
 
 | Protocol | Trades | Liquidity | Transfers | Notes |
-|----------|--------|-----------|-----------|-------|
-| **Jupiter** (All versions) | Yes | No | Yes | Priority parsing, aggregated trades |
-| **OKX DEX** | Yes | No | Yes | Route aggregator |
+|----------|:------:|:---------:|:---------:|-------|
+| **Jupiter** (All versions) | :white_check_mark: | :x: | :white_check_mark: | Priority parsing, aggregated trades |
+| **OKX DEX** | :white_check_mark: | :x: | :white_check_mark: | Route aggregator |
 
 ## Major AMMs
 
 | Protocol | Trades | Liquidity | Transfers | Notes |
-|----------|--------|-----------|-----------|-------|
-| **PumpSwap** | Yes | Yes | Yes | Pumpfun AMM |
-| **Raydium V4** | Yes | Yes | Yes | Classic AMM |
-| **Raydium CPMM** | Yes | Yes | Yes | Constant product |
-| **Raydium CL** | Yes | Yes | Yes | Concentrated liquidity |
-| **Orca Whirlpool** | Yes | Yes | Yes | CL pools |
-| **Meteora DLMM** | Yes | Yes | Yes | Dynamic liquidity |
-| **Meteora Pools** | Yes | Yes | Yes | Multi-token AMM |
-| **Meteora DAMM V2** | Yes | Yes | Yes | Dynamic AMM |
-| **Sanctum** | Yes | No | Yes | LST swaps |
-| **Phoenix** | Yes | No | Yes | Order book DEX |
-| **Lifinity** | Yes | No | Yes | Proactive market maker |
+|----------|:------:|:---------:|:---------:|-------|
+| **PumpSwap** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Pumpfun AMM |
+| **Raydium V4** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Classic AMM |
+| **Raydium CPMM** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Constant product |
+| **Raydium CL** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Concentrated liquidity |
+| **Orca Whirlpool** | :white_check_mark: | :white_check_mark: | :white_check_mark: | CL pools |
+| **Meteora DLMM** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Dynamic liquidity |
+| **Meteora Pools** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Multi-token AMM |
+| **Meteora DAMM V2** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Dynamic AMM |
+| **Sanctum** | :white_check_mark: | :x: | :white_check_mark: | LST swaps |
+| **Phoenix** | :white_check_mark: | :x: | :white_check_mark: | Order book DEX |
+| **Lifinity** | :white_check_mark: | :x: | :white_check_mark: | Proactive market maker |
 
 ## Meme & Launch Platforms
 
 | Protocol | Trades | Create | Migrate | Notes |
-|----------|--------|--------|---------|-------|
-| **Pumpfun** | Yes | Yes | Yes | Bonding curve |
-| **Raydium Launchpad** | Yes | Yes | Yes | Meme launcher |
-| **Meteora DBC** | Yes | Yes | Yes | Meme launcher |
-| **Moonit** | Yes | Yes | Yes | Meme launcher |
-| **Heaven.xyz** | Yes | Yes | Yes | Meme launcher |
-| **Sugar.money** | Yes | Yes | Yes | Meme launcher |
-| **Bonk** | Yes | Yes | Yes | Meme launcher |
-| **BoopFun** | Yes | Yes | Yes | Meme launcher |
+|----------|:------:|:------:|:-------:|-------|
+| **Pumpfun** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Bonding curve |
+| **Raydium Launchpad** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **Meteora DBC** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **Moonit** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **Heaven.xyz** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **Sugar.money** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **Bonk** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **BoopFun** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
 
 ## Trading Bots
 
 | Bot | Trades | Notes |
-|-----|--------|-------|
-| **BananaGun** | Yes | MEV bot |
-| **Maestro** | Yes | Trading bot |
-| **Nova** | Yes | Sniper bot |
-| **Bloom** | Yes | Copy trading |
-| **Mintech** | Yes | Trading bot |
-| **Apepro** | Yes | Trading bot |
+|-----|:------:|-------|
+| **BananaGun** | :white_check_mark: | MEV bot |
+| **Maestro** | :white_check_mark: | Trading bot |
+| **Nova** | :white_check_mark: | Sniper bot |
+| **Bloom** | :white_check_mark: | Copy trading |
+| **Mintech** | :white_check_mark: | Trading bot |
+| **Apepro** | :white_check_mark: | Trading bot |
 
 ## Program IDs
 
