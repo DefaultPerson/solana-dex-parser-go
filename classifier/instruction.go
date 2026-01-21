@@ -2,6 +2,7 @@ package classifier
 
 import (
 	"bytes"
+	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -92,7 +93,7 @@ func (ic *InstructionClassifier) GetInstructionByDiscriminator(discriminator []b
 	return nil
 }
 
-// GetAllProgramIds returns all non-system program IDs
+// GetAllProgramIds returns all non-system program IDs in deterministic order
 func (ic *InstructionClassifier) GetAllProgramIds() []string {
 	var result []string
 	for programId := range ic.instructionMap {
@@ -100,6 +101,7 @@ func (ic *InstructionClassifier) GetAllProgramIds() []string {
 			result = append(result, programId)
 		}
 	}
+	sort.Strings(result)
 	return result
 }
 

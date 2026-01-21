@@ -2,76 +2,11 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://defaultperson.github.io/solana-dex-parser-go/)
 
-A Go library for parsing Solana DEX swap transactions. This is a Go port of the TypeScript library [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser).
+A high-performance Go library for parsing Solana DEX transactions. Port of [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser).
 
-Supports multiple DEX protocols including Jupiter, Raydium, Meteora, Orca, PumpFun, Pumpswap, Moonit, and more.
-
-## Contents
-
-- [Features](#features)
-- [Supported Protocols](#supported-protocols)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Examples](#examples)
-- [Testing](#testing)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
-
-## Features
-
-- **DexParser** - Parse DEX transactions and extract Trade/Liquidity/Transfer data
-- **Multi-Protocol Support** - Jupiter, Raydium, Orca, Meteora, Pumpfun, Moonit, etc.
-- **Type Safety** - Strongly typed Go structs
-- **High Performance** - Optimized for large transaction volumes
-- **Rich Data Extraction** - Trades, liquidity events, transfers, and fees
-- **Meme Parsing** - MemeEvent parsers for Pumpfun/MeteoraDBC/Raydium Launchpad/Moonit etc.
-- **gRPC Support** - Raw data processing capabilities for Helius/Triton streams
-
-## Supported Protocols
-
-### DEX Aggregators & Routers
-| Protocol | Trades | Liquidity | Transfers | Notes |
-|----------|--------|-----------|-----------|-------|
-| **Jupiter** (All versions) | ✅ | ❌ | ✅ | Priority parsing, aggregated trades |
-| **OKX DEX** | ✅ | ❌ | ✅ | Route aggregator |
-
-### Major AMMs
-| Protocol | Trades | Liquidity | Transfers | Notes |
-|----------|--------|-----------|-----------|-------|
-| **PumpSwap** | ✅ | ✅ | ✅ | Pumpfun AMM |
-| **Raydium V4** | ✅ | ✅ | ✅ | Classic AMM |
-| **Raydium CPMM** | ✅ | ✅ | ✅ | Constant product |
-| **Raydium CL** | ✅ | ✅ | ✅ | Concentrated liquidity |
-| **Orca Whirlpool** | ✅ | ✅ | ✅ | CL pools |
-| **Meteora DLMM** | ✅ | ✅ | ✅ | Dynamic liquidity |
-| **Meteora Pools** | ✅ | ✅ | ✅ | Multi-token AMM |
-| **Meteora DAMM V2** | ✅ | ✅ | ✅ | Dynamic AMM |
-| **Sanctum** | ✅ | ❌ | ✅ | LST swaps |
-| **Phoenix** | ✅ | ❌ | ✅ | Order book DEX |
-| **Lifinity** | ✅ | ❌ | ✅ | Proactive market maker |
-
-### Meme & Launch Platforms
-| Protocol | Trades | Create | Migrate | Notes |
-|----------|--------|--------|---------|-------|
-| **Pumpfun** | ✅ | ✅ | ✅ | Bonding curve |
-| **Raydium Launchpad** | ✅ | ✅ | ✅ | Meme launcher |
-| **Meteora DBC** | ✅ | ✅ | ✅ | Meme launcher |
-| **Moonit** | ✅ | ✅ | ✅ | Meme launcher |
-| **Heaven.xyz** | ✅ | ✅ | ✅ | Meme launcher |
-| **Sugar.money** | ✅ | ✅ | ✅ | Meme launcher |
-| **Bonk** | ✅ | ✅ | ✅ | Meme launcher |
-| **BoopFun** | ✅ | ✅ | ✅ | Meme launcher |
-
-### Trading Bots
-| Bot | Trades | Notes |
-|-----|--------|-------|
-| **BananaGun** | ✅ | MEV bot |
-| **Maestro** | ✅ | Trading bot |
-| **Nova** | ✅ | Sniper bot |
-| **Bloom** | ✅ | Copy trading |
-| **Mintech** | ✅ | Trading bot |
-| **Apepro** | ✅ | Trading bot |
+Supports **30+ protocols** including Jupiter, Raydium, Orca, Meteora, Pumpfun, Pumpswap, Moonit, and more.
 
 ## Installation
 
@@ -81,180 +16,58 @@ go get github.com/solana-dex-parser-go
 
 ## Quick Start
 
-### Configuration Options
-
-```go
-type ParseConfig struct {
-    TryUnknownDEX    bool     // Try to parse unknown DEX programs (default: true)
-    ProgramIds       []string // Only parse specific program IDs
-    IgnoreProgramIds []string // Ignore specific program IDs
-    ThrowError       bool     // Panic on errors instead of returning error state
-    AggregateTrades  bool     // Aggregate multiple trades into one
-}
-```
-
-### Parse All (Trades, Liquidity and Transfers)
-
 ```go
 package main
 
 import (
     "encoding/json"
     "fmt"
-    "log"
 
     dexparser "github.com/solana-dex-parser-go"
 )
 
 func main() {
-    // Get transaction from RPC (example using JSON-RPC response)
-    txJSON := `{"transaction": {...}, "meta": {...}}`
-
     var tx dexparser.SolanaTransaction
     json.Unmarshal([]byte(txJSON), &tx)
 
-    // Parse all types
     parser := dexparser.NewDexParser()
     result := parser.ParseAll(&tx, nil)
 
     fmt.Printf("Trades: %d\n", len(result.Trades))
     fmt.Printf("Liquidities: %d\n", len(result.Liquidities))
-    fmt.Printf("Transfers: %d\n", len(result.Transfers))
     fmt.Printf("MemeEvents: %d\n", len(result.MemeEvents))
 }
 ```
 
-### Parse Result Structure
+## Features
 
-```go
-type ParseResult struct {
-    State            bool                    // Parsing success status
-    Fee              types.TokenAmount       // Transaction gas fee
-    AggregateTrade   *types.TradeInfo        // Aggregated trade info
-    Trades           []types.TradeInfo       // Individual trades
-    Liquidities      []types.PoolEvent       // Liquidity operations
-    Transfers        []types.TransferData    // Token transfers
-    MemeEvents       []types.MemeEvent       // Meme platform events
-    Slot             uint64                  // Solana slot number
-    Timestamp        int64                   // Unix timestamp
-    Signature        string                  // Transaction signature
-    Signer           []string                // Signers
-    Msg              string                  // Error message if any
-}
-```
+- **Multi-Protocol** - Jupiter, Raydium, Orca, Meteora, Pumpfun, Moonit, etc.
+- **Rich Data** - Trades, liquidity events, transfers, meme events
+- **High Performance** - Optimized JSON parsing, memory pooling
+- **gRPC Support** - ShredParser for Helius/Triton streams
 
-## Examples
+## Documentation
 
-### Parse DEX Trades
+- [Getting Started](https://defaultperson.github.io/solana-dex-parser-go/getting-started)
+- [Supported Protocols](https://defaultperson.github.io/solana-dex-parser-go/protocols)
+- [Code Examples](https://defaultperson.github.io/solana-dex-parser-go/examples/)
+- [API Reference](https://defaultperson.github.io/solana-dex-parser-go/api/)
 
-```go
-parser := dexparser.NewDexParser()
-trades := parser.ParseTrades(&tx, nil)
+## Supported Protocols
 
-for _, trade := range trades {
-    fmt.Printf("Type: %s\n", trade.Type)
-    fmt.Printf("AMM: %s\n", trade.AMM)
-    fmt.Printf("Input: %s (%f)\n", trade.InputToken.Mint, trade.InputToken.Amount)
-    fmt.Printf("Output: %s (%f)\n", trade.OutputToken.Mint, trade.OutputToken.Amount)
-    fmt.Printf("User: %s\n", trade.User)
-}
-```
+| Category | Protocols |
+|----------|-----------|
+| **Aggregators** | Jupiter, OKX DEX |
+| **AMMs** | Raydium (V4, CPMM, CL), Orca, Meteora (DLMM, DAMM), PumpSwap |
+| **Meme Platforms** | Pumpfun, Raydium Launchpad, Meteora DBC, Moonit, Heaven, Sugar, Bonk, BoopFun |
+| **Trading Bots** | BananaGun, Maestro, Nova, Bloom, Mintech, Apepro |
 
-### Parse Liquidity Events
-
-```go
-parser := dexparser.NewDexParser()
-events := parser.ParseLiquidity(&tx, nil)
-
-for _, event := range events {
-    fmt.Printf("Type: %s\n", event.Type) // CREATE, ADD, REMOVE
-    fmt.Printf("Pool: %s\n", event.PoolId)
-    fmt.Printf("Token0: %s\n", event.Token0Mint)
-    fmt.Printf("Token1: %s\n", event.Token1Mint)
-}
-```
-
-### Parse Meme Events (Pumpfun, etc.)
-
-```go
-parser := dexparser.NewDexParser()
-result := parser.ParseAll(&tx, nil)
-
-for _, event := range result.MemeEvents {
-    fmt.Printf("Type: %s\n", event.Type) // CREATE, BUY, SELL, COMPLETE, MIGRATE
-    fmt.Printf("Protocol: %s\n", event.Protocol)
-    fmt.Printf("Mint: %s\n", event.BaseMint)
-    fmt.Printf("User: %s\n", event.User)
-}
-```
-
-### ShredParser for gRPC Streams
-
-For parsing raw transaction data from Helius/Triton gRPC streams:
-
-```go
-shredParser := dexparser.NewShredParser()
-result := shredParser.ParseAll(&tx, &types.ParseConfig{
-    ProgramIds: []string{constants.DEX_PROGRAMS.PUMP_FUN.ID},
-})
-
-for program, instructions := range result.Instructions {
-    fmt.Printf("Program: %s, Instructions: %d\n", program, len(instructions))
-}
-```
-
-### Raydium Logs Decode
-
-```go
-import "github.com/solana-dex-parser-go/parsers/raydium"
-
-log := raydium.DecodeRaydiumLog(logData)
-if log != nil {
-    if swap := raydium.ParseRaydiumSwapLog(log); swap != nil {
-        fmt.Printf("Type: %s\n", swap.Type) // "Buy" or "Sell"
-        fmt.Printf("Mode: %s\n", swap.Mode) // "Exact Input" or "Exact Output"
-        fmt.Printf("InputAmount: %s\n", swap.InputAmount.String())
-        fmt.Printf("OutputAmount: %s\n", swap.OutputAmount.String())
-    }
-}
-```
-
-## Testing
-
-Run all tests:
-```bash
-go test ./... -v
-```
-
-Run integration tests:
-```bash
-go test ./tests -v -run TestIntegration
-```
-
-## Development
-
-### Prerequisites
-
-- Go 1.21+
-
-### Setup
-
-```bash
-git clone https://github.com/solana-dex-parser-go.git
-cd solana-dex-parser-go
-go mod download
-```
-
-### Build
-
-```bash
-go build ./...
-```
+[Full protocol list](https://defaultperson.github.io/solana-dex-parser-go/protocols)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
-- **[solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser)** - Original TypeScript implementation that this Go library is ported from
+- [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser) - Original TypeScript implementation

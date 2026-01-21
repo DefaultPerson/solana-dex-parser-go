@@ -2,25 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
-
-### Fixed
-- **Critical bug**: Float precision issue in transfer deduplication (`transaction_utils.go:309`)
-  - Changed from `fmt.Sprintf("%f", amount)` to `AmountRaw` string to prevent false duplicates
-
-### Performance
-- **JSON parsing**: Replaced `encoding/json` with `goccy/go-json` (~2x faster unmarshaling)
-- **BinaryReader pooling**: Added `sync.Pool` for `BinaryReader` instances to reduce allocations
-- **String formatting**: Replaced `fmt.Sprintf` with `strconv` + concatenation in hot paths
-- **Pre-allocation**: Added capacity hints for maps and slices in critical paths:
-  - `deduplicateTrades()`: map/slice pre-allocated to input length
-  - `NewDexParser()`: factory maps pre-allocated (20, 10, 5, 10)
-  - `GetMultiInstructions()`: result slice pre-allocated
-  - `NewTransactionAdapter()`: token maps pre-allocated (32, 16)
+## [1.1.0] - 2026-01-21
 
 ### Added
-- `utils/format.go`: Optimized string formatting utilities (`FormatTransferKey`, `FormatDedupeKey`)
-- `tests/benchmark_test.go`: Performance benchmarks for JSON, BinaryReader, and DexParser
+- Full documentation site with GitHub Pages
+- Documentation for all APIs, types, and examples
+- GitHub Actions workflow for docs deployment
+- Test parity with TypeScript (33 integration tests)
+- Route detection in trade parsing (BananaGun, Maestro, OKX, Jupiter, Bloom)
+- Deterministic program ID ordering in classifier
+
+### Changed
+- README restructured with links to docs/
+- GetDexInfo() now correctly detects both AMM and Route
+
+### Fixed
+- Non-deterministic Route detection due to map iteration order
+- Float precision issue in transfer deduplication
+
+### Performance
+- JSON parsing: Replaced `encoding/json` with `goccy/go-json` (~2x faster)
+- BinaryReader pooling with `sync.Pool` to reduce allocations
+- String formatting optimized with `strconv` in hot paths
+- Pre-allocation for maps and slices in critical paths
 
 ## [1.0.0] - 2026-01-20
 

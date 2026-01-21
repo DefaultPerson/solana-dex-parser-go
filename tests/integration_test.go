@@ -135,6 +135,7 @@ type IntegrationTestCase struct {
 	ExpectedType       string
 	ExpectedInputMint  string
 	ExpectedOutputMint string
+	ExpectedRoute      string
 }
 
 var integrationTestCases = []IntegrationTestCase{
@@ -163,10 +164,11 @@ var integrationTestCases = []IntegrationTestCase{
 	},
 	// Raydium V4 trades
 	{
-		Name:         "Raydium V4 SELL",
-		Signature:    "oXUd22GQ1d45a6XNzfdpHAX6NfFEfFa9o2Awn2oimY89Rms3PmXL1uBJx3CnTYjULJw6uim174b3PLBFkaAxKzK",
-		ExpectedAMM:  "RaydiumV4",
-		ExpectedType: "SELL",
+		Name:          "BananaGun SELL via RaydiumV4",
+		Signature:     "oXUd22GQ1d45a6XNzfdpHAX6NfFEfFa9o2Awn2oimY89Rms3PmXL1uBJx3CnTYjULJw6uim174b3PLBFkaAxKzK",
+		ExpectedAMM:   "RaydiumV4",
+		ExpectedType:  "SELL",
+		ExpectedRoute: "BananaGun",
 	},
 	{
 		Name:               "Raydium V4 SELL 5ka",
@@ -198,6 +200,7 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:       "RaydiumCPMM",
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "RaydiumRoute",
 	},
 	{
 		Name:              "Raydium CPMM BUY afU",
@@ -221,6 +224,7 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:       "MeteoraDLMM",
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "JupiterDCA",
 	},
 	// Moonit trades
 	{
@@ -274,18 +278,21 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:       "Moonit", // Jupiter routes through Moonit
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "Jupiter",
 	},
 	// OKX trades (6m2CDdhRgxpH4WjvdzxAYbGxwdGUz5MziiL5jek2kBma)
 	{
-		Name:        "OKX via RaydiumV4",
-		Signature:   "5xaT2SXQUyvyLGsnyyoKMwsDoHrx1enCKofkdRMdNaL5MW26gjQBM3AWebwjTJ49uqEqnFu5d9nXJek6gUSGCqbL",
-		ExpectedAMM: "RaydiumV4", // OKX routes through Raydium V4
+		Name:          "OKX via RaydiumV4",
+		Signature:     "5xaT2SXQUyvyLGsnyyoKMwsDoHrx1enCKofkdRMdNaL5MW26gjQBM3AWebwjTJ49uqEqnFu5d9nXJek6gUSGCqbL",
+		ExpectedAMM:   "RaydiumV4", // OKX routes through Raydium V4
+		ExpectedRoute: "OKX",
 	},
 	{
 		Name:               "OKX SELL",
 		Signature:          "53tdwmNWEp9KsyegiDk7Z3DXVfSQoBXpAJfZbpAUTwzCtDkfrbdCN17ksQnKdH2p9yBTrYHGhTvHrckaPCSshBkU",
 		ExpectedType:       "SELL",
 		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:      "OKX",
 	},
 	// Raydium Launchpad trades
 	{
@@ -318,18 +325,20 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
 	},
 	{
-		Name:         "Jupiter DCA SELL via RaydiumV4",
-		Signature:    "4mxr44yo5Qi7Rabwbknkh8MNUEWAMKmzFQEmqUVdx5JpHEEuh59TrqiMCjZ7mgZMozRK1zW8me34w8Myi8Qi1tWP",
-		ExpectedAMM:  "RaydiumV4",
-		ExpectedType: "SELL",
+		Name:          "Jupiter DCA SELL via RaydiumV4",
+		Signature:     "4mxr44yo5Qi7Rabwbknkh8MNUEWAMKmzFQEmqUVdx5JpHEEuh59TrqiMCjZ7mgZMozRK1zW8me34w8Myi8Qi1tWP",
+		ExpectedAMM:   "RaydiumV4",
+		ExpectedType:  "SELL",
+		ExpectedRoute: "JupiterDCA",
 	},
 	// Additional coverage tests - BUY operations
 	{
-		Name:              "Raydium V4 BUY via Maestro",
+		Name:              "Maestro BUY via RaydiumV4",
 		Signature:         "mWaH4FELcPj4zeY4Cgk5gxUirQDM7yE54VgMEVaqiUDQjStyzwNrxLx4FMEaKEHQoYsgCRhc1YdmBvhGDRVgRrq",
 		ExpectedAMM:       "RaydiumV4",
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "Maestro",
 	},
 	{
 		Name:              "Raydium CL BUY",
@@ -339,10 +348,51 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
 	},
 	{
-		Name:        "Meteora DLMM SELL via OKX",
-		Signature:   "33VnDBtrFawBRYwDqomdsH57GL83B7eWTQN5mnga9F1whyMzcpdmURnPkAjqDte8Ja9EcsGcejhDYcUKkA9sE4HG",
-		ExpectedAMM: "MeteoraDLMM",
-		ExpectedType: "SELL",
+		Name:          "Meteora DLMM SELL via OKX",
+		Signature:     "33VnDBtrFawBRYwDqomdsH57GL83B7eWTQN5mnga9F1whyMzcpdmURnPkAjqDte8Ja9EcsGcejhDYcUKkA9sE4HG",
+		ExpectedAMM:   "MeteoraDLMM",
+		ExpectedType:  "SELL",
+		ExpectedRoute: "OKX",
+	},
+	// Trading Bots - new tests
+	{
+		Name:              "Bloom BUY via Pumpfun",
+		Signature:         "U9K99asspxi8WzTHhzmvBZZ5BtaZsFijgrgW3zYLSkjGTEXLzHjtwffe3X85LPxqRQ8NvSdS3trhag5qptFASRj",
+		ExpectedAMM:       "Pumpfun",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "Bloom",
+	},
+	// OKX Routes - additional tests
+	{
+		Name:              "Pumpfun BUY via OKX",
+		Signature:         "648cwSysqKXnb3XLPy577Lu4oBk7jimaY8p95JGfS9QUNabYar5pzfcRdu518TWw3dbopquJnMne9qx22xuf8xqn",
+		ExpectedAMM:       "Pumpfun",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "OKX",
+	},
+	{
+		Name:          "OKX SELL via RaydiumV4 3rE",
+		Signature:     "3rEob1PiezEtzhjPJcDJ9menwWeUBmF19FfYysHP5v6DRQe6PVrWcLRBvAGDbB9Ubn8PF8FVKjQYVxDjA2wAwSgn",
+		ExpectedAMM:   "RaydiumV4",
+		ExpectedType:  "SELL",
+		ExpectedRoute: "OKX",
+	},
+	// Additional coverage - new tests
+	{
+		Name:              "Pumpfun BUY 5fu",
+		Signature:         "5fuBdjC7G3ABez84ZBppPz4SXg1EmhKFToXhfPpr8qGddVTnUaAvrgZ5UPfN3PXJdAXEnWAeoZfDXjG23u25trZB",
+		ExpectedAMM:       "Pumpfun",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+	},
+	{
+		Name:               "RaydiumV4 SELL 4qU",
+		Signature:          "4qUyABFnkT7wesZehkrYXYvUVtoS5XERm397ZUXAn7TRrXgrupFtEoPLZnzqh91SW8ZZZhaiQWxb4eVWftNhPmmC",
+		ExpectedAMM:        "RaydiumV4",
+		ExpectedType:       "SELL",
+		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
 	},
 }
 
@@ -397,8 +447,8 @@ func TestIntegrationParseTrades(t *testing.T) {
 			var ammOnlyMatch *types.TradeInfo
 			for i := range trades {
 				trade := &trades[i]
-				t.Logf("Trade[%d]: Type=%s, AMM=%s, Input=%s (%.6f), Output=%s (%.6f)",
-					i, trade.Type, trade.AMM,
+				t.Logf("Trade[%d]: Type=%s, AMM=%s, Route=%s, Input=%s (%.6f), Output=%s (%.6f)",
+					i, trade.Type, trade.AMM, trade.Route,
 					trade.InputToken.Mint, trade.InputToken.Amount,
 					trade.OutputToken.Mint, trade.OutputToken.Amount)
 
@@ -436,6 +486,10 @@ func TestIntegrationParseTrades(t *testing.T) {
 
 			if tc.ExpectedOutputMint != "" && trade.OutputToken.Mint != tc.ExpectedOutputMint {
 				t.Errorf("Expected output mint %s, got %s", tc.ExpectedOutputMint, trade.OutputToken.Mint)
+			}
+
+			if tc.ExpectedRoute != "" && trade.Route != tc.ExpectedRoute {
+				t.Errorf("Expected route %s, got %s", tc.ExpectedRoute, trade.Route)
 			}
 		})
 	}

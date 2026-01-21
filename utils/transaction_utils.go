@@ -28,27 +28,42 @@ func (tu *TransactionUtils) GetDexInfo(classifier *classifier.InstructionClassif
 		return types.DexInfo{}
 	}
 
+	info := types.DexInfo{}
+
 	for _, programId := range programIds {
 		prog := constants.GetDexProgramByID(programId)
-		if prog.Name != "" {
-			isRoute := true
-			for _, tag := range prog.Tags {
-				if tag == "amm" {
-					isRoute = false
-					break
+		if prog.Name == "" {
+			continue
+		}
+
+		hasAmmTag := false
+		for _, tag := range prog.Tags {
+			if tag == "amm" {
+				hasAmmTag = true
+				break
+			}
+		}
+
+		if hasAmmTag {
+			if info.AMM == "" {
+				info.AMM = prog.Name
+				if info.ProgramId == "" {
+					info.ProgramId = prog.ID
 				}
 			}
-			info := types.DexInfo{ProgramId: prog.ID}
-			if isRoute {
+		} else {
+			if info.Route == "" {
 				info.Route = prog.Name
-			} else {
-				info.AMM = prog.Name
+				info.ProgramId = prog.ID
 			}
-			return info
 		}
 	}
 
-	return types.DexInfo{ProgramId: programIds[0]}
+	if info.ProgramId == "" && len(programIds) > 0 {
+		info.ProgramId = programIds[0]
+	}
+
+	return info
 }
 
 // GetTransferActions extracts transfer actions from transaction
