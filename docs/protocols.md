@@ -4,48 +4,48 @@
 
 | Protocol | Trades | Liquidity | Transfers | Notes |
 |----------|:------:|:---------:|:---------:|-------|
-| **Jupiter** (All versions) | :white_check_mark: | :x: | :white_check_mark: | Priority parsing, aggregated trades |
-| **OKX DEX** | :white_check_mark: | :x: | :white_check_mark: | Route aggregator |
+| **Jupiter** (All versions) | ✅ | ❌ | ✅ | Priority parsing, aggregated trades |
+| **OKX DEX** | ✅ | ❌ | ✅ | Route aggregator |
 
 ## Major AMMs
 
 | Protocol | Trades | Liquidity | Transfers | Notes |
 |----------|:------:|:---------:|:---------:|-------|
-| **PumpSwap** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Pumpfun AMM |
-| **Raydium V4** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Classic AMM |
-| **Raydium CPMM** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Constant product |
-| **Raydium CL** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Concentrated liquidity |
-| **Orca Whirlpool** | :white_check_mark: | :white_check_mark: | :white_check_mark: | CL pools |
-| **Meteora DLMM** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Dynamic liquidity |
-| **Meteora Pools** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Multi-token AMM |
-| **Meteora DAMM V2** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Dynamic AMM |
-| **Sanctum** | :white_check_mark: | :x: | :white_check_mark: | LST swaps |
-| **Phoenix** | :white_check_mark: | :x: | :white_check_mark: | Order book DEX |
-| **Lifinity** | :white_check_mark: | :x: | :white_check_mark: | Proactive market maker |
+| **PumpSwap** | ✅ | ✅ | ✅ | Pumpfun AMM |
+| **Raydium V4** | ✅ | ✅ | ✅ | Classic AMM |
+| **Raydium CPMM** | ✅ | ✅ | ✅ | Constant product |
+| **Raydium CL** | ✅ | ✅ | ✅ | Concentrated liquidity |
+| **Orca Whirlpool** | ✅ | ✅ | ✅ | CL pools |
+| **Meteora DLMM** | ✅ | ✅ | ✅ | Dynamic liquidity |
+| **Meteora Pools** | ✅ | ✅ | ✅ | Multi-token AMM |
+| **Meteora DAMM V2** | ✅ | ✅ | ✅ | Dynamic AMM |
+| **Sanctum** | ✅ | ❌ | ✅ | LST swaps |
+| **Phoenix** | ✅ | ❌ | ✅ | Order book DEX |
+| **Lifinity** | ✅ | ❌ | ✅ | Proactive market maker |
 
 ## Meme & Launch Platforms
 
 | Protocol | Trades | Create | Migrate | Notes |
 |----------|:------:|:------:|:-------:|-------|
-| **Pumpfun** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Bonding curve |
-| **Raydium Launchpad** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
-| **Meteora DBC** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
-| **Moonit** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
-| **Heaven.xyz** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
-| **Sugar.money** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
-| **Bonk** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
-| **BoopFun** | :white_check_mark: | :white_check_mark: | :white_check_mark: | Meme launcher |
+| **Pumpfun** | ✅ | ✅ | ✅ | Bonding curve |
+| **Raydium Launchpad** | ✅ | ✅ | ✅ | Meme launcher |
+| **Meteora DBC** | ✅ | ✅ | ✅ | Meme launcher |
+| **Moonit** | ✅ | ✅ | ✅ | Meme launcher |
+| **Heaven.xyz** | ✅ | ✅ | ✅ | Meme launcher |
+| **Sugar.money** | ✅ | ✅ | ✅ | Meme launcher |
+| **Bonk** | ✅ | ✅ | ✅ | Meme launcher |
+| **BoopFun** | ✅ | ✅ | ✅ | Meme launcher |
 
 ## Trading Bots
 
 | Bot | Trades | Notes |
 |-----|:------:|-------|
-| **BananaGun** | :white_check_mark: | MEV bot |
-| **Maestro** | :white_check_mark: | Trading bot |
-| **Nova** | :white_check_mark: | Sniper bot |
-| **Bloom** | :white_check_mark: | Copy trading |
-| **Mintech** | :white_check_mark: | Trading bot |
-| **Apepro** | :white_check_mark: | Trading bot |
+| **BananaGun** | ✅ | MEV bot |
+| **Maestro** | ✅ | Trading bot |
+| **Nova** | ✅ | Sniper bot |
+| **Bloom** | ✅ | Copy trading |
+| **Mintech** | ✅ | Trading bot |
+| **Apepro** | ✅ | Trading bot |
 
 ## Program IDs
 
