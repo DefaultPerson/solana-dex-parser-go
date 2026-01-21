@@ -28,3 +28,5 @@ jobs:
 
       - name: Run tests
         run: go test ./... -v -race
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
