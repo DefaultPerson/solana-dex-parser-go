@@ -11,7 +11,7 @@ Supports **30+ protocols** including Jupiter, Raydium, Orca, Meteora, Pumpfun, P
 ## Installation
 
 ```bash
-go get github.com/solana-dex-parser-go
+go get github.com/DefaultPerson/solana-dex-parser-go
 ```
 
 ## Quick Start
@@ -23,7 +23,7 @@ import (
     "encoding/json"
     "fmt"
 
-    dexparser "github.com/solana-dex-parser-go"
+    dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 )
 
 func main() {
@@ -49,9 +49,7 @@ func main() {
 ## Documentation
 
 - [Getting Started](https://defaultperson.github.io/solana-dex-parser-go/getting-started)
-- [Supported Protocols](https://defaultperson.github.io/solana-dex-parser-go/protocols)
-- [Code Examples](https://defaultperson.github.io/solana-dex-parser-go/examples/)
-- [API Reference](https://defaultperson.github.io/solana-dex-parser-go/api/)
+- [Examples](https://defaultperson.github.io/solana-dex-parser-go/examples/)
 
 ## Supported Protocols
 
@@ -61,8 +59,6 @@ func main() {
 | **AMMs** | Raydium (V4, CPMM, CL), Orca, Meteora (DLMM, DAMM), PumpSwap |
 | **Meme Platforms** | Pumpfun, Raydium Launchpad, Meteora DBC, Moonit, Heaven, Sugar, Bonk, BoopFun |
 | **Trading Bots** | BananaGun, Maestro, Nova, Bloom, Mintech, Apepro |
-
-[Full protocol list](https://defaultperson.github.io/solana-dex-parser-go/protocols)
 
 ## License
 

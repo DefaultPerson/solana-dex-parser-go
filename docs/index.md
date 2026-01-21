@@ -17,7 +17,7 @@ A high-performance Go library for parsing Solana DEX transactions. Port of [sola
 ## Quick Install
 
 ```bash
-go get github.com/solana-dex-parser-go
+go get github.com/DefaultPerson/solana-dex-parser-go
 ```
 
 ## Minimal Example
@@ -30,12 +30,19 @@ fmt.Printf("Trades: %d\n", len(result.Trades))
 fmt.Printf("Liquidities: %d\n", len(result.Liquidities))
 ```
 
+## Supported Protocols
+
+| Category | Protocols |
+|----------|-----------|
+| **Aggregators** | Jupiter, OKX DEX |
+| **AMMs** | Raydium (V4, CPMM, CL), Orca, Meteora (DLMM, DAMM), PumpSwap |
+| **Meme Platforms** | Pumpfun, Raydium Launchpad, Meteora DBC, Moonit, Heaven, Sugar, Bonk, BoopFun |
+| **Trading Bots** | BananaGun, Maestro, Nova, Bloom, Mintech, Apepro |
+
 ## Documentation
 
 - [Getting Started](getting-started.md) - Installation and first steps
-- [Supported Protocols](protocols.md) - Full list of DEXes and platforms
 - [Examples](examples/index.md) - Code examples for all use cases
-- [API Reference](api/index.md) - Detailed API documentation
 - [Development](development.md) - Contributing and testing
 
 ## License

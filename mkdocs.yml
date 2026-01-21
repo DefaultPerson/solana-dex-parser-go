@@ -59,19 +59,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Supported Protocols: protocols.md
-  - Examples:
-    - Overview: examples/index.md
-    - Parse Trades: examples/parse-trades.md
-    - Parse Liquidity: examples/parse-liquidity.md
-    - Parse Meme Events: examples/parse-meme.md
-    - ShredParser: examples/shred-parser.md
-    - Raydium Logs: examples/raydium-logs.md
-  - API Reference:
-    - Overview: api/index.md
-    - DexParser: api/dex-parser.md
-    - ShredParser: api/shred-parser.md
-    - Types: api/types.md
+  - Examples: examples/index.md
   - Development: development.md
 
 extra:

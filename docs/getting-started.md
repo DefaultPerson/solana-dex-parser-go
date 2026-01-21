@@ -183,5 +183,4 @@ go get google.golang.org/grpc
 ## Next Steps
 
 - [Examples](examples/index.md) - Code examples for specific use cases
-- [Supported Protocols](protocols.md) - Full list of supported DEXes
-- [API Reference](api/index.md) - Detailed API documentation
+- [Development](development.md) - Contributing and testing
