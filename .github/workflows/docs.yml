@@ -28,6 +28,4 @@ jobs:
           pip install mkdocs-material mkdocs-minify-plugin
 
       - name: Build and deploy
-        run: |
-          cd docs
-          mkdocs gh-deploy --force --config-file mkdocs.yml
+        run: mkdocs gh-deploy --force
