@@ -27,10 +27,4 @@ jobs:
         run: go build ./...
 
       - name: Run tests
-        run: go test ./... -v -race -coverprofile=coverage.out
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
+        run: go test ./... -v -race
