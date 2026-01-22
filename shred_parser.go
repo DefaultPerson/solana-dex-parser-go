@@ -7,6 +7,11 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/jupiter"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/meteora"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/photon"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/systoken"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
@@ -37,9 +42,10 @@ func (p *ShredParser) parseWithClassifier(tx *adapter.SolanaTransaction, config 
 	}
 
 	result := &types.ParseShredResult{
-		State:        true,
-		Signature:    "",
-		Instructions: make(map[string][]interface{}),
+		State:              true,
+		Signature:          "",
+		Instructions:       make(map[string][]interface{}),
+		ParsedInstructions: make([]types.ParsedShredInstruction, 0),
 	}
 
 	defer func() {
@@ -61,6 +67,9 @@ func (p *ShredParser) parseWithClassifier(tx *adapter.SolanaTransaction, config 
 
 	allProgramIds := instructionClassifier.GetAllProgramIds()
 	result.Signature = txAdapter.Signature()
+	result.Slot = txAdapter.Slot()
+	result.Timestamp = txAdapter.BlockTime()
+	result.Signer = txAdapter.Signers()
 
 	// Filter by programIds if specified
 	if len(config.ProgramIds) > 0 {
@@ -112,15 +121,82 @@ func (p *ShredParser) parseWithClassifier(tx *adapter.SolanaTransaction, config 
 		}
 
 		var parser ShredInstructionParser
+		var programName string
+
 		switch programId {
 		case constants.DEX_PROGRAMS.PUMP_FUN.ID:
 			parser = NewPumpfunInstructionParser(txAdapter, instructionClassifier)
+			programName = utils.GetProgramName(programId)
 		case constants.DEX_PROGRAMS.PUMP_SWAP.ID:
 			parser = NewPumpswapInstructionParser(txAdapter, instructionClassifier)
+			programName = utils.GetProgramName(programId)
+		case constants.DEX_PROGRAMS.PHOTON.ID:
+			photonParser := photon.NewPhotonShredParser(txAdapter, instructionClassifier)
+			instructions := photonParser.ProcessInstructions()
+			if len(instructions) > 0 {
+				result.Instructions["Photon"] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, photonParser.ProcessTypedInstructions()...)
+			}
+			continue
+		case constants.SYSTEM_PROGRAM_ID:
+			sysParser := systoken.NewSystemTokenShredParser(txAdapter, instructionClassifier)
+			instructions := sysParser.ProcessNativeInstructions()
+			if len(instructions) > 0 {
+				result.Instructions["System"] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, sysParser.ProcessTypedNativeInstructions()...)
+			}
+			continue
+		case constants.TOKEN_PROGRAM_ID:
+			sysParser := systoken.NewSystemTokenShredParser(txAdapter, instructionClassifier)
+			instructions := sysParser.ProcessTokenInstructions()
+			if len(instructions) > 0 {
+				result.Instructions["Token"] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, sysParser.ProcessTypedTokenInstructions()...)
+			}
+			continue
+		case constants.TOKEN_2022_PROGRAM_ID:
+			sysParser := systoken.NewSystemTokenShredParser(txAdapter, instructionClassifier)
+			instructions := sysParser.ProcessToken2022Instructions()
+			if len(instructions) > 0 {
+				result.Instructions["Token2022"] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, sysParser.ProcessTypedToken2022Instructions()...)
+			}
+			continue
+		case constants.DEX_PROGRAMS.JUPITER.ID:
+			jupiterParser := jupiter.NewJupiterShredParser(txAdapter, instructionClassifier)
+			instructions := jupiterParser.ProcessInstructions()
+			if len(instructions) > 0 {
+				result.Instructions[constants.DEX_PROGRAMS.JUPITER.Name] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, jupiterParser.ProcessTypedInstructions()...)
+			}
+			continue
+		case constants.DEX_PROGRAMS.RAYDIUM_V4.ID:
+			raydiumParser := raydium.NewRaydiumV4ShredParser(txAdapter, instructionClassifier)
+			instructions := raydiumParser.ProcessInstructions()
+			if len(instructions) > 0 {
+				result.Instructions[constants.DEX_PROGRAMS.RAYDIUM_V4.Name] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, raydiumParser.ProcessTypedInstructions()...)
+			}
+			continue
+		case constants.DEX_PROGRAMS.RAYDIUM_LCP.ID:
+			lcpParser := raydium.NewLaunchpadShredParser(txAdapter, instructionClassifier)
+			instructions := lcpParser.ProcessInstructions()
+			if len(instructions) > 0 {
+				result.Instructions[constants.DEX_PROGRAMS.RAYDIUM_LCP.Name] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, lcpParser.ProcessTypedInstructions()...)
+			}
+			continue
+		case constants.DEX_PROGRAMS.METEORA_DBC.ID:
+			dbcParser := meteora.NewDBCShredParser(txAdapter, instructionClassifier)
+			instructions := dbcParser.ProcessInstructions()
+			if len(instructions) > 0 {
+				result.Instructions[constants.DEX_PROGRAMS.METEORA_DBC.Name] = instructions
+				result.ParsedInstructions = append(result.ParsedInstructions, dbcParser.ProcessTypedInstructions()...)
+			}
+			continue
 		}
 
 		if parser != nil {
-			programName := utils.GetProgramName(programId)
 			result.Instructions[programName] = parser.ProcessInstructions()
 		}
 	}

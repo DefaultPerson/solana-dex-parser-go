@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/DefaultPerson/solana-dex-parser-go/blob/main/LICENSE)
 [![Tests](https://github.com/DefaultPerson/solana-dex-parser-go/actions/workflows/test.yml/badge.svg)](https://github.com/DefaultPerson/solana-dex-parser-go/actions/workflows/test.yml)
 
-A high-performance Go library for parsing Solana DEX transactions. Port of [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser) TypeScript library.
+A high-performance Go library for parsing Solana DEX transactions.
 
 ## Features
 
@@ -34,10 +34,11 @@ fmt.Printf("Liquidities: %d\n", len(result.Liquidities))
 
 | Category | Protocols |
 |----------|-----------|
-| **Aggregators** | Jupiter, OKX DEX |
-| **AMMs** | Raydium (V4, CPMM, CL), Orca, Meteora (DLMM, DAMM), PumpSwap |
-| **Meme Platforms** | Pumpfun, Raydium Launchpad, Meteora DBC, Moonit, Heaven, Sugar, Bonk, BoopFun |
-| **Trading Bots** | BananaGun, Maestro, Nova, Bloom, Mintech, Apepro |
+| **Aggregators** | Jupiter (V6, DCA, Limit), OKX DEX, DFlow, Photon |
+| **AMMs** | Raydium (V4, CPMM, CL), Orca Whirlpool, Meteora (DLMM, DAMM), PumpSwap |
+| **Prop AMM** | SolFi, GoonFi, Obric V2, HumidiFi |
+| **Meme Platforms** | Pumpfun, Raydium Launchpad, Meteora DBC, Moonit, Heaven, Sugar, BoopFun |
+| **Trading Bots** | Trojan, BONKbot, Axiom, GMGN, BullX, Maestro, Bloom, BananaGun, Raybot |
 
 ## Documentation
 
@@ -48,3 +49,7 @@ fmt.Printf("Liquidities: %d\n", len(result.Liquidities))
 ## License
 
 MIT License - see [LICENSE](https://github.com/DefaultPerson/solana-dex-parser-go/blob/main/LICENSE)
+
+## Acknowledgments
+
+Based on [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser) TypeScript library.

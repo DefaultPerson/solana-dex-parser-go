@@ -23,9 +23,22 @@ var DISCRIMINATORS = struct {
 	HEAVEN             HeavenDiscriminators
 	METAPLEX           MetaplexDiscriminators
 	SUGAR              SugarDiscriminators
+	PHOTON             PhotonDiscriminators
+	SOLFI              SolFiDiscriminators
+	GOONFI             GoonFiDiscriminators
+	OBRIC              ObricDiscriminators
+	DFLOW              DFlowDiscriminators
+	HUMIDIFI           HumidiFiDiscriminators
 }{
 	JUPITER: JupiterDiscriminators{
 		ROUTE_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 64, 198, 205, 232, 38, 8, 113, 226},
+		// Jupiter V6 shred discriminators
+		ROUTE:                                  []byte{229, 23, 203, 151, 122, 227, 173, 42},
+		ROUTE_EXACT_OUT:                        []byte{208, 51, 239, 151, 123, 43, 237, 92},
+		ROUTE_WITH_TOKEN_LEDGER:                []byte{150, 86, 71, 116, 167, 93, 14, 104},
+		SHARE_ACCOUNTS_ROUTE:                   []byte{193, 32, 155, 51, 65, 214, 156, 129},
+		SHARE_ACCOUNTS_EXACT_OUT_ROUTE:         []byte{176, 209, 105, 168, 154, 125, 69, 62},
+		SHARE_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER: []byte{230, 121, 143, 80, 119, 159, 106, 170},
 	},
 	JUPITER_DCA: JupiterDCADiscriminators{
 		FILLED:      []byte{228, 69, 165, 46, 81, 203, 154, 29, 134, 4, 17, 63, 221, 45, 177, 173},
@@ -86,21 +99,42 @@ var DISCRIMINATORS = struct {
 		CREATE:           []byte{1},
 		ADD_LIQUIDITY:    []byte{3},
 		REMOVE_LIQUIDITY: []byte{4},
+		SWAP:             []byte{9},
+		SWAP_EXACT_OUT:   []byte{11},
 	},
 	RAYDIUM_CL: RaydiumCLDiscriminators{
 		CREATE: RaydiumCLCreateDiscriminators{
 			OPEN_POSITION:    []byte{135, 128, 47, 77, 15, 152, 240, 49},
 			OPEN_POSITION_V2: []byte{77, 184, 74, 214, 112, 86, 241, 199},
 			CREATE_POOL:      []byte{233, 146, 209, 142, 207, 104, 64, 188},
-			INITIALIZE:       []byte{77, 255, 174, 82, 125, 29, 201, 46},
 		},
 		ADD_LIQUIDITY: RaydiumCLAddLiquidityDiscriminators{
-			INCREASE_LIQUIDITY:    []byte{46, 156, 243, 118, 13, 205, 251, 178},
-			INCREASE_LIQUIDITY_V2: []byte{133, 29, 89, 223, 69, 238, 176, 10},
+			INCREASE_LIQUIDITY:         []byte{46, 156, 243, 118, 13, 205, 251, 178},
+			INCREASE_LIQUIDITY_V2:      []byte{133, 29, 89, 223, 69, 238, 176, 10},
+			OPEN_POSITION_WITH_TOKEN22: []byte{77, 255, 174, 82, 125, 29, 201, 46},
 		},
 		REMOVE_LIQUIDITY: RaydiumCLRemoveLiquidityDiscriminators{
 			DECREASE_LIQUIDITY:    []byte{160, 38, 208, 111, 104, 91, 44, 1},
 			DECREASE_LIQUIDITY_V2: []byte{58, 127, 188, 62, 79, 82, 196, 96},
+			CLOSE_POSITION:        []byte{123, 134, 81, 0, 49, 68, 98, 98},
+		},
+		SWAP: RaydiumCLSwapDiscriminators{
+			SWAP:                []byte{248, 198, 158, 145, 225, 117, 135, 200},
+			SWAP_V2:             []byte{43, 4, 237, 11, 26, 201, 30, 98},
+			SWAP_ROUTER_BASE_IN: []byte{69, 125, 115, 218, 245, 186, 242, 196},
+		},
+		EVENTS: RaydiumCLEventDiscriminators{
+			COLLECT_PERSONAL_FEE:     []byte{166, 174, 105, 192, 81, 161, 83, 105},
+			COLLECT_PROTOCOL_FEE:     []byte{206, 87, 17, 79, 45, 41, 213, 61},
+			CONFIG_CHANGE:            []byte{247, 189, 7, 119, 106, 112, 95, 151},
+			CREATE_PERSONAL_POSITION: []byte{100, 30, 87, 249, 196, 223, 154, 206},
+			DECREASE_LIQUIDITY:       []byte{58, 222, 86, 58, 68, 50, 85, 56},
+			INCREASE_LIQUIDITY:       []byte{49, 79, 105, 212, 32, 34, 30, 84},
+			LIQUIDITY_CALCULATE:      []byte{237, 112, 148, 230, 57, 84, 180, 162},
+			LIQUIDITY_CHANGE:         []byte{126, 240, 175, 206, 158, 88, 153, 107},
+			POOL_CREATED:             []byte{25, 94, 75, 47, 112, 99, 53, 63},
+			SWAP:                     []byte{64, 198, 205, 232, 38, 8, 113, 226},
+			UPDATE_REWARD_INFOS:      []byte{109, 127, 186, 78, 114, 65, 37, 236},
 		},
 	},
 	RAYDIUM_CPMM: RaydiumCPMMDiscriminators{
@@ -117,6 +151,7 @@ var DISCRIMINATORS = struct {
 		BUY_EXACT_OUT:     []byte{24, 211, 116, 40, 105, 3, 153, 56},
 		SELL_EXACT_IN:     []byte{149, 39, 222, 155, 211, 124, 152, 26},
 		SELL_EXACT_OUT:    []byte{95, 200, 71, 34, 8, 9, 11, 166},
+		INITIALIZE:        []byte{175, 175, 109, 31, 13, 152, 155, 237},
 	},
 	METEORA_DLMM: MeteoraDLMMDiscriminators{
 		ADD_LIQUIDITY: map[string][]byte{
@@ -200,11 +235,51 @@ var DISCRIMINATORS = struct {
 		INITIALIZE:        []byte{175, 175, 109, 31, 13, 152, 155, 237},
 		MIGRATE_TO_RADIUM: []byte{96, 230, 91, 140, 139, 40, 235, 142},
 	},
+	PHOTON: PhotonDiscriminators{
+		PUMPSWAP_TRADE: []byte{44, 119, 175, 218, 199, 77, 196, 235},
+		PUMPFUN_BUY:    []byte{82, 225, 119, 231, 78, 29, 45, 70},
+		PUMPFUN_SELL:   []byte{93, 88, 60, 34, 91, 18, 86, 197},
+		MOONIT_BUY:     []byte{61, 220, 193, 108, 173, 62, 69, 176},
+		MOONIT_SELL:    []byte{206, 188, 188, 107, 32, 145, 81, 150},
+		HOP_TWO_SWAP:   []byte{195, 96, 237, 108, 68, 162, 219, 230},
+	},
+
+	// Prop AMM discriminators
+	SOLFI: SolFiDiscriminators{
+		SWAP: []byte{0x07},
+	},
+	GOONFI: GoonFiDiscriminators{
+		SWAP: []byte{0x02},
+	},
+	OBRIC: ObricDiscriminators{
+		SWAP:        []byte{248, 198, 158, 145, 225, 117, 135, 200}, // Anchor: swap
+		SWAP_X_TO_Y: []byte{143, 190, 90, 218, 196, 30, 51, 222},    // Anchor: swapXToY
+		SWAP_Y_TO_X: []byte{220, 117, 232, 239, 48, 247, 211, 180},  // Anchor: swapYToX
+	},
+	DFLOW: DFlowDiscriminators{
+		SWAP:           []byte{248, 198, 158, 145, 225, 117, 135, 200},
+		SWAP2:          []byte{65, 75, 63, 76, 235, 91, 91, 136},
+		SWAP_WITH_DEST: []byte{168, 172, 24, 77, 197, 156, 135, 101},
+		OPEN_ORDER:     []byte{206, 88, 88, 143, 38, 136, 50, 224},
+		FILL_ORDER:     []byte{232, 122, 115, 25, 199, 143, 136, 162},
+		CLOSE_ORDER:    []byte{90, 103, 209, 28, 7, 63, 168, 4},
+	},
+	HUMIDIFI: HumidiFiDiscriminators{
+		// HumidiFi uses XOR encryption, discriminator after decryption
+		SWAP: []byte{248, 198, 158, 145, 225, 117, 135, 200},
+	},
 }
 
 // Discriminator type definitions
 type JupiterDiscriminators struct {
 	ROUTE_EVENT []byte
+	// Jupiter V6 shred discriminators
+	ROUTE                                  []byte
+	ROUTE_EXACT_OUT                        []byte
+	ROUTE_WITH_TOKEN_LEDGER                []byte
+	SHARE_ACCOUNTS_ROUTE                   []byte
+	SHARE_ACCOUNTS_EXACT_OUT_ROUTE         []byte
+	SHARE_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER []byte
 }
 
 type JupiterDCADiscriminators struct {
@@ -273,29 +348,54 @@ type RaydiumDiscriminators struct {
 	CREATE           []byte
 	ADD_LIQUIDITY    []byte
 	REMOVE_LIQUIDITY []byte
+	SWAP             []byte
+	SWAP_EXACT_OUT   []byte
 }
 
 type RaydiumCLDiscriminators struct {
 	CREATE           RaydiumCLCreateDiscriminators
 	ADD_LIQUIDITY    RaydiumCLAddLiquidityDiscriminators
 	REMOVE_LIQUIDITY RaydiumCLRemoveLiquidityDiscriminators
+	SWAP             RaydiumCLSwapDiscriminators
+	EVENTS           RaydiumCLEventDiscriminators
 }
 
 type RaydiumCLCreateDiscriminators struct {
 	OPEN_POSITION    []byte
 	OPEN_POSITION_V2 []byte
 	CREATE_POOL      []byte
-	INITIALIZE       []byte
 }
 
 type RaydiumCLAddLiquidityDiscriminators struct {
-	INCREASE_LIQUIDITY    []byte
-	INCREASE_LIQUIDITY_V2 []byte
+	INCREASE_LIQUIDITY         []byte
+	INCREASE_LIQUIDITY_V2      []byte
+	OPEN_POSITION_WITH_TOKEN22 []byte
 }
 
 type RaydiumCLRemoveLiquidityDiscriminators struct {
 	DECREASE_LIQUIDITY    []byte
 	DECREASE_LIQUIDITY_V2 []byte
+	CLOSE_POSITION        []byte
+}
+
+type RaydiumCLSwapDiscriminators struct {
+	SWAP                []byte
+	SWAP_V2             []byte
+	SWAP_ROUTER_BASE_IN []byte
+}
+
+type RaydiumCLEventDiscriminators struct {
+	COLLECT_PERSONAL_FEE     []byte
+	COLLECT_PROTOCOL_FEE     []byte
+	CONFIG_CHANGE            []byte
+	CREATE_PERSONAL_POSITION []byte
+	DECREASE_LIQUIDITY       []byte
+	INCREASE_LIQUIDITY       []byte
+	LIQUIDITY_CALCULATE      []byte
+	LIQUIDITY_CHANGE         []byte
+	POOL_CREATED             []byte
+	SWAP                     []byte
+	UPDATE_REWARD_INFOS      []byte
 }
 
 type RaydiumCPMMDiscriminators struct {
@@ -313,6 +413,7 @@ type RaydiumLCPDiscriminators struct {
 	BUY_EXACT_OUT     []byte
 	SELL_EXACT_IN     []byte
 	SELL_EXACT_OUT    []byte
+	INITIALIZE        []byte
 }
 
 type MeteoraDLMMDiscriminators struct {
@@ -385,6 +486,42 @@ type SugarDiscriminators struct {
 	CREATE            []byte
 	INITIALIZE        []byte
 	MIGRATE_TO_RADIUM []byte
+}
+
+type PhotonDiscriminators struct {
+	PUMPSWAP_TRADE []byte
+	PUMPFUN_BUY    []byte
+	PUMPFUN_SELL   []byte
+	MOONIT_BUY     []byte
+	MOONIT_SELL    []byte
+	HOP_TWO_SWAP   []byte
+}
+
+type SolFiDiscriminators struct {
+	SWAP []byte
+}
+
+type GoonFiDiscriminators struct {
+	SWAP []byte
+}
+
+type ObricDiscriminators struct {
+	SWAP        []byte
+	SWAP_X_TO_Y []byte
+	SWAP_Y_TO_X []byte
+}
+
+type DFlowDiscriminators struct {
+	SWAP           []byte
+	SWAP2          []byte
+	SWAP_WITH_DEST []byte
+	OPEN_ORDER     []byte
+	FILL_ORDER     []byte
+	CLOSE_ORDER    []byte
+}
+
+type HumidiFiDiscriminators struct {
+	SWAP []byte
 }
 
 // MatchDiscriminator checks if data starts with the given discriminator

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-01-22
+
+### Fixed
+- Raydium CL Token22 discriminator: moved from CREATE to ADD_LIQUIDITY
+- Correct classification of Token22 NFT positions
+
+### Added
+- Raydium CL Swap discriminators (SWAP, SWAP_V2, SWAP_ROUTER_BASE_IN)
+- Raydium CL CLOSE_POSITION discriminator
+- Raydium CL Event discriminators (11 events: COLLECT_PERSONAL_FEE, COLLECT_PROTOCOL_FEE, etc.)
+
+### Changed
+- Documentation: removed "port" mentions from headers
+- Documentation: updated protocol counts (35→55 routing detection)
+- Documentation: expanded ShredParser examples and protocol support
+
 ## [1.1.0] - 2026-01-21
 
 ### Added

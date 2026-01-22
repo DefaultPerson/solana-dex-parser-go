@@ -564,7 +564,37 @@ func (tu *TransactionUtils) AttachTradeFee(trade *types.TradeInfo) *types.TradeI
 		}
 	}
 
+	// Detect trading bot from fee transfers
+	tu.DetectBot(trade)
+
 	return trade
+}
+
+// DetectBot detects trading bot from SOL transfers to known bot fee accounts
+func (tu *TransactionUtils) DetectBot(trade *types.TradeInfo) {
+	if trade == nil || trade.Bot != "" {
+		return
+	}
+
+	// Check all account keys for bot fee accounts
+	for _, account := range tu.adapter.AccountKeys {
+		if botName := constants.GetBotName(account); botName != "" {
+			trade.Bot = botName
+			return
+		}
+	}
+
+	// Check SOL balance changes for fee transfers to bot accounts
+	solChanges := tu.adapter.GetAccountSolBalanceChanges(false)
+	for account, change := range solChanges {
+		// Bot fee accounts receive SOL (positive change)
+		if change != nil && change.Change.UIAmount != nil && *change.Change.UIAmount > 0 {
+			if botName := constants.GetBotName(account); botName != "" {
+				trade.Bot = botName
+				return
+			}
+		}
+	}
 }
 
 // GetTransfersForInstruction gets transfers for a specific instruction

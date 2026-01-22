@@ -166,6 +166,10 @@ if result.AggregateTrade != nil {
 
 ## ShredParser for gRPC Streams
 
+ShredParser provides pre-execution instruction analysis for real-time blockchain monitoring via gRPC streams (Helius, Triton, etc.).
+
+### Basic Usage
+
 ```go
 import (
     dexparser "github.com/DefaultPerson/solana-dex-parser-go"
@@ -176,22 +180,54 @@ import (
 shredParser := dexparser.NewShredParser()
 
 config := &types.ParseConfig{
-    ProgramIds: []string{constants.DEX_PROGRAMS.PUMP_FUN.ID},
+    ProgramIds: []string{
+        constants.DEX_PROGRAMS.PUMP_FUN.ID,
+        constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
+    },
 }
 
 result := shredParser.ParseAll(&tx, config)
 
+// Access parsed instructions by program
 for program, instructions := range result.Instructions {
-    for _, inst := range instructions {
-        fmt.Printf("[%s] %s\n", program[:8], inst.Type)
+    fmt.Printf("[%s] %d instructions\n", program[:8], len(instructions))
+}
+
+// Access typed instructions
+for _, inst := range result.ParsedInstructions {
+    fmt.Printf("[%s] %s\n", inst.ProgramName, inst.Action)
+    if inst.Trade != nil {
+        fmt.Printf("  Trade: %s -> %s\n",
+            inst.Trade.InputToken.Mint[:8],
+            inst.Trade.OutputToken.Mint[:8])
     }
 }
 ```
 
 **Output:**
 ```
-[6EF8rre..] BUY
+[6EF8rre..] 1 instructions
+[Pumpfun] BUY
+  Trade: So11111.. -> 9gyfSMQ..
 ```
+
+### Supported Protocols
+
+| Protocol | Instructions | Notes |
+|----------|--------------|-------|
+| **Jupiter V6** | Route variants | All route types including shared accounts |
+| **Raydium V4** | Swap, Create, Add/Remove Liquidity | Full AMM support |
+| **Raydium Launchpad** | Buy, Sell, Create, Migrate | Meme token launches |
+| **Meteora DBC** | Swap, Init Pool, Migrate | Dynamic bonding curve |
+| **DFlow** | Swap routing | Order flow aggregation |
+| **Photon** | Multi-hop swaps | Cross-AMM routing |
+| **System/Token** | Transfers | SOL and SPL tokens |
+
+### Use Cases
+
+- **MEV Detection**: Monitor instructions pre-execution
+- **Real-time Pricing**: Track incoming trades
+- **Launch Monitoring**: Detect new token launches instantly
 
 ## Raydium Logs Decode
 

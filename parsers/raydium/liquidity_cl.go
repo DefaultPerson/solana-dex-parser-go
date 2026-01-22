@@ -42,7 +42,6 @@ func (p *RaydiumCLPoolParser) GetPoolAction(data []byte) interface{} {
 		"openPosition":   constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.OPEN_POSITION,
 		"openPositionV2": constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.OPEN_POSITION_V2,
 		"createPool":     constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.CREATE_POOL,
-		"initialize":     constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.INITIALIZE,
 	}
 	for name, disc := range createDiscs {
 		if bytes.Equal(instructionType, disc) {
@@ -52,8 +51,9 @@ func (p *RaydiumCLPoolParser) GetPoolAction(data []byte) interface{} {
 
 	// ADD_LIQUIDITY discriminators
 	addDiscs := map[string][]byte{
-		"increaseLiquidity":   constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY,
-		"increaseLiquidityV2": constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2,
+		"increaseLiquidity":        constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY,
+		"increaseLiquidityV2":      constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2,
+		"openPositionWithToken22":  constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22,
 	}
 	for name, disc := range addDiscs {
 		if bytes.Equal(instructionType, disc) {

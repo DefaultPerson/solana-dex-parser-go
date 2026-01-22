@@ -21,32 +21,6 @@ const (
 	TradeTypeBurn     TradeType = "BURN"
 )
 
-// ParseConfig contains configuration options for transaction parsing
-type ParseConfig struct {
-	// TryUnknownDEX if true, will try to parse unknown DEXes (results may be inaccurate)
-	TryUnknownDEX bool `json:"tryUnknownDEX,omitempty"`
-
-	// ProgramIds if set, will only parse transactions from these program IDs
-	ProgramIds []string `json:"programIds,omitempty"`
-
-	// IgnoreProgramIds if set, will ignore transactions from these program IDs
-	IgnoreProgramIds []string `json:"ignoreProgramIds,omitempty"`
-
-	// ThrowError if true, will return error if parsing fails
-	ThrowError bool `json:"throwError,omitempty"`
-
-	// AggregateTrades if true, will return the finalSwap record instead of detail route trades
-	AggregateTrades bool `json:"aggregateTrades,omitempty"`
-}
-
-// DefaultParseConfig returns default parsing configuration
-func DefaultParseConfig() ParseConfig {
-	return ParseConfig{
-		TryUnknownDEX:   true,
-		AggregateTrades: true,
-	}
-}
-
 // DexInfo contains basic DEX protocol information
 type DexInfo struct {
 	ProgramId string `json:"programId,omitempty"` // DEX program ID on Solana
@@ -127,23 +101,25 @@ type FeeInfo struct {
 
 // TradeInfo contains comprehensive trade information
 type TradeInfo struct {
-	User        string     `json:"user"`                  // Signer address (trader)
-	Type        TradeType  `json:"type"`                  // Trade direction (BUY/SELL/SWAP)
-	Pool        []string   `json:"Pool"`                  // Pool addresses
-	InputToken  TokenInfo  `json:"inputToken"`            // Token being sold
-	OutputToken TokenInfo  `json:"outputToken"`           // Token being bought
-	SlippageBps *int       `json:"slippageBps,omitempty"` // Slippage in basis points
-	Fee         *FeeInfo   `json:"fee,omitempty"`         // Fee information (if applicable)
-	Fees        []FeeInfo  `json:"fees,omitempty"`        // List of fees (if multiple)
-	ProgramId   string     `json:"programId,omitempty"`   // DEX program ID
-	AMM         string     `json:"amm,omitempty"`         // AMM type (e.g., 'RaydiumV4', 'Meteora')
-	AMMs        []string   `json:"amms,omitempty"`        // List of AMMs (if multiple)
-	Route       string     `json:"route,omitempty"`       // Router or Bot name
-	Slot        uint64     `json:"slot"`                  // Block slot number
-	Timestamp   int64      `json:"timestamp"`             // Unix timestamp
-	Signature   string     `json:"signature"`             // Transaction signature
-	Idx         string     `json:"idx"`                   // Instruction indexes
-	Signer      []string   `json:"signer,omitempty"`      // Original signer
+	User        string      `json:"user"`                  // Signer address (trader)
+	Type        TradeType   `json:"type"`                  // Trade direction (BUY/SELL/SWAP)
+	Pool        []string    `json:"Pool"`                  // Pool addresses
+	InputToken  TokenInfo   `json:"inputToken"`            // Token being sold
+	OutputToken TokenInfo   `json:"outputToken"`           // Token being bought
+	SlippageBps *int        `json:"slippageBps,omitempty"` // Slippage in basis points
+	Fee         *FeeInfo    `json:"fee,omitempty"`         // Fee information (if applicable)
+	Fees        []FeeInfo   `json:"fees,omitempty"`        // List of fees (if multiple)
+	ProgramId   string      `json:"programId,omitempty"`   // DEX program ID
+	AMM         string      `json:"amm,omitempty"`         // AMM type (e.g., 'RaydiumV4', 'Meteora')
+	AMMs        []string    `json:"amms,omitempty"`        // List of AMMs (if multiple)
+	Route       string      `json:"route,omitempty"`       // Router or Bot name
+	Bot         string      `json:"bot,omitempty"`         // Trading bot name (e.g., 'Trojan', 'BONKbot')
+	Slot        uint64      `json:"slot"`                  // Block slot number
+	Timestamp   int64       `json:"timestamp"`             // Unix timestamp
+	Signature   string      `json:"signature"`             // Transaction signature
+	Idx         string      `json:"idx"`                   // Instruction indexes
+	Signer      []string    `json:"signer,omitempty"`      // Original signer
+	Extras      interface{} `json:"extras,omitempty"`      // Additional parser-specific data
 }
 
 // ConvertToUIAmount converts raw token amount to human-readable format

@@ -47,6 +47,33 @@ const (
 	TransactionStatusFailed  TransactionStatus = "failed"
 )
 
+// AltEvent contains Address Lookup Table event data
+type AltEvent struct {
+	// Type is the ALT operation type (CreateLookupTable/FreezeLookupTable/ExtendLookupTable/DeactivateLookupTable/CloseLookupTable)
+	Type string `json:"type"`
+
+	// AltAccount is the Address Lookup Table account address
+	AltAccount string `json:"altAccount"`
+
+	// AltAuthority is the ALT authority (owner) address
+	AltAuthority string `json:"altAuthority"`
+
+	// Recipient is the recipient account for CloseLookupTable
+	Recipient string `json:"recipient,omitempty"`
+
+	// NewAddresses contains newly added addresses for ExtendLookupTable
+	NewAddresses []string `json:"newAddresses,omitempty"`
+
+	// PayerAccount is the fee payer for CreateLookupTable/ExtendLookupTable
+	PayerAccount string `json:"payerAccount,omitempty"`
+
+	// RecentSlot is the recent slot for CreateLookupTable
+	RecentSlot uint64 `json:"recentSlot,omitempty"`
+
+	// Idx is the instruction index
+	Idx string `json:"idx,omitempty"`
+}
+
 // ParseResult contains complete parsing result with all extracted transaction data
 type ParseResult struct {
 	// State indicates parsing success status - true if parsing completed successfully
@@ -76,6 +103,9 @@ type ParseResult struct {
 	// MemeEvents contains meme platform events (create/buy/sell/migrate/complete)
 	MemeEvents []MemeEvent `json:"memeEvents"`
 
+	// AltEvents contains Address Lookup Table events
+	AltEvents []AltEvent `json:"altEvents,omitempty"`
+
 	// Slot is the Solana slot number where the transaction was included
 	Slot uint64 `json:"slot"`
 
@@ -96,6 +126,9 @@ type ParseResult struct {
 
 	// Msg contains optional error or status message
 	Msg string `json:"msg,omitempty"`
+
+	// Extras contains additional parser-specific data
+	Extras interface{} `json:"extras,omitempty"`
 }
 
 // NewParseResult creates a new ParseResult with default values
@@ -107,9 +140,19 @@ func NewParseResult() *ParseResult {
 		Liquidities: make([]PoolEvent, 0),
 		Transfers:   make([]TransferData, 0),
 		MemeEvents:  make([]MemeEvent, 0),
+		AltEvents:   make([]AltEvent, 0),
 		Signer:      make([]string, 0),
 		TxStatus:    TransactionStatusUnknown,
 	}
+}
+
+// IsArbitrage returns true if the aggregated trade is an arbitrage
+// (same input and output token mint addresses)
+func (r *ParseResult) IsArbitrage() bool {
+	if r.AggregateTrade != nil {
+		return r.AggregateTrade.InputToken.Mint == r.AggregateTrade.OutputToken.Mint
+	}
+	return false
 }
 
 // ParseShredResult contains parsing result for shred-stream data (pre-execution instruction analysis)
@@ -120,11 +163,56 @@ type ParseShredResult struct {
 	// Signature is the transaction signature being analyzed
 	Signature string `json:"signature"`
 
-	// Instructions contains parsed instructions grouped by AMM/DEX name
+	// Instructions contains parsed instructions grouped by AMM/DEX name (legacy format)
 	Instructions map[string][]interface{} `json:"instructions"`
+
+	// ParsedInstructions contains typed parsed instructions (new format)
+	ParsedInstructions []ParsedShredInstruction `json:"parsedInstructions,omitempty"`
+
+	// Slot is the block slot number
+	Slot uint64 `json:"slot,omitempty"`
+
+	// Timestamp is the Unix timestamp
+	Timestamp int64 `json:"timestamp,omitempty"`
+
+	// Signer contains transaction signers
+	Signer []string `json:"signer,omitempty"`
 
 	// Msg contains optional error or status message
 	Msg string `json:"msg,omitempty"`
+}
+
+// ParsedShredInstruction represents a typed parsed shred instruction
+type ParsedShredInstruction struct {
+	// ProgramID is the program that owns this instruction
+	ProgramID string `json:"programId"`
+
+	// ProgramName is the human-readable name of the program
+	ProgramName string `json:"programName"`
+
+	// Action is the instruction action type (e.g., "pumpswap_swap", "transfer")
+	Action string `json:"action"`
+
+	// Trade contains trade data if this is a trade instruction
+	Trade *TradeInfo `json:"trade,omitempty"`
+
+	// Liquidity contains liquidity data if this is a liquidity instruction
+	Liquidity *PoolEvent `json:"liquidity,omitempty"`
+
+	// Transfer contains transfer data if this is a transfer instruction
+	Transfer *TransferData `json:"transfer,omitempty"`
+
+	// MemeEvent contains meme event data if this is a meme event instruction
+	MemeEvent *MemeEvent `json:"memeEvent,omitempty"`
+
+	// Data contains additional instruction-specific data
+	Data interface{} `json:"data,omitempty"`
+
+	// Accounts contains the account addresses involved in this instruction
+	Accounts []string `json:"accounts"`
+
+	// Idx is the instruction index in format "outer" or "outer-inner"
+	Idx string `json:"idx"`
 }
 
 // EventParser is a generic event parser configuration for single discriminator events

@@ -56,27 +56,35 @@ var DEX_PROGRAMS = struct {
 	APEPRO     DexProgram
 
 	// Other DEX Protocols
-	ALDRIN        DexProgram
-	ALDRIN_V2     DexProgram
-	CREMA         DexProgram
-	GOOSEFX       DexProgram
-	LIFINITY      DexProgram
-	LIFINITY_V2   DexProgram
-	MERCURIAL     DexProgram
-	MOONIT        DexProgram
-	ONEDEX        DexProgram
-	PUMP_FUN      DexProgram
-	PUMP_SWAP     DexProgram
-	SABER         DexProgram
-	SAROS         DexProgram
-	SOLFI         DexProgram
-	STABBEL       DexProgram
+	ALDRIN         DexProgram
+	ALDRIN_V2      DexProgram
+	CREMA          DexProgram
+	GOOSEFX        DexProgram
+	LIFINITY       DexProgram
+	LIFINITY_V2    DexProgram
+	MERCURIAL      DexProgram
+	MOONIT         DexProgram
+	ONEDEX         DexProgram
+	PUMP_FUN       DexProgram
+	PUMP_SWAP      DexProgram
+	SABER          DexProgram
+	SAROS          DexProgram
+	SOLFI          DexProgram
+	STABBEL        DexProgram
 	STABBEL_WEIGHT DexProgram
-	BOOP_FUN      DexProgram
-	ZERO_FI       DexProgram
-	SUGAR         DexProgram
-	HEAVEN        DexProgram
-	HEAVEN_VAULT  DexProgram
+	BOOP_FUN       DexProgram
+	ZERO_FI        DexProgram
+	SUGAR          DexProgram
+	HEAVEN         DexProgram
+	HEAVEN_VAULT   DexProgram
+
+	// Prop AMM Protocols (Dark Pools)
+	GOONFI    DexProgram
+	OBRIC_V2  DexProgram
+	HUMIDIFI  DexProgram
+
+	// Additional Aggregators
+	DFLOW DexProgram
 }{
 	// DEX Aggregators
 	JUPITER: DexProgram{
@@ -382,6 +390,30 @@ var DEX_PROGRAMS = struct {
 		Name: "HeavenStore",
 		Tags: []string{"vault"},
 	},
+
+	// Prop AMM Protocols (Dark Pools)
+	GOONFI: DexProgram{
+		ID:   "goonERTdGsjnkZqWuVjs73BZ3Pb9qoCUdBUL17BnS5j",
+		Name: "GoonFi",
+		Tags: []string{"amm"},
+	},
+	OBRIC_V2: DexProgram{
+		ID:   "obriQD1zbpyLz95G5n7nJe6a4DPjpFwa5XYPoNm113y",
+		Name: "ObricV2",
+		Tags: []string{"amm"},
+	},
+	HUMIDIFI: DexProgram{
+		ID:   "9H6tua7jkLhdm3w8BvgpTn5LZNU7g4ZynDmCiNN3q6Rp",
+		Name: "HumidiFi",
+		Tags: []string{"amm"},
+	},
+
+	// Additional Aggregators
+	DFLOW: DexProgram{
+		ID:   "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
+		Name: "DFlow",
+		Tags: []string{"route"},
+	},
 }
 
 // DEX_PROGRAM_IDS is a list of all DEX program IDs
@@ -445,6 +477,10 @@ var DEX_PROGRAM_IDS = []string{
 	DEX_PROGRAMS.SUGAR.ID,
 	DEX_PROGRAMS.HEAVEN.ID,
 	DEX_PROGRAMS.HEAVEN_VAULT.ID,
+	DEX_PROGRAMS.GOONFI.ID,
+	DEX_PROGRAMS.OBRIC_V2.ID,
+	DEX_PROGRAMS.HUMIDIFI.ID,
+	DEX_PROGRAMS.DFLOW.ID,
 }
 
 // SYSTEM_PROGRAMS contains system program IDs that should be ignored
@@ -463,10 +499,18 @@ var SKIP_PROGRAM_IDS = []string{
 
 // Token program constants
 const (
-	TOKEN_PROGRAM_ID            = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-	TOKEN_2022_PROGRAM_ID       = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+	// System program ID (SOL transfers)
+	SYSTEM_PROGRAM_ID = "11111111111111111111111111111111"
+	// SPL Token program ID
+	TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+	// SPL Token 2022 program ID
+	TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+	// Associated Token Account program ID
 	ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-	METAPLEX_PROGRAM_ID         = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+	// Metaplex Token Metadata program ID
+	METAPLEX_PROGRAM_ID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+	// Address Lookup Table program
+	ALT_PROGRAM_ID = "AddressLookupTab1e1111111111111111111111111"
 )
 
 // PUMPFUN_MIGRATORS contains Pumpfun migrator addresses
@@ -642,6 +686,14 @@ func GetDexProgramByID(id string) DexProgram {
 		return DEX_PROGRAMS.HEAVEN
 	case DEX_PROGRAMS.HEAVEN_VAULT.ID:
 		return DEX_PROGRAMS.HEAVEN_VAULT
+	case DEX_PROGRAMS.GOONFI.ID:
+		return DEX_PROGRAMS.GOONFI
+	case DEX_PROGRAMS.OBRIC_V2.ID:
+		return DEX_PROGRAMS.OBRIC_V2
+	case DEX_PROGRAMS.HUMIDIFI.ID:
+		return DEX_PROGRAMS.HUMIDIFI
+	case DEX_PROGRAMS.DFLOW.ID:
+		return DEX_PROGRAMS.DFLOW
 	default:
 		return DexProgram{}
 	}

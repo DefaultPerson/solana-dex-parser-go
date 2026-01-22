@@ -47,7 +47,7 @@ CLAUDE.md
 .claude/
 
 # TypeScript source (reference only)
-solana-dex-parser-ts/
+research/
 
 # Logs
 *.log

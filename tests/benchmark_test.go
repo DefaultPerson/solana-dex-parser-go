@@ -4,113 +4,139 @@ import (
 	"os"
 	"testing"
 
-	"github.com/goccy/go-json"
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
-	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
-// Sample transaction JSON for benchmarks (Pumpfun BUY)
-var benchTxJSON = []byte(`{
-	"slot": 123456789,
-	"blockTime": 1704067200,
-	"transaction": {
-		"signatures": ["4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz"],
-		"message": {
-			"accountKeys": [
-				"9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
-				"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-				"11111111111111111111111111111111"
-			],
-			"instructions": []
+// benchmarkTxs holds pre-fetched transactions for benchmarks
+var benchmarkTxs []*adapter.SolanaTransaction
+
+func setupBenchmarkTxs(b *testing.B) []*adapter.SolanaTransaction {
+	apiKey := os.Getenv("HELIUS_API_KEY")
+	if apiKey == "" {
+		b.Skip("HELIUS_API_KEY not set, skipping benchmarks")
+	}
+
+	if benchmarkTxs != nil {
+		return benchmarkTxs
+	}
+
+	signatures := []string{
+		"4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz", // Pumpfun
+		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",  // Pumpfun sell
+	}
+
+	txs := make([]*adapter.SolanaTransaction, 0, len(signatures))
+	for _, sig := range signatures {
+		tx, err := fetchTransaction(sig)
+		if err != nil {
+			b.Fatalf("Failed to fetch transaction %s: %v", sig, err)
 		}
-	},
-	"meta": {
-		"err": null,
-		"fee": 5000,
-		"innerInstructions": [],
-		"postTokenBalances": [],
-		"preTokenBalances": []
+		txs = append(txs, tx)
 	}
-}`)
 
-func BenchmarkJSONUnmarshalStdlib(b *testing.B) {
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		var tx adapter.SolanaTransaction
-		if err := json.Unmarshal(benchTxJSON, &tx); err != nil {
-			b.Fatal(err)
-		}
-	}
+	benchmarkTxs = txs
+	return txs
 }
 
-func BenchmarkBinaryReaderNew(b *testing.B) {
-	data := make([]byte, 128)
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		r := utils.NewBinaryReader(data)
-		r.ReadU64()
-		r.ReadPubkey()
-		r.ReadU64()
-	}
-}
-
-func BenchmarkBinaryReaderPooled(b *testing.B) {
-	data := make([]byte, 128)
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		r := utils.GetBinaryReader(data)
-		r.ReadU64()
-		r.ReadPubkey()
-		r.ReadU64()
-		r.Release()
-	}
-}
-
-func BenchmarkNewDexParser(b *testing.B) {
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		_ = dexparser.NewDexParser()
-	}
-}
-
-func BenchmarkParseTransactionMinimal(b *testing.B) {
-	var tx adapter.SolanaTransaction
-	if err := json.Unmarshal(benchTxJSON, &tx); err != nil {
-		b.Fatal(err)
-	}
-
+// BenchmarkParseSingle benchmarks single transaction parsing
+func BenchmarkParseSingle(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
 	parser := dexparser.NewDexParser()
-	cfg := types.DefaultParseConfig()
+	config := types.DefaultParseConfig()
 
 	b.ResetTimer()
-	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		parser.ParseAll(&tx, &cfg)
+		for _, tx := range txs {
+			_ = parser.ParseAll(tx, &config)
+		}
 	}
 }
 
-// BenchmarkParseRealTransaction benchmarks with a real transaction if available
-func BenchmarkParseRealTransaction(b *testing.B) {
-	// Try to load a cached transaction
-	data, err := os.ReadFile("testdata/pumpfun_buy.json")
-	if err != nil {
-		b.Skip("testdata/pumpfun_buy.json not found, skipping real tx benchmark")
-		return
-	}
-
-	var tx adapter.SolanaTransaction
-	if err := json.Unmarshal(data, &tx); err != nil {
-		b.Fatal(err)
-	}
-
+// BenchmarkParseBatchSequential benchmarks batch parsing with 1 worker (sequential)
+func BenchmarkParseBatchSequential(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
 	parser := dexparser.NewDexParser()
-	cfg := types.DefaultParseConfig()
+	config := types.DefaultParseConfig()
 
 	b.ResetTimer()
-	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		parser.ParseAll(&tx, &cfg)
+		_ = parser.ParseBatch(txs, &config, 1)
+	}
+}
+
+// BenchmarkParseBatchConcurrent2 benchmarks batch parsing with 2 workers
+func BenchmarkParseBatchConcurrent2(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
+	parser := dexparser.NewDexParser()
+	config := types.DefaultParseConfig()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parser.ParseBatch(txs, &config, 2)
+	}
+}
+
+// BenchmarkParseBatchConcurrent4 benchmarks batch parsing with 4 workers
+func BenchmarkParseBatchConcurrent4(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
+	parser := dexparser.NewDexParser()
+	config := types.DefaultParseConfig()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parser.ParseBatch(txs, &config, 4)
+	}
+}
+
+// BenchmarkParseTradesOnly benchmarks parsing with only trades enabled
+func BenchmarkParseTradesOnly(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
+	parser := dexparser.NewDexParser()
+	config := types.ParseConfig{
+		ParseType:     types.ParseTradesOnly(),
+		TryUnknownDEX: true,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, tx := range txs {
+			_ = parser.ParseAll(tx, &config)
+		}
+	}
+}
+
+// BenchmarkParseLiquidityOnly benchmarks parsing with only liquidity enabled
+func BenchmarkParseLiquidityOnly(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
+	parser := dexparser.NewDexParser()
+	config := types.ParseConfig{
+		ParseType:     types.ParseLiquidityOnly(),
+		TryUnknownDEX: true,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, tx := range txs {
+			_ = parser.ParseAll(tx, &config)
+		}
+	}
+}
+
+// BenchmarkParseAllTypes benchmarks parsing with all types enabled
+func BenchmarkParseAllTypes(b *testing.B) {
+	txs := setupBenchmarkTxs(b)
+	parser := dexparser.NewDexParser()
+	config := types.ParseConfig{
+		ParseType:     types.ParseAll(),
+		TryUnknownDEX: true,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, tx := range txs {
+			_ = parser.ParseAll(tx, &config)
+		}
 	}
 }

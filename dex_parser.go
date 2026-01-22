@@ -2,20 +2,32 @@ package dexparser
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/alt"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/dflow"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/jupiter"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/meme"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/meteora"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/orca"
+	"github.com/DefaultPerson/solana-dex-parser-go/parsers/propamm"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/pumpfun"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
+
+// ParseCallback defines the callback function type for batch parsing
+// index: the index of the transaction in the batch
+// tx: the transaction being parsed (may be nil)
+// result: the parse result
+// err: any error that occurred during parsing
+// returns: true to continue processing, false to stop early
+type ParseCallback func(index int, tx *adapter.SolanaTransaction, result *types.ParseResult, err error) bool
 
 // DexParser is the main parser class for Solana DEX transactions
 type DexParser struct {
@@ -136,6 +148,31 @@ func (dp *DexParser) registerDefaultParsers() {
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.MOONIT.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
 		return meme.NewMoonitParser(a, d, t, c)
 	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.HEAVEN.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return meme.NewHeavenParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.SUGAR.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return meme.NewSugarParser(a, d, t, c)
+	}
+
+	// Prop AMM parsers
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.SOLFI.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewSolFiParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.GOONFI.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewGoonFiParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.OBRIC_V2.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewObricParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.HUMIDIFI.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewHumidiFiParser(a, d, t, c)
+	}
+
+	// Aggregator parsers
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.DFLOW.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return dflow.NewDFlowParser(a, d, t, c)
+	}
 
 	// Liquidity parsers
 	dp.liquidityParserFactories[constants.DEX_PROGRAMS.METEORA.ID] = func(a *adapter.TransactionAdapter, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.LiquidityParser {
@@ -247,6 +284,148 @@ func (dp *DexParser) ParseAll(tx *adapter.SolanaTransaction, config *types.Parse
 	return dp.parseWithClassifier(tx, config, "all")
 }
 
+// ParseBatch parses multiple transactions concurrently
+// maxWorkers: maximum number of concurrent workers, if <= 1, will use sequential processing
+func (dp *DexParser) ParseBatch(txs []*adapter.SolanaTransaction, config *types.ParseConfig, maxWorkers int) []*types.ParseResult {
+	return dp.ParseBatchWithCallback(txs, config, maxWorkers, nil)
+}
+
+// ParseBatchWithCallback parses multiple transactions with callback support
+// maxWorkers: maximum number of concurrent workers, if <= 1, will use sequential processing
+// callback: optional callback function called for each completed transaction
+func (dp *DexParser) ParseBatchWithCallback(
+	txs []*adapter.SolanaTransaction,
+	config *types.ParseConfig,
+	maxWorkers int,
+	callback ParseCallback,
+) []*types.ParseResult {
+	if len(txs) == 0 {
+		return []*types.ParseResult{}
+	}
+
+	// Optimize for single worker case
+	if maxWorkers <= 1 {
+		return dp.parseSequentiallyWithCallback(txs, config, callback)
+	}
+
+	return dp.parseConcurrentlyWithCallback(txs, config, maxWorkers, callback)
+}
+
+// parseSequentiallyWithCallback processes transactions one by one with callback
+func (dp *DexParser) parseSequentiallyWithCallback(
+	txs []*adapter.SolanaTransaction,
+	config *types.ParseConfig,
+	callback ParseCallback,
+) []*types.ParseResult {
+	results := make([]*types.ParseResult, len(txs))
+
+	for i, tx := range txs {
+		var result *types.ParseResult
+		var err error
+
+		// Handle panic gracefully
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic in transaction %d: %v", i, r)
+					result = types.NewParseResult()
+					result.State = false
+					result.Msg = fmt.Sprintf("panic: %v", r)
+				}
+			}()
+
+			result = dp.ParseAll(tx, config)
+		}()
+
+		results[i] = result
+
+		// Call callback function if provided
+		if callback != nil {
+			if !callback(i, tx, result, err) {
+				// Early termination requested
+				break
+			}
+		}
+	}
+
+	return results
+}
+
+// parseConcurrentlyWithCallback processes transactions using goroutines with callback
+func (dp *DexParser) parseConcurrentlyWithCallback(
+	txs []*adapter.SolanaTransaction,
+	config *types.ParseConfig,
+	maxWorkers int,
+	callback ParseCallback,
+) []*types.ParseResult {
+	semaphore := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var callbackMu sync.Mutex
+
+	// Pre-allocate results slice
+	results := make([]*types.ParseResult, len(txs))
+	var shouldStop bool
+
+	for i, tx := range txs {
+		wg.Add(1)
+		go func(index int, transaction *adapter.SolanaTransaction) {
+			defer wg.Done()
+
+			// Check if we should stop early
+			callbackMu.Lock()
+			if shouldStop {
+				callbackMu.Unlock()
+				return
+			}
+			callbackMu.Unlock()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			var result *types.ParseResult
+			var err error
+
+			// Handle panic gracefully
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						err = fmt.Errorf("panic in transaction %d: %v", index, r)
+						result = types.NewParseResult()
+						result.State = false
+						result.Msg = fmt.Sprintf("panic: %v", r)
+					}
+				}()
+
+				result = dp.ParseAll(transaction, config)
+			}()
+
+			// Store result
+			mu.Lock()
+			results[index] = result
+			mu.Unlock()
+
+			// Call callback function if provided
+			if callback != nil {
+				callbackMu.Lock()
+				if !shouldStop {
+					if !callback(index, transaction, result, err) {
+						// Early termination requested
+						shouldStop = true
+					}
+				}
+				callbackMu.Unlock()
+			}
+		}(i, tx)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	return results
+}
+
 // parseWithClassifier is the main parsing logic
 func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *types.ParseConfig, parseType string) *types.ParseResult {
 	if config == nil {
@@ -297,7 +476,42 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		}
 		if !found {
 			result.State = false
+			result.Msg = "No matching program ids"
 			return result
+		}
+	}
+
+	// Check account include filter
+	if len(config.AccountInclude) > 0 {
+		found := false
+		for _, includeAccount := range config.AccountInclude {
+			for _, accountKey := range adapt.AccountKeys {
+				if includeAccount == accountKey {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			result.State = false
+			result.Msg = "No matching accounts include"
+			return result
+		}
+	}
+
+	// Check account exclude filter
+	if len(config.AccountExclude) > 0 {
+		for _, excludeAccount := range config.AccountExclude {
+			for _, accountKey := range adapt.AccountKeys {
+				if excludeAccount == accountKey {
+					result.State = false
+					result.Msg = "Account excluded"
+					return result
+				}
+			}
 		}
 	}
 
@@ -314,6 +528,15 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		result.TokenBalanceChange = userTokenChanges
 	}
 
+	// Determine what to parse based on parseType and config.ParseType
+	// Use GetEffectiveParseType for backward compatibility (defaults to all if not set)
+	effectiveParseType := config.GetEffectiveParseType()
+	shouldParseTrades := parseType == "trades" || (parseType == "all" && effectiveParseType.Trade)
+	shouldParseLiquidity := parseType == "liquidity" || (parseType == "all" && effectiveParseType.Liquidity)
+	shouldParseTransfers := parseType == "transfer" || (parseType == "all" && effectiveParseType.Transfer)
+	shouldParseMemeEvents := parseType == "all" && effectiveParseType.MemeEvent
+	shouldParseAltEvents := parseType == "all" && effectiveParseType.AltEvent
+
 	// Try Jupiter-specific parsing first
 	jupiterProgramIds := []string{
 		constants.DEX_PROGRAMS.JUPITER.ID,
@@ -326,7 +549,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	}
 
 	if dexInfo.ProgramId != "" && containsString(jupiterProgramIds, dexInfo.ProgramId) {
-		if parseType == "trades" || parseType == "all" {
+		if shouldParseTrades {
 			jupiterInstructions := instrClassifier.GetInstructions(dexInfo.ProgramId)
 			if factory, ok := dp.tradeParserFactories[dexInfo.ProgramId]; ok {
 				dexInfoWithAMM := types.DexInfo{
@@ -337,7 +560,8 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 				parser := factory(adapt, dexInfoWithAMM, transferActions, jupiterInstructions)
 				trades := parser.ProcessTrades()
 				if len(trades) > 0 {
-					if config.AggregateTrades {
+					shouldAggregate := config.ShouldAggregateTrades() || effectiveParseType.AggregateTrade
+					if shouldAggregate {
 						aggregateTrade := utils.GetFinalSwap(trades, &dexInfo)
 						if aggregateTrade != nil {
 							result.AggregateTrade = txUtils.AttachTradeFee(aggregateTrade)
@@ -348,7 +572,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 				}
 			}
 		}
-		if len(result.Trades) > 0 {
+		if len(result.Trades) > 0 || result.AggregateTrade != nil {
 			return result
 		}
 	}
@@ -366,7 +590,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		classifiedInstructions := instrClassifier.GetInstructions(programId)
 
 		// Process trades
-		if parseType == "trades" || parseType == "all" {
+		if shouldParseTrades {
 			if factory, ok := dp.tradeParserFactories[programId]; ok {
 				dexInfoForProgram := types.DexInfo{
 					ProgramId: programId,
@@ -403,7 +627,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		}
 
 		// Process liquidity
-		if parseType == "liquidity" || parseType == "all" {
+		if shouldParseLiquidity {
 			if factory, ok := dp.liquidityParserFactories[programId]; ok {
 				parser := factory(adapt, transferActions, classifiedInstructions)
 				liquidities := parser.ProcessLiquidity()
@@ -412,7 +636,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		}
 
 		// Process meme events
-		if parseType == "all" {
+		if shouldParseMemeEvents {
 			if factory, ok := dp.memeEventParserFactories[programId]; ok {
 				parser := factory(adapt, transferActions)
 				result.MemeEvents = append(result.MemeEvents, parser.ProcessEvents()...)
@@ -420,10 +644,20 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		}
 	}
 
+	// Process ALT events
+	if shouldParseAltEvents {
+		altInstructions := instrClassifier.GetInstructions(constants.ALT_PROGRAM_ID)
+		if len(altInstructions) > 0 {
+			altParser := alt.NewAltEventParser(adapt, altInstructions)
+			result.AltEvents = append(result.AltEvents, altParser.ProcessEvents()...)
+		}
+	}
+
 	// Deduplicate trades
 	if len(result.Trades) > 0 {
 		result.Trades = deduplicateTrades(result.Trades)
-		if config.AggregateTrades {
+		shouldAggregate := config.ShouldAggregateTrades() || effectiveParseType.AggregateTrade
+		if shouldAggregate {
 			aggregateTrade := utils.GetFinalSwap(result.Trades, &dexInfo)
 			if aggregateTrade != nil {
 				result.AggregateTrade = txUtils.AttachTradeFee(aggregateTrade)
@@ -433,7 +667,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 
 	// Process transfers if no trades and no liquidity
 	if len(result.Trades) == 0 && len(result.Liquidities) == 0 {
-		if parseType == "transfer" || parseType == "all" {
+		if shouldParseTransfers {
 			if dexInfo.ProgramId != "" {
 				classifiedInstructions := instrClassifier.GetInstructions(dexInfo.ProgramId)
 				if factory, ok := dp.transferParserFactories[dexInfo.ProgramId]; ok {

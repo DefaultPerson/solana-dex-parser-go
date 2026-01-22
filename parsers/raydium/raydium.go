@@ -109,7 +109,6 @@ func (p *RaydiumParser) notLiquidityEvent(instruction interface{}) bool {
 			constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.OPEN_POSITION,
 			constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.OPEN_POSITION_V2,
 			constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.CREATE_POOL,
-			constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.INITIALIZE,
 		} {
 			if bytes.Equal(disc8, d) {
 				return false
@@ -119,6 +118,7 @@ func (p *RaydiumParser) notLiquidityEvent(instruction interface{}) bool {
 		for _, d := range [][]byte{
 			constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY,
 			constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2,
+			constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22,
 		} {
 			if bytes.Equal(disc8, d) {
 				return false
