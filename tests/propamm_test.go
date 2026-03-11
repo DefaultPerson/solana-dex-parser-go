@@ -117,14 +117,19 @@ func TestGetBotNames(t *testing.T) {
 	// Should contain known bots
 	expected := map[string]bool{
 		"Trojan":    true,
-		"BONKbot":   true,
-		"Axiom":     true,
-		"GMGN":      true,
-		"BullX":     true,
-		"Maestro":   true,
-		"Bloom":     true,
-		"BananaGun": true,
-		"Raybot":    true,
+		"BONKbot":    true,
+		"Axiom":      true,
+		"GMGN":       true,
+		"BullX":      true,
+		"Maestro":    true,
+		"Bloom":      true,
+		"BananaGun":  true,
+		"Raybot":     true,
+		"Photon":     true,
+		"Padre":      true,
+		"PepeBoost":  true,
+		"STBot":      true,
+		"MevX":       true,
 	}
 
 	for _, name := range names {

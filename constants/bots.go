@@ -5,6 +5,12 @@ package constants
 var BOT_FEE_ACCOUNTS = map[string][]string{
 	"Trojan": {
 		"9yMwSPk9mrXSN7yDHUuZurAh1sjbJsfpUqjZ7SvVtdco",
+		"BBYXdwhqbCxVRVtnuMTTxh8biNisz3ZxsnHfr44jXytR",
+		"92Med3qeK7duC5iiYsHX38H2f2twJfRsSx93oNrza2VH",
+		"2jwHNxavSoMZMEDbT1eV9PcPt5dDcayCqM6MkgaPpmWQ",
+		"65gDv7pZQCZELsNpNYSFEBtNFpWZAbxmRFB6BGMqFkHH",
+		"BWgb8wR1FEGiu1jCDSKuHKf752W27b4iN6SvoNCiK4qp",
+		"8jgg7moFJkHyTtAv9M6RBSPMp2oXeXhuiUMKW8YbYCWn",
 	},
 	"BONKbot": {
 		"ZG98FUCjb8mJ824Gbs6RsgVmr1FhXb2oNiJHa2dwmPd",
@@ -57,9 +63,35 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 		"47hEzz83VFR23rLTEeVm9A7eFzjJwjvdupPPmX3cePqF",
 		"4BBNEVRgrxVKv9f7pMNE788XM1tt379X9vNjpDH2KCL7",
 		"8r2hZoDfk5hDWJ1sDujAi2Qr45ZyZw5EQxAXiMZWLKh2",
+		"Cj297UauzMX64FU9dKJZRUBWszJ7tEWpVheasq4CfATV",
+		"HKMh8nV3ysSofRi23LsfVGLGQKB415QAEfZT96kCcVj4",
+		"7tQiiBdKoScWQkB1RmVuML7DBGnR31cuKPEtMM7Vy5SA",
 	},
 	"Raybot": {
 		"4mih95RmBqfHYvEfqq6uGGLp1Fr3gVS3VNSEa3JVRfQK",
+	},
+	"Photon": {
+		"AVUCZyuT35YSuj4RH7fwiyPu82Djn2Hfg7y2ND2XcnZH",
+	},
+	"Padre": {
+		"J5XGHmzrRmnYWbmw45DbYkdZAU2bwERFZ11qCDXPvFB5",
+		"DoAsxPQgiyAxyaJNvpAAUb2ups6rbJRdYrCPyWxwRxBb",
+	},
+	"PepeBoost": {
+		"G9PhF9C9H83mAjjkdJz4MDqkufiTPMJkx7TnKE1kFyCp",
+	},
+	"STBot": {
+		"F34kcgMgCF7mYWkwLN3WN7KrFprr2NbwxuLvXx4fbztj",
+		"96aFQc9qyqpjMfqdUeurZVYRrrwPJG2uPV6pceu4B1yb",
+		"BTQyUXhxiLrFPD5JUANCwg4ViibmNY39McmWk4bVNxLA",
+		"4vfFG2xGZsjXQgA6ZCTzA1PgUGLppFHY9eGnh3ZVGUuz",
+		"A7XTexV13EPnhtH55qhT7qmFkgYCMAMnfXk89VWu9PCJ",
+		"GreGavLfh5sK1BeQ2WYvmk352wbyNNzQdCmqWCV8QSib",
+	},
+	"MevX": {
+		"3kxSQybWEeQZsMuNWMRJH4TxrhwoDwfv41TNMLRzFP5A",
+		"BS3CyJ9rRC4Tp8G7f86r6hGvuu3XdrVGNVpbNM9U5WRZ",
+		"4Lpvp1q69SHentfYcMBUrkgvppeEx6ovHCSYjg4UYXiq",
 	},
 }
 

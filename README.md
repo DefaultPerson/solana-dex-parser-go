@@ -6,7 +6,7 @@
 
 A high-performance Go library for parsing Solana DEX transactions.
 
-Supports **23 full parsers** + **55 routing detection** (program IDs), including Jupiter, Raydium, Orca, Meteora, Pumpfun, Pumpswap, and **9 trading bots** with fee detection + **6 bot programs**.
+Supports **23 full parsers** + **55 routing detection** (program IDs), including Jupiter, Raydium, Orca, Meteora, Pumpfun, Pumpswap, and **14 trading bots** with fee detection + **6 bot programs**.
 
 ## Installation
 
@@ -115,6 +115,11 @@ func main() {
 | **Bloom** | ✅ | ✅ Parser |
 | **BananaGun** | ✅ | ✅ Parser |
 | **Raybot** | ✅ | ✅ Parser |
+| **Photon** | ✅ | ✅ Parser |
+| **Padre** | ✅ | ✅ Parser |
+| **PepeBoost** | ✅ | ✅ Parser |
+| **STBot** | ✅ | ✅ Parser |
+| **MevX** | ✅ | ✅ Parser |
 
 ### Trading Bots (Program Detection)
 | Bot | Detection | Status |
