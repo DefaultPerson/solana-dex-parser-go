@@ -226,19 +226,19 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 	var amms []string
 	for _, trade := range trades {
 		for _, name := range append([]string{trade.AMM}, trade.AMMs...) {
-			if name != "" && !containsString(amms, name) {
+			if isProgramName(name) && !containsString(amms, name) {
 				amms = append(amms, name)
 			}
 		}
 	}
 
 	amm := inputTrade.AMM
-	if amm == "" && len(amms) > 0 {
+	if !isProgramName(amm) && len(amms) > 0 {
 		amm = amms[0]
 	}
 	route := inputTrade.Route
 	if dexInfo != nil {
-		if dexInfo.AMM != "" {
+		if isProgramName(dexInfo.AMM) {
 			amm = dexInfo.AMM
 		}
 		if dexInfo.Route != "" {
@@ -298,6 +298,15 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 		Fee:         fee,
 		Fees:        fees,
 	}
+}
+
+// unknownProgramName is the name GetProgramName gives programs that are not
+// in DEX_PROGRAMS (upstream parity)
+const unknownProgramName = "Unknown"
+
+// isProgramName reports whether name identifies a known program
+func isProgramName(name string) bool {
+	return name != "" && name != unknownProgramName
 }
 
 // isZeroAmount reports whether a raw amount is empty or zero
