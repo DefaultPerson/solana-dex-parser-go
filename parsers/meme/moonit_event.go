@@ -53,7 +53,7 @@ func (p *MoonitEventParser) ParseInstructions(instructions []types.ClassifiedIns
 	var events []*types.MemeEvent
 
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
-	types.SortInstructionsByExecution(ordered)
+	utils.SortInstructionsByExecution(ordered)
 
 	for _, ci := range ordered {
 		if ci.ProgramId != constants.DEX_PROGRAMS.MOONIT.ID {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // tradeInfoParams holds parameters for creating trade info
@@ -47,7 +48,7 @@ func getPumpfunTradeInfo(event *types.MemeEvent, info tradeInfoParams) types.Tra
 	// the quote mint; Fee is their sum
 	if len(event.Fees) > 0 {
 		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-		trade.Fee = types.TotalFee(event.Fees)
+		trade.Fee = utils.TotalFee(event.Fees)
 	}
 
 	return trade
@@ -113,7 +114,7 @@ func pumpswapTradeInfo(
 		programId = constants.DEX_PROGRAMS.PUMP_SWAP.ID
 	}
 
-	total := types.SumFeeAmounts(fees)
+	total := utils.SumFeeAmounts(fees)
 	return types.TradeInfo{
 		Type: tradeType,
 		Pool: []string{pool},

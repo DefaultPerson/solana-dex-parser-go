@@ -5,6 +5,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // MeteoraDBCParser parses Meteora Dynamic Bonding Curve transactions
@@ -73,7 +74,7 @@ func (p *MeteoraDBCParser) createTradeInfo(event *types.MemeEvent) *types.TradeI
 	// Fees from the swap event (trading, protocol, referral), in one mint
 	if len(event.Fees) > 0 {
 		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-		trade.Fee = types.TotalFee(event.Fees)
+		trade.Fee = utils.TotalFee(event.Fees)
 	}
 
 	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)

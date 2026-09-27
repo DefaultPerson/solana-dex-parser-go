@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"sort"
+
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
@@ -104,4 +106,16 @@ func CPIGroup(a *adapter.TransactionAdapter, ci types.ClassifiedInstruction) (fi
 		last = j
 	}
 	return first, last
+}
+
+// SortInstructionsByExecution sorts instructions in place in execution
+// order: an outer instruction first, then its inner instructions by inner
+// index. The sort is stable.
+func SortInstructionsByExecution(instructions []types.ClassifiedInstruction) {
+	sort.SliceStable(instructions, func(i, j int) bool {
+		if instructions[i].OuterIndex != instructions[j].OuterIndex {
+			return instructions[i].OuterIndex < instructions[j].OuterIndex
+		}
+		return instructions[i].InnerIndex < instructions[j].InnerIndex
+	})
 }

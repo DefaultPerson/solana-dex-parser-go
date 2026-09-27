@@ -105,7 +105,7 @@ func (p *SugarEventParser) ParseInstructions(instructions []types.ClassifiedInst
 	var events []*types.MemeEvent
 
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
-	types.SortInstructionsByExecution(ordered)
+	utils.SortInstructionsByExecution(ordered)
 
 	for _, ci := range ordered {
 		if ci.ProgramId != constants.DEX_PROGRAMS.SUGAR.ID {

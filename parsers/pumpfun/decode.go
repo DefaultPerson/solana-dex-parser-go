@@ -113,7 +113,7 @@ func isEventData(data []byte) bool {
 func executionOrder(instructions []types.ClassifiedInstruction) []types.ClassifiedInstruction {
 	ordered := make([]types.ClassifiedInstruction, len(instructions))
 	copy(ordered, instructions)
-	types.SortInstructionsByExecution(ordered)
+	utils.SortInstructionsByExecution(ordered)
 	return ordered
 }
 

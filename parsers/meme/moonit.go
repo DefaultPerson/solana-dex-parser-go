@@ -5,6 +5,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // MoonitParser parses Moonit (MoonShot) transactions
@@ -55,7 +56,7 @@ func (p *MoonitParser) ProcessTrades() []types.TradeInfo {
 		}
 		if len(event.Fees) > 0 {
 			trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-			trade.Fee = types.TotalFee(event.Fees)
+			trade.Fee = utils.TotalFee(event.Fees)
 		}
 		trades = append(trades, *p.Utils.AttachTokenTransferInfo(trade, p.TransferActions))
 	}

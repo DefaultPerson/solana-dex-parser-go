@@ -83,7 +83,7 @@ func (p *RaydiumLaunchpadParser) createTradeInfo(event *types.MemeEvent) *types.
 	// the quote mint; Fee is their exact sum
 	if len(event.Fees) > 0 {
 		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-		trade.Fee = types.TotalFee(event.Fees)
+		trade.Fee = utils.TotalFee(event.Fees)
 	}
 
 	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
@@ -139,7 +139,7 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 			ordered = append(ordered, ci)
 		}
 	}
-	types.SortInstructionsByExecution(ordered)
+	utils.SortInstructionsByExecution(ordered)
 
 	for pos, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)

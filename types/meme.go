@@ -1,10 +1,5 @@
 package types
 
-import (
-	"math/big"
-	"sort"
-)
-
 // TradeTypeBuyAndBurn is the MemeEvent type of a protocol buy-and-burn
 // (PumpSwap boost_buy_and_burn): the protocol buys the coin with its boost
 // vault and burns it. It is not a user trade and never produces a TradeInfo.
@@ -86,46 +81,4 @@ type MemeCurveParams struct {
 	TotalLockedAmount     string `json:"totalLockedAmount,omitempty"`     // Vesting: locked base amount
 	CliffPeriod           string `json:"cliffPeriod,omitempty"`           // Vesting: cliff period (seconds)
 	UnlockPeriod          string `json:"unlockPeriod,omitempty"`          // Vesting: unlock period (seconds)
-}
-
-// SumFeeAmounts returns the exact sum of the raw amounts of fee components
-// (an amount that is not an integer counts as 0).
-func SumFeeAmounts(fees []FeeInfo) *big.Int {
-	total := new(big.Int)
-	for _, f := range fees {
-		if v, ok := new(big.Int).SetString(f.AmountRaw, 10); ok {
-			total.Add(total, v)
-		}
-	}
-	return total
-}
-
-// TotalFee returns fee components charged in one mint as a single fee: the
-// exact sum of their raw amounts, with the mint, decimals and dex of the
-// first component. It returns nil when there are no components.
-func TotalFee(fees []FeeInfo) *FeeInfo {
-	if len(fees) == 0 {
-		return nil
-	}
-	total := SumFeeAmounts(fees)
-	first := fees[0]
-	return &FeeInfo{
-		Mint:      first.Mint,
-		Amount:    ConvertToUIAmount(total, first.Decimals),
-		AmountRaw: total.String(),
-		Decimals:  first.Decimals,
-		Dex:       first.Dex,
-	}
-}
-
-// SortInstructionsByExecution sorts instructions in place in execution
-// order: an outer instruction first, then its inner instructions by inner
-// index. The sort is stable.
-func SortInstructionsByExecution(instructions []ClassifiedInstruction) {
-	sort.SliceStable(instructions, func(i, j int) bool {
-		if instructions[i].OuterIndex != instructions[j].OuterIndex {
-			return instructions[i].OuterIndex < instructions[j].OuterIndex
-		}
-		return instructions[i].InnerIndex < instructions[j].InnerIndex
-	})
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // constants-12: the protocol, reserved (mayhem) and buyback fee recipients
@@ -39,10 +40,10 @@ func TestMemePumpFeeRecipientsAreFeeAccounts(t *testing.T) {
 // components (beyond uint64 and float64 precision), in the first
 // component's mint, and nil without components.
 func TestMemeTotalFee(t *testing.T) {
-	if types.TotalFee(nil) != nil {
+	if utils.TotalFee(nil) != nil {
 		t.Errorf("TotalFee(nil) is not nil")
 	}
-	fee := types.TotalFee([]types.FeeInfo{
+	fee := utils.TotalFee([]types.FeeInfo{
 		{Mint: solMint, AmountRaw: "18446744073709551615", Decimals: 9, Dex: "Moonit", Type: "dex"},
 		{Mint: solMint, AmountRaw: "3", Decimals: 9, Dex: "Moonit", Type: "helio"},
 	})

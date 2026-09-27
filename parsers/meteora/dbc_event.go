@@ -61,7 +61,7 @@ func (p *MeteoraDBCEventParser) ParseInstructions(instructions []types.Classifie
 			ordered = append(ordered, ci)
 		}
 	}
-	types.SortInstructionsByExecution(ordered)
+	utils.SortInstructionsByExecution(ordered)
 
 	for pos, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)

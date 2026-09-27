@@ -283,7 +283,7 @@ func (p *PumpfunEventParser) tradeEventToMeme(evt *pumpfunTradeEvent, ordered []
 	if evt.Cashback > 0 {
 		fees = append(fees, feeInfo(quoteMint, u64(evt.Cashback), quoteDecimals, dex, "cashback", evt.User))
 	}
-	totalFee := types.SumFeeAmounts(fees)
+	totalFee := utils.SumFeeAmounts(fees)
 
 	userQuote := new(big.Int).Set(quoteAmount)
 	if evt.IsBuy {
