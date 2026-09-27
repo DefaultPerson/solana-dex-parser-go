@@ -70,7 +70,7 @@ func ProcessTransfer(ix *adapter.UnifiedInstruction, idx string, adapt *adapter.
 	info := ix.Parsed.Info
 	source := getStringFromMap(info, "source")
 	destination := getStringFromMap(info, "destination")
-	authority := getStringFromMap(info, "authority")
+	authority := parsedAuthority(info, "authority", "multisigAuthority")
 	amount := getStringFromMap(info, "amount")
 
 	// Get mint from token map, preferring a non-SOL mint of either side
@@ -165,7 +165,7 @@ func ProcessTransferCheck(ix *adapter.UnifiedInstruction, idx string, adapt *ada
 	info := ix.Parsed.Info
 	source := getStringFromMap(info, "source")
 	destination := getStringFromMap(info, "destination")
-	authority := getStringFromMap(info, "authority")
+	authority := parsedAuthority(info, "authority", "multisigAuthority")
 	mint := getStringFromMap(info, "mint")
 
 	decimals := adapt.GetTokenDecimals(mint)
@@ -236,10 +236,7 @@ func ProcessExtraAction(ix *adapter.UnifiedInstruction, idx string, adapt *adapt
 			source = getStringFromMap(info, "account")
 		}
 	}
-	authority := getStringFromMap(info, "authority")
-	if authority == "" {
-		authority = getStringFromMap(info, "mintAuthority")
-	}
+	authority := parsedAuthority(info, "authority", "multisigAuthority", "mintAuthority", "multisigMintAuthority")
 	mint := getStringFromMap(info, "mint")
 
 	if mint == "" {
@@ -578,6 +575,21 @@ func ProcessCompiledExtraAction(ix *adapter.UnifiedInstruction, idx string, adap
 // Helper to get string from map. JSON numbers (json.Number, float64) and Go
 // integers are formatted as exact decimal strings, so numeric fields such as
 // jsonParsed system transfer lamports are read as well.
+// parsedAuthority returns the signing authority of a jsonParsed token
+// instruction: the first of keys that is set. The RPC names a multisig
+// authority "multisigAuthority" ("multisigMintAuthority" for mints) with its
+// "signers", and it does so whenever accounts follow the authority, which
+// every Token-2022 transfer-hook transfer has; the "json" encoding's
+// authority is that same account.
+func parsedAuthority(info map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if v := getStringFromMap(info, key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func getStringFromMap(m map[string]interface{}, key string) string {
 	v, ok := m[key]
 	if !ok {
