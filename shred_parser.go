@@ -343,8 +343,13 @@ type PumpfunCreateData struct {
 	// QuoteMint is the curve's quote mint: WSOL, or the quote_mint remaining
 	// account of create_v2
 	QuoteMint string `json:"quoteMint,omitempty"`
-	// IsMayhemMode is the create_v2 is_mayhem_mode argument
-	IsMayhemMode bool `json:"isMayhemMode,omitempty"`
+	// IsMayhemMode, IsCashbackEnabled, CreatorFeeBps and IsHolderReward are
+	// the create_v2 flags (fixed-size OptionBool/OptionU64 values; older
+	// create_v2 instructions end after the first ones and leave the rest 0)
+	IsMayhemMode      bool   `json:"isMayhemMode,omitempty"`
+	IsCashbackEnabled bool   `json:"isCashbackEnabled,omitempty"`
+	CreatorFeeBps     uint64 `json:"creatorFeeBps,omitempty"`
+	IsHolderReward    bool   `json:"isHolderReward,omitempty"`
 	// Instruction is the instruction name (create, create_v2)
 	Instruction string `json:"instruction,omitempty"`
 }
@@ -644,8 +649,8 @@ func (p *PumpfunInstructionParser) decodeCreate(accounts []string, data []byte) 
 }
 
 // decodeCreateV2 decodes create_v2: accounts 0 mint, 2 bonding_curve, 5 user;
-// args name, symbol, uri, creator, is_mayhem_mode and fixed-size option
-// flags. A non-SOL curve passes quote_mint, associated_quote_bonding_curve and
+// args name, symbol, uri, creator, is_mayhem_mode and the fixed-size
+// is_cashback_enabled, creator_fee_bps and is_holder_reward. A non-SOL curve passes quote_mint, associated_quote_bonding_curve and
 // quote_token_program as remaining accounts 16-18; without them the quote is
 // SOL.
 func (p *PumpfunInstructionParser) decodeCreateV2(accounts []string, data []byte) *PumpfunCreateData {
@@ -659,9 +664,7 @@ func (p *PumpfunInstructionParser) decodeCreateV2(accounts []string, data []byte
 	if !ok {
 		return nil
 	}
-	mayhem, _ := reader.ReadBool()
-
-	return &PumpfunCreateData{
+	create := &PumpfunCreateData{
 		Name:         name,
 		Symbol:       symbol,
 		URI:          uri,
@@ -670,9 +673,21 @@ func (p *PumpfunInstructionParser) decodeCreateV2(accounts []string, data []byte
 		User:         accounts[5],
 		Creator:      creator,
 		QuoteMint:    quoteOrSOL(accountAt(accounts, 16), len(accounts) >= 19),
-		IsMayhemMode: mayhem,
 		Instruction:  "create_v2",
 	}
+	if reader.Remaining() >= 1 {
+		create.IsMayhemMode, _ = reader.ReadBool()
+	}
+	if reader.Remaining() >= 1 {
+		create.IsCashbackEnabled, _ = reader.ReadBool()
+	}
+	if reader.Remaining() >= 8 {
+		create.CreatorFeeBps, _ = reader.ReadU64()
+	}
+	if reader.Remaining() >= 1 {
+		create.IsHolderReward, _ = reader.ReadBool()
+	}
+	return create
 }
 
 // decodeMigrate decodes migrate: accounts 2 mint, 3 bonding_curve, 5 user,

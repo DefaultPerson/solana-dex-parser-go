@@ -113,6 +113,15 @@ func TestShredPumpfunV2Instructions(t *testing.T) {
 	if cm := oneTypedAt(t, res, constants.DEX_PROGRAMS.PUMP_FUN.ID, utils.FormatIdx(create.outer, -1)).MemeEvent; cm.QuoteMint != usdcMint {
 		t.Errorf("create_v2 quote = %s, want USDC", cm.QuoteMint)
 	}
+	// create_v2 flags: the args end with is_mayhem_mode 0, is_cashback_enabled 1
+	if tail := create.data[len(create.data)-2:]; tail[0] != 0 || tail[1] != 1 {
+		t.Fatalf("fixture: create_v2 flags %x", tail)
+	}
+	for _, e := range res.Instructions[constants.DEX_PROGRAMS.PUMP_FUN.Name] {
+		if c, ok := e.(*dexparser.PumpfunInstruction).Data.(*dexparser.PumpfunCreateData); ok && (c.IsMayhemMode || !c.IsCashbackEnabled || c.Creator != buy.accounts[13]) {
+			t.Errorf("create_v2 flags/creator = %+v", c)
+		}
+	}
 
 	// create_v2 + buy_exact_quote_in_v2 (spendable_quote_in, min_tokens_out)
 	tx = loadFixture(t, sigPumpCreateV2ExactQuote)
