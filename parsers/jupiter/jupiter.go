@@ -14,6 +14,10 @@ import (
 // JupiterParser parses Jupiter V6 swap transactions
 type JupiterParser struct {
 	*parsers.BaseParser
+
+	// hops maps the idx of each hop trade to the AMM instruction that
+	// executed the hop (filled by ProcessTrades)
+	hops map[string]types.ClassifiedInstruction
 }
 
 // NewJupiterParser creates a new Jupiter parser
@@ -38,6 +42,7 @@ func NewJupiterParser(
 func (p *JupiterParser) ProcessTrades() []types.TradeInfo {
 	var trades []types.TradeInfo
 	var feeEvents []jupiterFeeEventAt
+	p.hops = make(map[string]types.ClassifiedInstruction)
 
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId != constants.DEX_PROGRAMS.JUPITER.ID {
@@ -57,16 +62,22 @@ func (p *JupiterParser) ProcessTrades() []types.TradeInfo {
 			}
 			event := layout.ToSwapEvent()
 			event.Idx = idx
+			if amm, ok := p.legacyHopInstruction(ci, event.AMM); ok {
+				p.hops[idx] = amm
+			}
 			trades = p.appendHopTrade(trades, event, p.routeUser(ci))
 		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER.SWAPS_EVENT):
 			events, err := ParseJupiterSwapsEvent(data[16:])
 			if err != nil {
 				continue
 			}
-			hopIdx := p.hopIndexes(ci, events)
+			hopIdx, hopInner := p.hopIndexes(ci, events)
 			user := p.routeUser(ci)
 			for i, event := range events {
 				event.Idx = hopIdx[i]
+				if hopInner[i] >= 0 {
+					p.hops[event.Idx] = p.innerInstruction(ci.OuterIndex, hopInner[i])
+				}
 				trades = p.appendHopTrade(trades, event, user)
 			}
 		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER.FEE_EVENT):
@@ -81,6 +92,46 @@ func (p *JupiterParser) ProcessTrades() []types.TradeInfo {
 	trades = utils.SortTradesByIdx(trades)
 	p.attachFeeEvents(trades, feeEvents)
 	return trades
+}
+
+// HopInstruction returns the AMM instruction that executed the hop trade at
+// idx (a trade of the last ProcessTrades call); ok is false when it was not
+// identified. A legacy route logs a SwapEvent after each hop's AMM
+// instruction; a *_v2 route's hops are matched to its AMM instructions.
+func (p *JupiterParser) HopInstruction(idx string) (types.ClassifiedInstruction, bool) {
+	ci, ok := p.hops[idx]
+	return ci, ok
+}
+
+// legacyHopInstruction returns the AMM instruction of the hop a legacy
+// SwapEvent ci reports: the nearest preceding instruction of amm in the same
+// outer instruction, at the event's stack height (both are invoked by the
+// route) when heights are known
+func (p *JupiterParser) legacyHopInstruction(ci types.ClassifiedInstruction, amm string) (types.ClassifiedInstruction, bool) {
+	height := p.Adapter.GetInstructionStackHeight(ci.OuterIndex, ci.InnerIndex)
+	for j := ci.InnerIndex - 1; j >= 0; j-- {
+		ix := p.Adapter.GetInnerInstruction(ci.OuterIndex, j)
+		if p.Adapter.GetInstructionProgramId(ix) != amm {
+			continue
+		}
+		if h := adapter.InstructionStackHeight(ix); height > 0 && h > 0 && h != height {
+			continue
+		}
+		return p.innerInstruction(ci.OuterIndex, j), true
+	}
+	return types.ClassifiedInstruction{}, false
+}
+
+// innerInstruction returns the classified inner instruction (outer, inner)
+func (p *JupiterParser) innerInstruction(outer, inner int) types.ClassifiedInstruction {
+	ix := p.Adapter.GetInnerInstruction(outer, inner)
+	return types.ClassifiedInstruction{
+		Instruction: ix,
+		ProgramId:   p.Adapter.GetInstructionProgramId(ix),
+		OuterIndex:  outer,
+		InnerIndex:  inner,
+		StackHeight: adapter.InstructionStackHeight(ix),
+	}
 }
 
 // jupiterFeeEventAt is a decoded FeeEvent with its position in the transaction
@@ -142,15 +193,18 @@ func (p *JupiterParser) routeUser(ci types.ClassifiedInstruction) string {
 // in order against the instructions between the route instruction that
 // emitted the event and the event itself. A hop whose AMM instruction is not
 // found gets a distinct idx of its own (see fallback below), so that the
-// trade dedupe by idx never merges two hops.
-func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*JupiterSwapEvent) []string {
+// trade dedupe by idx never merges two hops. matched holds the inner index
+// of each hop's AMM instruction, -1 when it was not found.
+func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*JupiterSwapEvent) (result []string, matched []int) {
 	eventIdx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
-	result := make([]string, len(events))
+	result = make([]string, len(events))
+	matched = make([]int, len(events)) // inner index of each hop, -1 when unmatched
 	for i := range result {
 		result[i] = eventIdx
+		matched[i] = -1
 	}
 	if ci.InnerIndex < 0 {
-		return result
+		return result, matched
 	}
 
 	var inner []interface{}
@@ -176,7 +230,6 @@ func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*Jup
 	}
 
 	start := cursor
-	matched := make([]int, len(events)) // inner index of each hop, -1 when unmatched
 	used := make(map[int]bool)
 	for i, event := range events {
 		matched[i] = -1
@@ -216,7 +269,7 @@ func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*Jup
 		result[i] = utils.FormatIdx(ci.OuterIndex, j)
 		prev = j + 1
 	}
-	return result
+	return result, matched
 }
 
 // attachFeeEvents sets each FeeEvent as the fee of a hop of the same outer

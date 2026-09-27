@@ -2,6 +2,7 @@ package dexparser
 
 import (
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 	"sync"
@@ -678,6 +679,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 			}
 			isOrderProgram := containsString(jupiterOrderProgramIds, programId)
 			parser := factory(adapt, dexInfoFor(programId), transferActions, instrClassifier.GetInstructions(programId))
+			hops, _ := parser.(hopInstructionSource)
 			for _, trade := range parser.ProcessTrades() {
 				outer, inner := utils.SplitIdx(trade.Idx)
 				if owner, ok := coveredBy[outer]; ok && owner != programId {
@@ -692,6 +694,13 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 					orderFilled = true
 				} else if orderFilled {
 					continue // keeper route of an order fill
+				}
+				if hops != nil {
+					if ci, ok := hops.HopInstruction(trade.Idx); ok {
+						if warning := dp.enrichHop(adapt, instrClassifier, transferActions, dexInfoFor, &trade, ci); warning != "" {
+							result.Warnings = append(result.Warnings, warning)
+						}
+					}
 				}
 				trades = append(trades, trade)
 			}
@@ -906,6 +915,118 @@ func jupiterCPIRange(adapt *adapter.TransactionAdapter, programId string, outer,
 		last = j
 	}
 	return root, last, true
+}
+
+// hopInstructionSource is implemented by route parsers whose trades are hops
+// executed by venue instructions (jupiter.JupiterParser): it names the venue
+// instruction of a hop trade
+type hopInstructionSource interface {
+	HopInstruction(idx string) (types.ClassifiedInstruction, bool)
+}
+
+// enrichHop completes a route hop trade from the trade the venue's own
+// parser reports for the hop's instruction ci: the pool, the trade type (the
+// venue knows its quote side, e.g. a launchpad quoted in a token that is
+// neither SOL nor a stablecoin) and the venue's fees (Token-2022 transfer
+// fees are not the venue's and are left out). The amounts stay the route's
+// (its swap event); when the venue's amounts differ from them, a warning is
+// returned. A side whose mint moved through the Token-2022 program is not
+// compared: for a transfer-fee mint the route reports what the user sent
+// and received, while venues report the gross or the net amount. Nothing
+// changes when the venue has no registered trade parser or its trade is for
+// other mints.
+func (dp *DexParser) enrichHop(
+	adapt *adapter.TransactionAdapter,
+	instrClassifier *classifier.InstructionClassifier,
+	transferActions map[string][]types.TransferData,
+	dexInfoFor func(string) types.DexInfo,
+	hop *types.TradeInfo,
+	ci types.ClassifiedInstruction,
+) string {
+	if containsString(jupiterProgramIds, ci.ProgramId) {
+		return ""
+	}
+	factory, ok := dp.tradeParserFactories[ci.ProgramId]
+	if !ok {
+		return ""
+	}
+	// The hop's instruction and the events it emitted (its program's
+	// instructions inside its CPI group)
+	first, last := utils.CPIGroup(adapt, ci)
+	instructions := []types.ClassifiedInstruction{ci}
+	for _, other := range instrClassifier.GetInstructions(ci.ProgramId) {
+		if other.OuterIndex == ci.OuterIndex && other.InnerIndex >= first && other.InnerIndex <= last {
+			instructions = append(instructions, other)
+		}
+	}
+	var venue *types.TradeInfo
+	for _, trade := range factory(adapt, dexInfoFor(ci.ProgramId), transferActions, instructions).ProcessTrades() {
+		if outer, inner := utils.SplitIdx(trade.Idx); outer == ci.OuterIndex && (inner == ci.InnerIndex || (inner >= first && inner <= last)) {
+			trade := trade
+			venue = &trade
+			break
+		}
+	}
+	if venue == nil || venue.InputToken.Mint != hop.InputToken.Mint || venue.OutputToken.Mint != hop.OutputToken.Mint {
+		return ""
+	}
+
+	// The route's own amounts: the event's, before the route's platform fee
+	// (added to the first hop's input or taken from the last hop's output)
+	routeIn, okIn := new(big.Int).SetString(hop.InputToken.AmountRaw, 10)
+	routeOut, okOut := new(big.Int).SetString(hop.OutputToken.AmountRaw, 10)
+	for _, f := range utils.FeeComponents(hop) {
+		v, ok := new(big.Int).SetString(f.AmountRaw, 10)
+		if !ok || f.Type != "platform" || f.Dex != constants.DEX_PROGRAMS.JUPITER.Name {
+			continue
+		}
+		switch f.Mint {
+		case hop.InputToken.Mint:
+			routeIn.Sub(routeIn, v)
+		case hop.OutputToken.Mint:
+			routeOut.Add(routeOut, v)
+		}
+	}
+
+	if len(venue.Pool) > 0 {
+		hop.Pool = append([]string(nil), venue.Pool...)
+	}
+	hop.Type = venue.Type
+	// The venue's fees, in the venue's own Fee/Fees form when the hop has
+	// none (the route's platform fee), else added to Fees once each
+	venueFees := venue.Fees
+	if hop.Fee == nil {
+		if venue.Fee != nil {
+			fee := *venue.Fee
+			hop.Fee = &fee
+		}
+	} else {
+		venueFees = utils.FeeComponents(venue)
+	}
+	for _, f := range venueFees {
+		if f.Type != "transferFee" {
+			hop.Fees = append(hop.Fees, f)
+		}
+	}
+
+	token2022 := make(map[string]bool)
+	for _, transfers := range transferActions {
+		for _, t := range transfers {
+			if outer, inner := utils.SplitIdx(t.Idx); outer == ci.OuterIndex && inner >= first && inner <= last &&
+				t.ProgramId == constants.TOKEN_2022_PROGRAM_ID {
+				token2022[t.Info.Mint] = true
+			}
+		}
+	}
+	venueIn, okVenueIn := new(big.Int).SetString(venue.InputToken.AmountRaw, 10)
+	venueOut, okVenueOut := new(big.Int).SetString(venue.OutputToken.AmountRaw, 10)
+	inDiffers := okIn && okVenueIn && !token2022[hop.InputToken.Mint] && venueIn.Cmp(routeIn) != 0
+	outDiffers := okOut && okVenueOut && !token2022[hop.OutputToken.Mint] && venueOut.Cmp(routeOut) != 0
+	if inDiffers || outDiffers {
+		return fmt.Sprintf("hop %s (%s): the venue reports %s -> %s, the route's event %s -> %s; the event amounts are kept",
+			hop.Idx, hop.AMM, venue.InputToken.AmountRaw, venue.OutputToken.AmountRaw, routeIn, routeOut)
+	}
+	return ""
 }
 
 // routeAggregateTrades returns the trades the aggregate trade is built from:
