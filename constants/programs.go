@@ -750,8 +750,7 @@ var FEE_ACCOUNTS = []string{
 	// Jupiter Partner Referral Fee Vault
 	"45ruCyfdRkWpRNGEqWzjCiXRHkZs8WXCLQ67Pnpye7Hp",
 
-	// Pumpfun
-	"39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg",
+	// Pumpfun (39azUY... is the migrator / withdraw_authority, see PUMPFUN_MIGRATORS)
 	"FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz",
 	"G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
 	"7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX",
@@ -770,6 +769,26 @@ var FEE_ACCOUNTS = []string{
 
 	// Meteora Fee Vault
 	"CdQTNULjDiTsvyR5UKjYBMqWvYpxXj6HY4m6atm2hErk",
+
+	// Pump.fun Global (4wTV1Ymi...) and PumpSwap GlobalConfig (ADyA8hde...), decoded on-chain
+	// 2026-09-27: reserved (mayhem mode) fee recipients, identical in both accounts
+	"GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS",
+	"4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6",
+	"8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR",
+	"4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH",
+	"8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6",
+	"Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk",
+	"463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq",
+	"6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA",
+	// buyback fee recipients, identical in both accounts
+	"5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+	"9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+	"GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+	"3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+	"5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+	"EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+	"5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+	"A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
 }
 
 // dexProgramMap is a map for quick lookup of DEX programs by ID
