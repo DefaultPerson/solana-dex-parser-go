@@ -310,3 +310,88 @@ func TestFinalCLMMOneSidedAdd(t *testing.T) {
 	}
 }
 
+// dlmmReserveFlows sums the inner transferChecked amounts paid out of (or,
+// for deposits, into) the reserve accounts of the outer DLMM instruction at
+// outer, by mint, from the raw fixture
+func dlmmReserveFlows(t *testing.T, tx *adapterTx, outer int, reserves map[string]bool) map[string]string {
+	t.Helper()
+	sums := map[string]uint64{}
+	for _, ix := range fixtureIxs(t, tx) {
+		if ix.outer != outer || ix.inner < 0 || ix.programId != constants.TOKEN_PROGRAM_ID || len(ix.data) != 10 || ix.data[0] != 12 {
+			continue
+		}
+		// transferChecked: source, mint, destination, authority
+		if reserves[ix.accounts[0]] || reserves[ix.accounts[2]] {
+			sums[ix.accounts[1]] += le64At(ix.data, 1)
+		}
+	}
+	out := map[string]string{}
+	for mint, v := range sums {
+		out[mint] = u64str(v)
+	}
+	return out
+}
+
+// TestFinalDLMMLiquiditySides: DLMM liquidity events put the quote mint in
+// token0 or token1 depending on how many tokens moved (flipped between two
+// removes of one pool in one transaction; a one-side add had USDC as token0
+// and an empty token1). Truth: the IDL accounts (reserve_x/y 5/6,
+// token_x/y_mint 7/8; one-side adds: reserve 4, token_mint 5) and the
+// transfers out of or into the reserves; the quote mint is token1. amm-4.
+func TestFinalDLMMLiquiditySides(t *testing.T) {
+	for _, c := range []struct {
+		sig      string
+		outer    int
+		oneSide  bool
+		wantType types.PoolEventType
+	}{
+		{"2mNBApzw9HXF3TJXsLoBtSxc3DqC6XVYbtwchmyUA9mvt9oVamYzpHa9axF62y9aNnXMzyKTzpfCcsHNsLgUcSnE", 0, false, types.PoolEventTypeRemove},
+		{"2mNBApzw9HXF3TJXsLoBtSxc3DqC6XVYbtwchmyUA9mvt9oVamYzpHa9axF62y9aNnXMzyKTzpfCcsHNsLgUcSnE", 1, false, types.PoolEventTypeRemove},
+		{"4HAaBUNWYGQZsEf1VJAvzAtF6sLL8pb7CEMeBxNdivrWwP6XhNVNBH446NpoVtVyFoGuT1bu8jSpVHa8xe1yXtf", 2, true, types.PoolEventTypeAdd},
+	} {
+		tx, res := parseFixture(t, c.sig, nil)
+		var ix rawIx
+		for _, x := range fixtureIxs(t, tx) {
+			if x.programId == constants.DEX_PROGRAMS.METEORA.ID && x.outer == c.outer && x.inner < 0 {
+				ix = x
+			}
+		}
+		var mints []string
+		reserves := map[string]bool{}
+		if c.oneSide {
+			mints, reserves[ix.accounts[4]] = []string{ix.accounts[5]}, true
+		} else {
+			mints, reserves[ix.accounts[5]], reserves[ix.accounts[6]] = []string{ix.accounts[7], ix.accounts[8]}, true, true
+		}
+		flows := dlmmReserveFlows(t, tx, c.outer, reserves)
+		var ev *types.PoolEvent
+		for i := range res.Liquidities {
+			if res.Liquidities[i].Idx == fmtIdx(c.outer, -1) {
+				ev = &res.Liquidities[i]
+			}
+		}
+		if ev == nil || ev.Type != c.wantType {
+			t.Fatalf("%s %d: event %+v, want %s", c.sig[:8], c.outer, ev, c.wantType)
+		}
+		got := map[string]string{ev.Token0Mint: ev.Token0AmountRaw, ev.Token1Mint: ev.Token1AmountRaw}
+		for _, mint := range mints {
+			want := flows[mint]
+			if want == "" {
+				want = "0"
+			}
+			if got[mint] != want {
+				t.Errorf("%s %d: %s %q, want %s (event %s:%s / %s:%s)", c.sig[:8], c.outer, mint, got[mint], want, ev.Token0Mint, ev.Token0AmountRaw, ev.Token1Mint, ev.Token1AmountRaw)
+			}
+		}
+		// the quote mint of the pair is token1
+		quote := ""
+		for _, mint := range mints {
+			if mint == solMint || (quote == "" && constants.IsQuoteToken(mint)) {
+				quote = mint
+			}
+		}
+		if ev.Token1Mint != quote {
+			t.Errorf("%s %d: token1 %s, want the quote mint %s", c.sig[:8], c.outer, ev.Token1Mint, quote)
+		}
+	}
+}

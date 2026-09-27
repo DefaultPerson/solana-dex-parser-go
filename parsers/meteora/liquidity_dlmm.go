@@ -80,53 +80,49 @@ func (p *MeteoraDLMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 	return events
 }
 
-// ParseAddLiquidityEvent parses add liquidity event
+// ParseAddLiquidityEvent parses add liquidity event. Accounts (lb_clmm IDL
+// 0.12.0): lb_pair 1, token_x_mint 7, token_y_mint 8; the one-side adds name
+// only the deposited mint (token_mint 5).
 func (p *MeteoraDLMMPoolParser) ParseAddLiquidityEvent(
 	instruction interface{},
 	index int,
 	data []byte,
 	transfers []types.TransferData,
 ) *types.PoolEvent {
-	token0, token1 := p.normalizeTokens(transfers)
 	programId := p.Adapter.GetInstructionProgramId(instruction)
 	accounts := p.Adapter.GetInstructionAccounts(instruction)
-
-	var token0Mint, token1Mint string
-	if token0 != nil {
-		token0Mint = token0.Info.Mint
-	}
-	if token1 != nil {
-		token1Mint = token1.Info.Mint
-	}
-
-	token0Decimals := p.Adapter.GetTokenDecimals(token0Mint)
-	token1Decimals := p.Adapter.GetTokenDecimals(token1Mint)
-
-	base := p.Adapter.GetPoolEventBase(types.PoolEventTypeAdd, programId)
+	mintXIndex, mintYIndex := dlmmAddLayout(data)
 
 	event := &types.PoolEvent{
-		PoolEventBase:  base,
-		Token0Mint:     token0Mint,
-		Token1Mint:     token1Mint,
-		Token0Decimals: &token0Decimals,
-		Token1Decimals: &token1Decimals,
+		PoolEventBase: p.Adapter.GetPoolEventBase(types.PoolEventTypeAdd, programId),
 	}
-
 	if len(accounts) > 1 {
 		event.PoolId = accounts[1]
 		event.PoolLpMint = accounts[1]
 	}
-
-	if token0 != nil && token0.Info.TokenAmount.UIAmount != nil {
-		event.Token0Amount = token0.Info.TokenAmount.UIAmount
-		event.Token0AmountRaw = token0.Info.TokenAmount.Amount
-	}
-	if token1 != nil && token1.Info.TokenAmount.UIAmount != nil {
-		event.Token1Amount = token1.Info.TokenAmount.UIAmount
-		event.Token1AmountRaw = token1.Info.TokenAmount.Amount
-	}
-
+	p.setSides(event, accountAt(accounts, mintXIndex), accountAt(accounts, mintYIndex), transfers)
 	return event
+}
+
+// dlmmAddLayout gives the token_x_mint and token_y_mint account indices of a
+// DLMM add instruction (lb_clmm IDL 0.12.0); a one-side add names only the
+// deposited mint (token_mint 5), and mintYIndex is -1
+func dlmmAddLayout(data []byte) (mintXIndex, mintYIndex int) {
+	dlmm := constants.DISCRIMINATORS.METEORA_DLMM.ADD_LIQUIDITY
+	for _, name := range []string{"addLiquidityOneSide", "addLiquidityByStrategyOneSide", "addLiquidityOneSidePrecise", "addLiquidityOneSidePrecise2"} {
+		if constants.MatchDiscriminator(data, dlmm[name]) {
+			return 5, -1
+		}
+	}
+	return 7, 8
+}
+
+// accountAt returns accounts[i], "" when i is out of range
+func accountAt(accounts []string, i int) string {
+	if i >= 0 && i < len(accounts) {
+		return accounts[i]
+	}
+	return ""
 }
 
 // dlmmRemoveLayout gives the lb_pair and token_x/y_mint account indices of a
@@ -158,61 +154,55 @@ func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 ) *types.PoolEvent {
 	accounts := p.Adapter.GetInstructionAccounts(instruction)
 	poolIndex, mintXIndex, mintYIndex := dlmmRemoveLayout(data)
-	accountAt := func(i int) string {
-		if i < len(accounts) {
-			return accounts[i]
-		}
-		return ""
-	}
-	token0, token1 := p.normalizeTokens(transfers)
-
-	// Normalize tokens based on account positions
-	if token1 == nil && token0 != nil && token0.Info.Mint == accountAt(mintYIndex) {
-		token1 = token0
-		token0 = nil
-	} else if token0 == nil && token1 != nil && token1.Info.Mint == accountAt(mintXIndex) {
-		token0 = token1
-		token1 = nil
-	}
-
-	var token0Mint, token1Mint string
-	if token0 != nil {
-		token0Mint = token0.Info.Mint
-	} else {
-		token0Mint = accountAt(mintXIndex)
-	}
-	if token1 != nil {
-		token1Mint = token1.Info.Mint
-	} else {
-		token1Mint = accountAt(mintYIndex)
-	}
-
 	programId := p.Adapter.GetInstructionProgramId(instruction)
-	token0Decimals := p.Adapter.GetTokenDecimals(token0Mint)
-	token1Decimals := p.Adapter.GetTokenDecimals(token1Mint)
-
-	base := p.Adapter.GetPoolEventBase(types.PoolEventTypeRemove, programId)
 
 	event := &types.PoolEvent{
-		PoolEventBase:  base,
-		Token0Mint:     token0Mint,
-		Token1Mint:     token1Mint,
-		Token0Decimals: &token0Decimals,
-		Token1Decimals: &token1Decimals,
+		PoolEventBase: p.Adapter.GetPoolEventBase(types.PoolEventTypeRemove, programId),
+		PoolId:        accountAt(accounts, poolIndex),
 	}
-	event.PoolId = accountAt(poolIndex)
 	event.PoolLpMint = event.PoolId
-
-	if token0 != nil && token0.Info.TokenAmount.UIAmount != nil {
-		event.Token0Amount = token0.Info.TokenAmount.UIAmount
-		event.Token0AmountRaw = token0.Info.TokenAmount.Amount
-	}
-	if token1 != nil && token1.Info.TokenAmount.UIAmount != nil {
-		event.Token1Amount = token1.Info.TokenAmount.UIAmount
-		event.Token1AmountRaw = token1.Info.TokenAmount.Amount
-	}
-
+	p.setSides(event, accountAt(accounts, mintXIndex), accountAt(accounts, mintYIndex), transfers)
 	return event
+}
+
+// setSides sets the tokens of a DLMM ADD or REMOVE event: the pair's mints
+// mintX and mintY ("" when the instruction does not name it), each token
+// transfer on the side of its mint, 0 for a side of a known mint that moved
+// nothing (one-sided deposits and withdrawals), and, as for the pair's create
+// event, the quote mint (utils.GetTradeType) as token1.
+func (p *MeteoraDLMMPoolParser) setSides(event *types.PoolEvent, mintX, mintY string, transfers []types.TransferData) {
+	mints := [2]string{mintX, mintY}
+	var sides [2]*types.TransferData
+	for _, t := range p.Utils.GetLPTransfers(transfers) {
+		t := t
+		for side := 0; side < 2; side++ {
+			if sides[side] == nil && (mints[side] == t.Info.Mint || (mints[side] == "" && t.Info.Mint != mints[1-side])) {
+				sides[side] = &t
+				mints[side] = t.Info.Mint
+				break
+			}
+		}
+	}
+	if utils.GetTradeType(mints[0], mints[1]) == types.TradeTypeBuy {
+		mints[0], mints[1] = mints[1], mints[0]
+		sides[0], sides[1] = sides[1], sides[0]
+	}
+
+	decimals0, decimals1 := p.Adapter.GetTokenDecimals(mints[0]), p.Adapter.GetTokenDecimals(mints[1])
+	event.Token0Mint, event.Token1Mint = mints[0], mints[1]
+	event.Token0Decimals, event.Token1Decimals = &decimals0, &decimals1
+	amount := func(side int) (*float64, string) {
+		if t := sides[side]; t != nil && t.Info.TokenAmount.UIAmount != nil {
+			return t.Info.TokenAmount.UIAmount, t.Info.TokenAmount.Amount
+		}
+		if mints[side] == "" {
+			return nil, ""
+		}
+		zero := float64(0)
+		return &zero, "0"
+	}
+	event.Token0Amount, event.Token0AmountRaw = amount(0)
+	event.Token1Amount, event.Token1AmountRaw = amount(1)
 }
 
 // ParseCreateLiquidityEvent parses the creation of a pair. Accounts
@@ -262,26 +252,6 @@ func (p *MeteoraDLMMPoolParser) ParseCreateLiquidityEvent(
 		}
 	}
 	return event
-}
-
-// normalizeTokens normalizes token transfers for DLMM
-func (p *MeteoraDLMMPoolParser) normalizeTokens(transfers []types.TransferData) (*types.TransferData, *types.TransferData) {
-	lpTransfers := p.Utils.GetLPTransfers(transfers)
-	var token0, token1 *types.TransferData
-	if len(lpTransfers) > 0 {
-		token0 = &lpTransfers[0]
-	}
-	if len(lpTransfers) > 1 {
-		token1 = &lpTransfers[1]
-	}
-
-	// Special case: if only one transfer and it's SOL, put it as token1
-	if len(transfers) == 1 && transfers[0].Info.Mint == constants.TOKENS.SOL {
-		token1 = &transfers[0]
-		token0 = nil
-	}
-
-	return token0, token1
 }
 
 // parseRebalance parses rebalance_liquidity, which can withdraw from some
