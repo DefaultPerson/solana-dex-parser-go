@@ -108,6 +108,12 @@ var venueSwapCases = []venueSwapCase{
 	// ZeroFi: input-first accounts, both directions on one pool
 	{"ZeroFi", "2fbxB1hkkbwvTj2kZLRVmWZuGA4poHXmsmQDDzCRQEV3gkqvnLDoLiL9o4smRK1eMUUXWTgH3oKsTCnAGxcmvUET", "3-3", "A59MtPWamLSFb4o6fLWprNAsmJbMSxQ3yKBoZcsXDCmk", "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", "6525536", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "177096524"},
 	{"ZeroFi", "3hWuUyvWrBuqgqizgeUcsCLNeQdW9TBVv6Hywve68dXsSRitgxxQbViURZfkSTTggcVCKBKiABQULRWjCmhAKrwC", "9-4", "A59MtPWamLSFb4o6fLWprNAsmJbMSxQ3yKBoZcsXDCmk", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "434641443", "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", "16007517"},
+	// ZeroFi 17- and 57-byte swaps (same accounts; the decoder took only 18
+	// bytes, meme-2 of the final review): a GoonFi/ZeroFi route, an OKX-style
+	// multi-venue route and a Titan route whose only hop is ZeroFi
+	{"ZeroFi", "49kwguyf3UZMbDA1f5bSidtiX5Pi972zYRdTtJaJuYyMUvJsz258JzEuUj3SVdqDoRinwdDcCu3hETrEwpiWa9xL", "2-5", "9XVKRT2D53LEDyA5jyhBLMEv23kw91iNrXBzvghUDfT9", "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1", "38803", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "42292620"},
+	{"ZeroFi", "3zxaqfr5Pk5yf4npN55Usb92ZDdrjRKLLKEb4rEy3UVbkBVLmMRWQAopFjTdiLmFVNAdxsZcMqJuQ76AJFnZWrLf", "6-16", "7DyH4hFA9KY2Uf3ZC2fUGP9ATsLqAEq3pUpyJPA2Mjft", "So11111111111111111111111111111111111111112", "5246547495", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "639646456"},
+	{"ZeroFi", "psShYLi8kZ5ZFsCfBSTYpXUGe2h1okSfq4aDsnVW9nPfsMQZeiJeXFRbTZ4v3a7P6KuzvCW2nX4qWbb77QhifuT", "3-1", "HsE6AfxKJQgWMdK1Z23u1xgZhstxXjMVnm5gVaGJ2J7", "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH", "7448", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "13221532"},
 	// Scorch: tag 0x02 (17 accounts), compact tag 0x01 (14 and 13 accounts)
 	{"Scorch", "3tHnRiFwCdzB92qnpui67qviFD24YUuVcu7VMNhrUEYVL2xdVsmQy9v4of3bA9oEPxmMWckKicXtESKqY6zemP73", "2-0", "FnhxUP3dcQbypCUmGWw55ijxPBxifPT558UQSCYDfcCU", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "309365132", "So11111111111111111111111111111111111111112", "2490560000"},
 	{"Scorch", "5dnD4akxGFE31hLnSfybpL24geVkFDHNVcyCsDwVLwig2HPwL26EjKRkwEm8CKajGamYRDV1DN4BkFDDWMnJntEv", "2-15", "382i8DWxUuNLYXrYqnbK151otneeqjsJgrtVpdKArtm6", "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij", "255014", "So11111111111111111111111111111111111111112", "1742210000"},

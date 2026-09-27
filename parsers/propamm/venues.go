@@ -71,13 +71,14 @@ func decodeAlphaQ(data []byte, n int) *swapLayout {
 	return &swapLayout{pool: 1, legs: bothDirections(3, 4, 5, 6)}
 }
 
-// decodeZeroFi (ZERor4...): tag 0x10 ("swap_v4"), 18 bytes (u64 amount_in at
-// 1). The accounts are in input-first order: 0 pool, 1 config, 2 input vault
+// decodeZeroFi (ZERor4...): tag 0x10 ("swap_v4"), 17, 18 or 57 bytes (u64
+// amount_in at 1; all three forms run on mainnet with the same accounts).
+// The accounts are in input-first order: 0 pool, 1 config, 2 input vault
 // info, 3 pool input vault, 4 output vault info, 5 pool output vault, 6 user
 // input account, 7 user output account, 8 user authority, 9-12 token programs
 // and mints, 13 sysvar instructions. Tag 0x11 is an update.
 func decodeZeroFi(data []byte, n int) *swapLayout {
-	if !hasTag(data, disc.ZERO_FI.SWAP, 18) || n < 13 {
+	if !hasTag(data, disc.ZERO_FI.SWAP, 17, 18, 57) || n < 13 {
 		return nil
 	}
 	return &swapLayout{pool: 0, legs: []swapLegs{{userIn: 6, vaultIn: 3, vaultOut: 5, userOut: 7}}}
