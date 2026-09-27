@@ -124,13 +124,6 @@ func (p *JupiterDCAParser) getTransferActionKeys() []string {
 	return utils.SortedTransferKeys(p.TransferActions)
 }
 
-// DCA self-CPI events (DCA IDL): the Anchor event prefix followed by
-// sha256("event:Opened")[:8] / sha256("event:Closed")[:8]
-var (
-	dcaOpenedEvent = []byte{228, 69, 165, 46, 81, 203, 154, 29, 166, 172, 97, 9, 77, 76, 189, 109}
-	dcaClosedEvent = []byte{228, 69, 165, 46, 81, 203, 154, 29, 50, 31, 87, 155, 135, 220, 195, 239}
-)
-
 // ProcessTransfers reports DCA (Recurring) deposits and refunds from the DCA
 // program's events. Opened (open_dca, open_dca_v2) is the user's deposit of
 // in_deposited input tokens. Closed (close_dca by the user, end_and_close by a
@@ -149,11 +142,11 @@ func (p *JupiterDCAParser) ProcessTransfers() []types.TransferData {
 			continue
 		}
 		switch {
-		case bytes.Equal(data[:16], dcaOpenedEvent):
+		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_DCA.OPENED_EVENT):
 			if event, err := ParseJupiterDCAOpenedEvent(data[16:]); err == nil {
 				transfers = append(transfers, p.parseOpened(event, ci)...)
 			}
-		case bytes.Equal(data[:16], dcaClosedEvent):
+		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_DCA.CLOSED_EVENT):
 			if event, err := ParseJupiterDCAClosedEvent(data[16:]); err == nil {
 				transfers = append(transfers, p.parseClosed(event, ci)...)
 			}

@@ -30,10 +30,6 @@ func NewJupiterLimitOrderParser(
 	}
 }
 
-// limitV1PreFlashFillOrder is the discriminator of the Limit Order v1
-// pre_flash_fill_order instruction (global:pre_flash_fill_order, v1 IDL)
-var limitV1PreFlashFillOrder = []byte{240, 47, 153, 68, 13, 190, 225, 42}
-
 // ProcessTrades parses Limit Order v1 fills (flash_fill_order; legacy: the
 // program no longer fills orders, the parser serves historical transactions).
 // The user is the order's maker: the maker sold the making_amount of the input
@@ -152,7 +148,7 @@ func (p *JupiterLimitOrderParser) preFlashFillMaking(order string, ci types.Clas
 		}
 		data := p.Adapter.GetInstructionData(pre.Instruction)
 		accounts := p.Adapter.GetInstructionAccounts(pre.Instruction)
-		if len(data) < 16 || !bytes.Equal(data[:8], limitV1PreFlashFillOrder) || len(accounts) == 0 || accounts[0] != order {
+		if len(data) < 16 || !bytes.Equal(data[:8], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER.PRE_FLASH_FILL_ORDER) || len(accounts) == 0 || accounts[0] != order {
 			continue
 		}
 		making = new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[8:16]))

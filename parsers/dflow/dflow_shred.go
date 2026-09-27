@@ -119,9 +119,6 @@ type dflowSwapEvent struct {
 	inputMint, outputMint string
 }
 
-// dflowSwapEventDisc is the emit_cpi prefix + event:SwapEvent
-var dflowSwapEventDisc = []byte{228, 69, 165, 46, 81, 203, 154, 29, 64, 198, 205, 232, 38, 8, 113, 226}
-
 // ProcessAll decodes the DFlow swaps into legacy events and typed trades
 func (p *DFlowShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
 	var events []interface{}
@@ -211,7 +208,7 @@ func (p *DFlowShredParser) swapEvents(instructions []types.ClassifiedInstruction
 		}
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		// event: amm, input_mint, input_amount, output_mint, output_amount
-		if len(data) < 16+32+32+8+32+8 || !bytes.Equal(data[:16], dflowSwapEventDisc) {
+		if len(data) < 16+32+32+8+32+8 || !bytes.Equal(data[:16], constants.DISCRIMINATORS.DFLOW.SWAP_EVENT) {
 			continue
 		}
 		owner, found := -2, false

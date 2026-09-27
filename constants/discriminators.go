@@ -75,6 +75,12 @@ var DISCRIMINATORS = struct {
 		CLOSE_DCA:   []byte{22, 7, 33, 98, 168, 183, 34, 243},
 		OPEN_DCA:    []byte{36, 65, 185, 54, 1, 210, 100, 163},
 		OPEN_DCA_V2: []byte{142, 119, 43, 109, 162, 52, 11, 177},
+
+		// Added 2026-09 (integ): self-CPI events (DCA IDL, Anchor event prefix + event:<Name>)
+		OPENED_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 166, 172, 97, 9, 77, 76, 189, 109},
+		CLOSED_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 50, 31, 87, 155, 135, 220, 195, 239},
+		WITHDRAW_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 192, 241, 201, 217, 70, 150, 90, 247},
+		DEPOSIT_EVENT:  []byte{228, 69, 165, 46, 81, 203, 154, 29, 62, 205, 242, 175, 244, 169, 136, 52},
 	},
 	JUPITER_LIMIT_ORDER: JupiterLimitOrderDiscriminators{
 		CANCEL_ORDER:     []byte{95, 129, 237, 240, 8, 49, 223, 132},
@@ -82,6 +88,10 @@ var DISCRIMINATORS = struct {
 		TRADE_EVENT:      []byte{228, 69, 165, 46, 81, 203, 154, 29, 189, 219, 127, 211, 78, 230, 97, 238},
 		UNKNOWN:          []byte{232, 122, 115, 25, 199, 143, 136, 162},
 		FLASH_FILL_ORDER: []byte{252, 104, 18, 134, 164, 78, 18, 140},
+
+		// Added 2026-09 (integ): v1 IDL. UNKNOWN above is global:fill_order.
+		CANCEL_EXPIRED_ORDER: []byte{216, 120, 64, 235, 155, 19, 229, 99},
+		PRE_FLASH_FILL_ORDER: []byte{240, 47, 153, 68, 13, 190, 225, 42},
 	},
 	JUPITER_LIMIT_ORDER_V2: JupiterLimitOrderV2Discriminators{
 		CANCEL_ORDER:       []byte{95, 129, 237, 240, 8, 49, 223, 132},
@@ -540,9 +550,16 @@ var DISCRIMINATORS = struct {
 		SWAP2_WITH_DEST:        []byte{95, 123, 213, 246, 122, 1, 86, 231},
 		SWAP_WITH_DEST_NATIVE:  []byte{205, 77, 127, 108, 241, 32, 196, 195},
 		SWAP2_WITH_DEST_NATIVE: []byte{222, 100, 184, 146, 186, 196, 105, 165},
+
+		// Added 2026-09 (integ): self-CPI events (swap_orchestrator IDL, Anchor
+		// event prefix + event:SwapEvent / event:FeeEvent)
+		SWAP_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 64, 198, 205, 232, 38, 8, 113, 226},
+		FEE_EVENT:  []byte{228, 69, 165, 46, 81, 203, 154, 29, 73, 79, 78, 127, 184, 213, 13, 220},
 	},
 	HUMIDIFI: HumidiFiDiscriminators{
-		// HumidiFi uses XOR encryption, discriminator after decryption
+		// The Anchor hash of global:swap. HumidiFi is not an Anchor program
+		// and never uses it: its instruction data is XOR-obfuscated and has
+		// no tag. Unused by the parsers; kept for compatibility (D12).
 		SWAP: []byte{248, 198, 158, 145, 225, 117, 135, 200},
 	},
 
@@ -636,6 +653,11 @@ type JupiterDCADiscriminators struct {
 	CLOSE_DCA   []byte
 	OPEN_DCA    []byte
 	OPEN_DCA_V2 []byte
+
+	OPENED_EVENT   []byte
+	CLOSED_EVENT   []byte
+	WITHDRAW_EVENT []byte
+	DEPOSIT_EVENT  []byte
 }
 
 type JupiterLimitOrderDiscriminators struct {
@@ -644,6 +666,9 @@ type JupiterLimitOrderDiscriminators struct {
 	TRADE_EVENT      []byte
 	UNKNOWN          []byte
 	FLASH_FILL_ORDER []byte
+
+	CANCEL_EXPIRED_ORDER []byte
+	PRE_FLASH_FILL_ORDER []byte
 }
 
 type JupiterLimitOrderV2Discriminators struct {
@@ -1012,6 +1037,9 @@ type DFlowDiscriminators struct {
 	SWAP2_WITH_DEST        []byte
 	SWAP_WITH_DEST_NATIVE  []byte
 	SWAP2_WITH_DEST_NATIVE []byte
+
+	SWAP_EVENT []byte
+	FEE_EVENT  []byte
 }
 
 type HumidiFiDiscriminators struct {
