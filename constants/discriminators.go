@@ -230,6 +230,11 @@ var DISCRIMINATORS = struct {
 		COLLECT_CREATOR_FEE:  []byte{20, 22, 86, 123, 198, 28, 219, 132},
 		COLLECT_FUND_FEE:     []byte{167, 138, 78, 149, 223, 194, 6, 126},
 		COLLECT_PROTOCOL_FEE: []byte{136, 136, 252, 221, 194, 66, 126, 89},
+
+		// Added 2026-09 (amm): emit! events, written as "Program data:" log lines
+		// (8 bytes, sha256("event:<Name>")[:8]; raydium_cp_swap IDL)
+		SWAP_EVENT:      []byte{64, 198, 205, 232, 38, 8, 113, 226},   // SwapEvent
+		LP_CHANGE_EVENT: []byte{121, 163, 205, 201, 57, 218, 117, 60}, // LpChangeEvent
 	},
 	RAYDIUM_LCP: RaydiumLCPDiscriminators{
 		CREATE_EVENT:      []byte{228, 69, 165, 46, 81, 203, 154, 29, 151, 215, 226, 9, 118, 161, 115, 174},
@@ -318,6 +323,27 @@ var DISCRIMINATORS = struct {
 			"claimReward":  {149, 95, 181, 242, 94, 90, 158, 162},
 			"claimReward2": {190, 3, 127, 119, 178, 87, 157, 183},
 		},
+
+		// Added 2026-09 (amm): self-CPI events (event-instruction tag + sha256("event:<Name>")[:8];
+		// lb_clmm IDL 0.12.0). Swap2Evt is emitted by swap2, swap_exact_out2 and
+		// swap_with_price_impact2.
+		EVENTS: map[string][]byte{
+			"swap":           {228, 69, 165, 46, 81, 203, 154, 29, 81, 108, 227, 190, 205, 208, 10, 196},
+			"swap2Evt":       {228, 69, 165, 46, 81, 203, 154, 29, 46, 116, 82, 215, 148, 27, 84, 77},
+			"claimFee":       {228, 69, 165, 46, 81, 203, 154, 29, 75, 122, 154, 48, 140, 74, 123, 163},
+			"claimFee2":      {228, 69, 165, 46, 81, 203, 154, 29, 232, 171, 242, 97, 58, 77, 35, 45},
+			"positionCreate": {228, 69, 165, 46, 81, 203, 154, 29, 144, 142, 252, 84, 157, 53, 37, 121},
+			"positionClose":  {228, 69, 165, 46, 81, 203, 154, 29, 255, 196, 16, 107, 28, 202, 53, 128},
+			"lbPairCreate":   {228, 69, 165, 46, 81, 203, 154, 29, 185, 74, 252, 125, 27, 215, 188, 111},
+			"rebalancing":    {228, 69, 165, 46, 81, 203, 154, 29, 0, 109, 117, 179, 61, 91, 199, 200},
+		},
+		// Position bookkeeping; these move no tokens
+		POSITION: map[string][]byte{
+			"initializePosition":  {219, 192, 234, 71, 190, 191, 102, 80},
+			"initializePosition2": {143, 19, 242, 145, 213, 15, 104, 115},
+			"closePosition":       {123, 134, 81, 0, 49, 68, 98, 98},
+			"closePosition2":      {174, 90, 35, 115, 186, 40, 147, 226},
+		},
 	},
 	METEORA_DAMM: MeteoraDAMMDiscriminators{
 		CREATE:                  []byte{7, 166, 138, 171, 206, 171, 236, 244},
@@ -338,6 +364,16 @@ var DISCRIMINATORS = struct {
 		PARTNER_CLAIM_FEE:                        []byte{57, 53, 176, 30, 123, 70, 52, 64},
 		WITHDRAW_PROTOCOL_FEES:                   []byte{11, 68, 165, 98, 18, 208, 134, 73},
 		LOCK:                                     []byte{21, 19, 208, 43, 237, 62, 255, 87},
+
+		// Added 2026-09 (amm): emit! events, written as "Program data:" log lines
+		// (8 bytes, sha256("event:<Name>")[:8]; amm 0.5.2 IDL)
+		SWAP_EVENT:                []byte{81, 108, 227, 190, 205, 208, 10, 196}, // Swap
+		ADD_LIQUIDITY_EVENT:       []byte{31, 94, 125, 90, 227, 52, 61, 186},    // AddLiquidity
+		REMOVE_LIQUIDITY_EVENT:    []byte{116, 244, 97, 232, 103, 31, 152, 58},  // RemoveLiquidity
+		BOOTSTRAP_LIQUIDITY_EVENT: []byte{121, 127, 38, 136, 92, 55, 14, 247},   // BootstrapLiquidity
+		POOL_CREATED_EVENT:        []byte{202, 44, 41, 88, 104, 220, 157, 82},   // PoolCreated
+		SET_POOL_FEES_EVENT:       []byte{245, 26, 198, 164, 88, 18, 75, 9},     // SetPoolFees
+		CLAIM_FEE_EVENT:           []byte{75, 122, 154, 48, 140, 74, 123, 163},  // ClaimFee
 	},
 	METEORA_DAMM_V2: MeteoraDAMMV2Discriminators{
 		INITIALIZE_POOL:                     []byte{95, 180, 10, 172, 84, 174, 232, 40},
@@ -360,6 +396,26 @@ var DISCRIMINATORS = struct {
 		FUND_REWARD:                []byte{188, 50, 249, 165, 93, 151, 38, 63},
 		WITHDRAW_INELIGIBLE_REWARD: []byte{148, 206, 42, 195, 247, 49, 103, 8},
 		ZAP_PROTOCOL_FEE:           []byte{213, 155, 187, 34, 56, 182, 91, 240},
+
+		// Added 2026-09 (amm): self-CPI events (event-instruction tag + sha256("event:<Name>")[:8];
+		// cp_amm IDL 0.2.4). EvtSwap, EvtAddLiquidity and EvtRemoveLiquidity are the legacy
+		// events of older program versions (EvtSwap seen until 2025-11), kept for history.
+		EVT_SWAP:                           []byte{228, 69, 165, 46, 81, 203, 154, 29, 27, 60, 21, 213, 138, 170, 187, 147},
+		EVT_SWAP2:                          []byte{228, 69, 165, 46, 81, 203, 154, 29, 189, 66, 51, 168, 38, 80, 117, 153},
+		EVT_LIQUIDITY_CHANGE:               []byte{228, 69, 165, 46, 81, 203, 154, 29, 197, 171, 78, 127, 224, 211, 87, 13},
+		EVT_ADD_LIQUIDITY:                  []byte{228, 69, 165, 46, 81, 203, 154, 29, 175, 242, 8, 157, 30, 247, 185, 169},
+		EVT_REMOVE_LIQUIDITY:               []byte{228, 69, 165, 46, 81, 203, 154, 29, 87, 46, 88, 98, 175, 96, 34, 91},
+		EVT_INITIALIZE_POOL:                []byte{228, 69, 165, 46, 81, 203, 154, 29, 228, 50, 246, 85, 203, 66, 134, 37},
+		EVT_CLAIM_POSITION_FEE:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 198, 182, 183, 52, 97, 12, 49, 56},
+		EVT_CLOSE_POSITION:                 []byte{228, 69, 165, 46, 81, 203, 154, 29, 20, 145, 144, 68, 143, 142, 214, 178},
+		EVT_CLAIM_REWARD:                   []byte{228, 69, 165, 46, 81, 203, 154, 29, 218, 86, 147, 200, 235, 188, 215, 231},
+		EVT_FUND_REWARD:                    []byte{228, 69, 165, 46, 81, 203, 154, 29, 104, 233, 237, 122, 199, 191, 121, 85},
+		EVT_INITIALIZE_REWARD:              []byte{228, 69, 165, 46, 81, 203, 154, 29, 129, 91, 188, 3, 246, 52, 185, 249},
+		EVT_CREATE_CONFIG:                  []byte{228, 69, 165, 46, 81, 203, 154, 29, 131, 207, 180, 174, 180, 73, 165, 54},
+		EVT_CREATE_DYNAMIC_CONFIG:          []byte{228, 69, 165, 46, 81, 203, 154, 29, 231, 197, 13, 164, 248, 213, 133, 152},
+		EVT_UPDATE_DELEGATE_PERMISSION:     []byte{228, 69, 165, 46, 81, 203, 154, 29, 66, 188, 75, 151, 150, 232, 87, 93},
+		EVT_WITHDRAW_DEAD_LIQUIDITY_REWARD: []byte{228, 69, 165, 46, 81, 203, 154, 29, 228, 66, 150, 195, 42, 62, 163, 13},
+		EVT_CLAIM_PROTOCOL_FEE2:            []byte{228, 69, 165, 46, 81, 203, 154, 29, 187, 133, 66, 9, 205, 161, 84, 13},
 	},
 	METEORA_DBC: MeteoraDBCDiscriminators{
 		SWAP:                                   []byte{248, 198, 158, 145, 225, 117, 135, 200},
@@ -406,6 +462,11 @@ var DISCRIMINATORS = struct {
 		TRADED_EVENT:              []byte{225, 202, 73, 175, 147, 43, 160, 150},
 		LIQUIDITY_INCREASED_EVENT: []byte{30, 7, 144, 181, 102, 254, 155, 161},
 		LIQUIDITY_DECREASED_EVENT: []byte{166, 1, 36, 71, 112, 202, 181, 171},
+
+		// Added 2026-09 (amm): more emit! log events (whirlpool 0.9.0 IDL)
+		POOL_INITIALIZED_EVENT:       []byte{100, 118, 173, 87, 12, 198, 254, 229},   // PoolInitialized
+		LIQUIDITY_REPOSITIONED_EVENT: []byte{95, 130, 181, 132, 251, 50, 195, 38},    // LiquidityRepositioned
+		POSITION_OPENED_EVENT:        []byte{237, 175, 243, 230, 147, 117, 101, 121}, // PositionOpened
 	},
 	BOOPFUN: BoopfunDiscriminators{
 		CREATE:   []byte{84, 52, 204, 228, 24, 140, 234, 75},
@@ -728,6 +789,9 @@ type RaydiumCPMMDiscriminators struct {
 	COLLECT_CREATOR_FEE        []byte
 	COLLECT_FUND_FEE           []byte
 	COLLECT_PROTOCOL_FEE       []byte
+
+	SWAP_EVENT      []byte
+	LP_CHANGE_EVENT []byte
 }
 
 type RaydiumLCPDiscriminators struct {
@@ -758,6 +822,9 @@ type MeteoraDLMMDiscriminators struct {
 	CREATE      map[string][]byte
 	LIMIT_ORDER map[string][]byte
 	OTHER       map[string][]byte
+
+	EVENTS   map[string][]byte
+	POSITION map[string][]byte
 }
 
 type MeteoraDAMMDiscriminators struct {
@@ -778,6 +845,14 @@ type MeteoraDAMMDiscriminators struct {
 	PARTNER_CLAIM_FEE                        []byte
 	WITHDRAW_PROTOCOL_FEES                   []byte
 	LOCK                                     []byte
+
+	SWAP_EVENT                []byte
+	ADD_LIQUIDITY_EVENT       []byte
+	REMOVE_LIQUIDITY_EVENT    []byte
+	BOOTSTRAP_LIQUIDITY_EVENT []byte
+	POOL_CREATED_EVENT        []byte
+	SET_POOL_FEES_EVENT       []byte
+	CLAIM_FEE_EVENT           []byte
 }
 
 type MeteoraDAMMV2Discriminators struct {
@@ -800,6 +875,23 @@ type MeteoraDAMMV2Discriminators struct {
 	FUND_REWARD                []byte
 	WITHDRAW_INELIGIBLE_REWARD []byte
 	ZAP_PROTOCOL_FEE           []byte
+
+	EVT_SWAP                           []byte
+	EVT_SWAP2                          []byte
+	EVT_LIQUIDITY_CHANGE               []byte
+	EVT_ADD_LIQUIDITY                  []byte
+	EVT_REMOVE_LIQUIDITY               []byte
+	EVT_INITIALIZE_POOL                []byte
+	EVT_CLAIM_POSITION_FEE             []byte
+	EVT_CLOSE_POSITION                 []byte
+	EVT_CLAIM_REWARD                   []byte
+	EVT_FUND_REWARD                    []byte
+	EVT_INITIALIZE_REWARD              []byte
+	EVT_CREATE_CONFIG                  []byte
+	EVT_CREATE_DYNAMIC_CONFIG          []byte
+	EVT_UPDATE_DELEGATE_PERMISSION     []byte
+	EVT_WITHDRAW_DEAD_LIQUIDITY_REWARD []byte
+	EVT_CLAIM_PROTOCOL_FEE2            []byte
 }
 
 type MeteoraDBCDiscriminators struct {
@@ -844,6 +936,10 @@ type OrcaDiscriminators struct {
 	TRADED_EVENT                      []byte
 	LIQUIDITY_INCREASED_EVENT         []byte
 	LIQUIDITY_DECREASED_EVENT         []byte
+
+	POOL_INITIALIZED_EVENT       []byte
+	LIQUIDITY_REPOSITIONED_EVENT []byte
+	POSITION_OPENED_EVENT        []byte
 }
 
 type BoopfunDiscriminators struct {
