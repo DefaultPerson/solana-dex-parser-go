@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
@@ -25,41 +26,68 @@ func TestMemeLaunchLabTrades(t *testing.T) {
 	cases := []struct {
 		sig, idx     string
 		outer, inner int // trade instruction; its transfers follow it up to inner+5
-		typ          types.TradeType
-		quote        string // mint
-		amount       string // quote amount the user paid / received
-		fee          string // protocol + platform + creator + share (IDL decode)
-		pool         string // pool_state
+		// routed: the outer instruction is a Jupiter v6 route. Under D3 the
+		// Jupiter trade is the trade at idx (no LaunchLab pool or fee), so
+		// pool and fee are checked on the LaunchLab meme event only.
+		routed bool
+		typ    types.TradeType
+		quote  string // mint
+		amount string // quote amount the user paid / received
+		fee    string // protocol + platform + creator + share (IDL decode)
+		pool   string // pool_state
 	}{
-		{sigLaunchLabUSD1Buy, "2-1", 2, 1, types.TradeTypeBuy, usd1Mint, "424499", "6368", "4qvv7cbNA1P7J8NG4i6yBNyJXthYntbPwxEJuJGVfBpU"},
-		{sigLaunchLabUSD1Sell, "5-0", 5, 0, types.TradeTypeSell, usd1Mint, "85749244", "1305827", "7jey32kZWJDp1uUMiHa9yuXQT8Cr4rTmR3a8kjGgwwnY"},
-		{sigLaunchLabSOLSell, "1-0", 1, 0, types.TradeTypeSell, solMint, "3361960", "51198", "8hEdzYqEGRjyFgE8k16kwrMZ8ciQ1coooJxgnd6f7P2b"},
+		{sigLaunchLabUSD1Buy, "2-1", 2, 1, false, types.TradeTypeBuy, usd1Mint, "424499", "6368", "4qvv7cbNA1P7J8NG4i6yBNyJXthYntbPwxEJuJGVfBpU"},
+		{sigLaunchLabUSD1Sell, "5-0", 5, 0, true, types.TradeTypeSell, usd1Mint, "85749244", "1305827", "7jey32kZWJDp1uUMiHa9yuXQT8Cr4rTmR3a8kjGgwwnY"},
+		{sigLaunchLabSOLSell, "1-0", 1, 0, false, types.TradeTypeSell, solMint, "3361960", "51198", "8hEdzYqEGRjyFgE8k16kwrMZ8ciQ1coooJxgnd6f7P2b"},
 	}
 	for _, c := range cases {
 		r := memeParse(t, c.sig)
 		tr := memeTradeAt(t, r, c.idx)
+		e := memeEventAt(t, r, c.idx)
 		raw := loadMemeRaw(t, c.sig)
 		acc := raw.accounts(c.outer, c.inner)
-		quoteSide := &tr.OutputToken
+		quoteSide, memeQuoteSide := &tr.OutputToken, e.OutputToken
 		// user_quote_token (6) sends the quote on buys and receives it on sells
 		moved := raw.sumTransfers(c.outer, c.inner+1, c.inner+5, func(x memeRawTransfer) bool { return x.Mint == c.quote && x.To == acc[6] })
 		if c.typ == types.TradeTypeBuy {
-			quoteSide = &tr.InputToken
+			quoteSide, memeQuoteSide = &tr.InputToken, e.InputToken
 			moved = raw.sumTransfers(c.outer, c.inner+1, c.inner+5, func(x memeRawTransfer) bool { return x.Mint == c.quote && x.From == acc[6] })
 		}
 		if moved.String() != c.amount {
 			t.Fatalf("%.8s: fixture quote transfer %s, table %s", c.sig, moved, c.amount)
 		}
-		if tr.Type != c.typ || len(tr.Pool) != 1 || tr.Pool[0] != c.pool {
-			t.Errorf("%.8s: %s pool %v, want %s %s", c.sig, tr.Type, tr.Pool, c.typ, c.pool)
+		if tr.Type != c.typ {
+			t.Errorf("%.8s: trade %s, want %s", c.sig, tr.Type, c.typ)
 		}
 		checkToken(t, c.sig[:8]+" quote", quoteSide, c.quote, c.amount, raw.decimals[c.quote])
-		if tr.Fee == nil || tr.Fee.AmountRaw != c.fee || tr.Fee.Mint != c.quote || tr.Fee.Decimals != raw.decimals[c.quote] {
-			t.Errorf("%.8s: Fee %+v, want %s", c.sig, tr.Fee, c.fee)
+		if !c.routed {
+			if len(tr.Pool) != 1 || tr.Pool[0] != c.pool {
+				t.Errorf("%.8s: trade pool %v, want %s", c.sig, tr.Pool, c.pool)
+			}
+			if tr.Fee == nil || tr.Fee.AmountRaw != c.fee || tr.Fee.Mint != c.quote || tr.Fee.Decimals != raw.decimals[c.quote] {
+				t.Errorf("%.8s: Fee %+v, want %s", c.sig, tr.Fee, c.fee)
+			}
+			if len(e.Fees) != len(tr.Fees) {
+				t.Errorf("%.8s: meme event fees %+v, trade fees %+v", c.sig, e.Fees, tr.Fees)
+			}
 		}
-		e := memeEventAt(t, r, c.idx)
-		if e.Pool != c.pool || e.PlatformConfig != acc[3] || len(e.Fees) != len(tr.Fees) {
-			t.Errorf("%.8s: meme event pool %s platform %s fees %+v", c.sig, e.Pool, e.PlatformConfig, e.Fees)
+
+		// the LaunchLab meme event, routed or not
+		if e.Type != c.typ || e.Pool != c.pool || e.PlatformConfig != acc[3] {
+			t.Errorf("%.8s: meme event %s pool %s platform %s", c.sig, e.Type, e.Pool, e.PlatformConfig)
+		}
+		checkToken(t, c.sig[:8]+" meme quote", memeQuoteSide, c.quote, c.amount, raw.decimals[c.quote])
+		feeSum := new(big.Int)
+		for _, f := range e.Fees {
+			v, ok := new(big.Int).SetString(f.AmountRaw, 10)
+			if !ok || f.Mint != c.quote || f.Decimals != raw.decimals[c.quote] {
+				t.Errorf("%.8s: meme event fee component %+v", c.sig, f)
+				continue
+			}
+			feeSum.Add(feeSum, v)
+		}
+		if feeSum.String() != c.fee {
+			t.Errorf("%.8s: meme event fees %+v sum %s, want %s", c.sig, e.Fees, feeSum, c.fee)
 		}
 	}
 
