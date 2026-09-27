@@ -116,7 +116,8 @@ func (p *OrcaParser) ProcessTrades() []types.TradeInfo {
 				trade.Pool = append(trade.Pool, accounts[i])
 			}
 		}
-		trades = append(trades, *p.Utils.AttachTokenTransferInfo(trade, p.TransferActions))
+		trade = p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
+		trades = append(trades, *p.Utils.AttachInstructionTransfers(trade, transfers))
 	}
 
 	return trades

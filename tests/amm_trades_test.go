@@ -525,3 +525,114 @@ func TestMeteoraDLMMSwap2Event(t *testing.T) {
 		t.Errorf("Swap fee %s - protocol %s != Swap2Evt mm_fee %s", fee, protocol, u64s(swap2, 129))
 	}
 }
+
+// TestAmmTradeLegTransfers: each leg of an AMM trade carries the token
+// accounts, authority and balances of the swap instruction's own transfer.
+// Before, a leg took the first transfer of the whole transaction with its
+// mint and amount: in a route the input got the previous hop's output (same
+// amount), a Token-2022 output with a transfer fee (net amount, which no
+// transfer carries) was left without them, or got the next hop's input
+// (NeF1UiWX). Truth: the swap instruction's accounts per IDL and the owner
+// in the token balances.
+func TestAmmTradeLegTransfers(t *testing.T) {
+	cpmm := constants.DEX_PROGRAMS.RAYDIUM_CPMM.ID
+	dammV2 := constants.DEX_PROGRAMS.METEORA_DAMM_V2.ID
+	whirlpool := constants.DEX_PROGRAMS.ORCA.ID
+	dlmm := constants.DEX_PROGRAMS.METEORA.ID
+	rayAMM := constants.DEX_PROGRAMS.RAYDIUM_AMM.ID
+	// CPMM swap_base_input: payer 0, authority 1, input_token_account 4,
+	// output_token_account 5, input_vault 6, output_vault 7
+	cpmmIn, cpmmOut := [3]int{4, 6, 0}, [3]int{7, 5, 1}
+	// whirlpool swap_v2 b to a: token_authority 3, whirlpool 4,
+	// token_owner_account_a 7, token_vault_a 8, token_owner_account_b 9,
+	// token_vault_b 10
+	orcaV2In, orcaV2Out := [3]int{9, 10, 3}, [3]int{8, 7, 4}
+	cases := []struct {
+		name, prefix, program string
+		outer, inner          int
+		tradeIdx              string
+		// source, destination and authority of each leg as instruction
+		// account indices
+		in, out [3]int
+	}{
+		// event trades; the outputs have a Token-2022 transfer fee
+		{"cpmm", "34sGGDUK4A1x", cpmm, 5, 7, "5-8", cpmmIn, cpmmOut},
+		{"cpmm 4gKb", "4gKbbWmpYHRW", cpmm, 5, 18, "5-19", cpmmIn, cpmmOut},
+		{"cpmm 51nj", "51nj5GtAmDC2", cpmm, 1, 5, "1-6", cpmmIn, cpmmOut},
+		{"cpmm 5bLd", "5bLdxNz8YJyt", cpmm, 5, 7, "5-8", cpmmIn, cpmmOut},
+		{"cpmm 5qJs", "5qJs7ws4UY3q", cpmm, 5, 7, "5-8", cpmmIn, cpmmOut},
+		// the net output equals the next hop's (DLMM) input
+		{"cpmm NeF1", "NeF1UiWXKUbu", cpmm, 3, 0, "3-1", cpmmIn, cpmmOut},
+		// DAMM v2 swap, B to A: pool_authority 0, input_token_account 2,
+		// output_token_account 3, token_a_vault 4, token_b_vault 5, payer 8
+		{"damm v2", "5GXaLd1g1tHY", dammV2, 4, -1, "4-0", [3]int{2, 5, 8}, [3]int{4, 3, 0}},
+		{"orca", "Dr6ZkVfaHmFv", whirlpool, 4, 7, "4-8", orcaV2In, orcaV2Out},
+		{"orca outer", "2nTCUTK4dYky", whirlpool, 5, -1, "5-0", orcaV2In, orcaV2Out},
+		// DLMM swap, X to Y: lb_pair 0, reserve_x 2, reserve_y 3,
+		// user_token_in 4, user_token_out 5, user 10
+		{"dlmm", "2K23xSbLP1SG", dlmm, 2, 4, "2-5", [3]int{4, 2, 10}, [3]int{3, 5, 0}},
+		// trades from transfers (no ray_log, no Traded event).
+		// Raydium AMM swap: authority 2, pool vaults 4/5, user source 15,
+		// user destination 16, user owner 17
+		{"raydium amm", "33VnDBtrFawB", rayAMM, 4, 4, "4-5", [3]int{15, 5, 17}, [3]int{4, 16, 2}},
+		// whirlpool swap b to a: token_authority 1, whirlpool 2,
+		// token_owner_account_a 3, token_vault_a 4, token_owner_account_b 5,
+		// token_vault_b 6
+		{"orca v1", "4MSVpVBwxnYT", whirlpool, 2, 4, "2-5", [3]int{5, 6, 1}, [3]int{4, 3, 2}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			tx := loadFixture(t, fixtureSig(t, c.prefix))
+			ctx := newParseContext(tx, nil)
+			accounts := ctx.Adapter.GetInstructionAccounts(instructionAt(t, ctx, c.program, c.outer, c.inner).Instruction)
+			result := dexparser.NewDexParser().ParseAll(tx, nil)
+			var trade *types.TradeInfo
+			for i := range result.Trades {
+				if result.Trades[i].ProgramId == c.program && result.Trades[i].Idx == c.tradeIdx {
+					trade = &result.Trades[i]
+				}
+			}
+			if trade == nil {
+				t.Fatalf("no trade at %s: %+v", c.tradeIdx, result.Trades)
+			}
+			for _, leg := range []struct {
+				name  string
+				token types.TokenInfo
+				want  [3]int
+			}{{"input", trade.InputToken, c.in}, {"output", trade.OutputToken, c.out}} {
+				src, dst, auth := accounts[leg.want[0]], accounts[leg.want[1]], accounts[leg.want[2]]
+				if leg.token.Source != src || leg.token.Destination != dst || leg.token.Authority != auth {
+					t.Errorf("%s source %q destination %q authority %q, want %s %s %s", leg.name,
+						leg.token.Source, leg.token.Destination, leg.token.Authority, src, dst, auth)
+				}
+			}
+			out := trade.OutputToken
+			if owner := ctx.Adapter.GetTokenAccountOwner(accounts[c.out[1]]); owner == "" || out.DestinationOwner != owner {
+				t.Errorf("output destinationOwner %q, token balances say %q", out.DestinationOwner, owner)
+			}
+			if out.SourceBalance == nil || out.SourcePreBalance == nil {
+				t.Errorf("output source balances missing")
+			}
+		})
+	}
+}
+
+// fixtureSig returns the full signature of the stored fixture that starts
+// with prefix
+func fixtureSig(t *testing.T, prefix string) string {
+	t.Helper()
+	var found string
+	for _, sig := range fixtureSignatures(t, "json") {
+		if strings.HasPrefix(sig, prefix) {
+			if found != "" {
+				t.Fatalf("prefix %s is ambiguous", prefix)
+			}
+			found = sig
+		}
+	}
+	if found == "" {
+		t.Fatalf("no fixture %s*", prefix)
+	}
+	return found
+}

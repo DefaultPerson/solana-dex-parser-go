@@ -88,7 +88,8 @@ func (p *MeteoraParser) ProcessTrades() []types.TradeInfo {
 		if pool := p.getPoolAddress(ci.Instruction, ci.ProgramId); pool != "" {
 			trade.Pool = []string{pool}
 		}
-		trades = append(trades, *p.Utils.AttachTokenTransferInfo(trade, p.TransferActions))
+		trade = p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
+		trades = append(trades, *p.Utils.AttachInstructionTransfers(trade, transfers))
 	}
 
 	return trades

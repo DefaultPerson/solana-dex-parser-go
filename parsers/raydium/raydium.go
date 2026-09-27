@@ -141,7 +141,8 @@ func (p *RaydiumParser) ProcessTrades() []types.TradeInfo {
 		} else if pool := p.getPoolAddress(kind, accounts); pool != "" {
 			trade.Pool = []string{pool}
 		}
-		trades = append(trades, *p.Utils.AttachTokenTransferInfo(trade, p.TransferActions))
+		trade = p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
+		trades = append(trades, *p.Utils.AttachInstructionTransfers(trade, transfers))
 	}
 
 	return trades

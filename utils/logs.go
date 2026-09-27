@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
@@ -253,6 +254,72 @@ func (tu *TransactionUtils) NewEventTrade(swap EventSwap, dexInfo types.DexInfo,
 		Signature: tu.adapter.Signature(),
 		Idx:       idx,
 	}
+}
+
+// AttachInstructionTransfers sets the token accounts, authority and
+// balances of each trade leg from the swap instruction's own transfers.
+// Call it after AttachTokenTransferInfo: that one takes the first transfer
+// of the whole transaction with the leg's mint and amount, which in a route
+// is the previous hop's output (the same amount) or, for a Token-2022
+// output with a transfer fee, the next hop's input (the net amount), and
+// leaves a leg bare when no transfer carries its amount.
+func (tu *TransactionUtils) AttachInstructionTransfers(trade *types.TradeInfo, transfers []types.TransferData) *types.TradeInfo {
+	if trade == nil {
+		return nil
+	}
+	// The output transfer carries the amount before the Token-2022
+	// transfer fee is withheld from the user
+	output := parseAmount(trade.OutputToken.AmountRaw)
+	grossOutput := new(big.Int).Set(output)
+	for _, f := range trade.Fees {
+		if f.Type == "transferFee" && f.Mint == trade.OutputToken.Mint {
+			grossOutput.Add(grossOutput, parseAmount(f.AmountRaw))
+		}
+	}
+	setLegTransfer(&trade.InputToken, legTransfer(transfers, trade.InputToken.Mint, parseAmount(trade.InputToken.AmountRaw)))
+	setLegTransfer(&trade.OutputToken, legTransfer(transfers, trade.OutputToken.Mint, output, grossOutput))
+	return trade
+}
+
+// legTransfer returns the transfer that carried a trade leg: the first
+// transfer of mint whose amount is one of amounts, else the first transfer
+// of mint (the amount a program reports can differ from the transferred
+// one, e.g. a self-referral fee paid back to the user in a second
+// transfer). Native SOL transfers of the System program (rent, tips) are
+// not swap legs.
+func legTransfer(transfers []types.TransferData, mint string, amounts ...*big.Int) *types.TransferData {
+	var first *types.TransferData
+	for i := range transfers {
+		t := &transfers[i]
+		if t.Info.Mint != mint || t.ProgramId == constants.SYSTEM_PROGRAM_ID {
+			continue
+		}
+		if first == nil {
+			first = t
+		}
+		for _, amount := range amounts {
+			if t.Info.TokenAmount.Amount == amount.String() {
+				return t
+			}
+		}
+	}
+	return first
+}
+
+// setLegTransfer copies the token accounts, authority and balances of the
+// transfer that carried a trade leg to the leg
+func setLegTransfer(token *types.TokenInfo, transfer *types.TransferData) {
+	if transfer == nil {
+		return
+	}
+	token.Authority = transfer.Info.Authority
+	token.Source = transfer.Info.Source
+	token.Destination = transfer.Info.Destination
+	token.DestinationOwner = transfer.Info.DestinationOwner
+	token.DestinationBalance = transfer.Info.DestinationBalance
+	token.DestinationPreBalance = transfer.Info.DestinationPreBalance
+	token.SourceBalance = transfer.Info.SourceBalance
+	token.SourcePreBalance = transfer.Info.SourcePreBalance
 }
 
 // NewEventFee returns the FeeInfo of a fee a program reported in an event
