@@ -578,36 +578,91 @@ func (tu *TransactionUtils) AttachTradeFee(trade *types.TradeInfo) *types.TradeI
 // Smaller credits are dust (address poisoning) and do not count.
 const BotFeeMinLamports = 10000
 
-// DetectBot attributes a trading bot when one of the bot's fee accounts
-// receives at least BotFeeMinLamports of SOL (lamports) or WSOL in the
-// transaction. The first such account in account-key order wins.
+// BotFeeMinLegDivisor sets the smallest credit in a traded mint that counts as
+// a bot fee: 1/BotFeeMinLegDivisor (0.1%) of the trade leg in that mint.
+const BotFeeMinLegDivisor = 1000
+
+// DetectBot attributes a trading bot when one of its fee accounts
+// (constants.BOT_FEE_ACCOUNTS), or a token account owned by one, receives in
+// the transaction either at least BotFeeMinLamports of SOL or WSOL, or an
+// amount of the trade's input or output mint that is at least 0.1% of that
+// trade leg (some bots, e.g. BONKbot, take their fee in the traded token).
+// Credits are balance deltas, so fees moved by a program without a transfer
+// instruction count too; the owner of a token account comes from the token
+// balances, so the fee wallet itself need not be in the account keys. Presence
+// of a fee account alone never counts, and the trade's user and the signers are
+// never fee receivers. For SOL/WSOL only the absolute threshold applies, so
+// dust never counts on small trades. Accounts are checked in account-key order;
+// the first match wins.
 func (tu *TransactionUtils) DetectBot(trade *types.TradeInfo) {
 	if trade == nil || trade.Bot != "" {
 		return
 	}
 
 	solChanges := tu.adapter.GetAccountSolBalanceChanges(false)
-	tokenChanges := tu.adapter.GetAccountTokenBalanceChanges(true)
-	minFee := big.NewInt(BotFeeMinLamports)
-	received := func(change *types.BalanceChange) bool {
+	byAccount := tu.adapter.GetAccountTokenBalanceChanges(false)
+	byOwner := tu.adapter.GetAccountTokenBalanceChanges(true)
+
+	// Minimum credit per mint: BotFeeMinLamports for SOL/WSOL, 0.1% (rounded
+	// up, at least 1) of the smaller trade leg for the traded mints
+	minFee := map[string]*big.Int{constants.TOKENS.SOL: big.NewInt(BotFeeMinLamports)}
+	for _, leg := range []types.TokenInfo{trade.InputToken, trade.OutputToken} {
+		if leg.Mint == "" || leg.Mint == constants.TOKENS.SOL {
+			continue
+		}
+		amount, ok := new(big.Int).SetString(leg.AmountRaw, 10)
+		if !ok || amount.Sign() <= 0 {
+			continue
+		}
+		min := new(big.Int).Add(amount, big.NewInt(BotFeeMinLegDivisor-1))
+		min.Quo(min, big.NewInt(BotFeeMinLegDivisor))
+		if cur, ok := minFee[leg.Mint]; !ok || min.Cmp(cur) < 0 {
+			minFee[leg.Mint] = min
+		}
+	}
+	received := func(change *types.BalanceChange, min *big.Int) bool {
 		if change == nil {
 			return false
 		}
 		v, ok := new(big.Int).SetString(change.Change.Amount, 10)
-		return ok && v.Cmp(minFee) >= 0
+		return ok && v.Sign() > 0 && v.Cmp(min) >= 0
+	}
+	receivedToken := func(byMint map[string]*types.BalanceChange) bool {
+		for mint, min := range minFee {
+			if received(byMint[mint], min) {
+				return true
+			}
+		}
+		return false
 	}
 
-	for _, account := range tu.adapter.AccountKeys {
-		botName := constants.GetBotName(account)
-		if botName == "" {
+	// The trader's own accounts are never fee receivers
+	excluded := map[string]bool{trade.User: true}
+	for _, signer := range tu.adapter.Signers() {
+		excluded[signer] = true
+	}
+
+	checkedOwners := make(map[string]bool)
+	for _, key := range tu.adapter.AccountKeys {
+		if key == "" || excluded[key] {
 			continue
 		}
-		if received(solChanges[account]) {
-			trade.Bot = botName
-			return
+		// A listed wallet, or a listed token account (e.g. a WSOL account)
+		if bot := constants.GetBotName(key); bot != "" {
+			checkedOwners[key] = true
+			if received(solChanges[key], minFee[constants.TOKENS.SOL]) || receivedToken(byAccount[key]) || receivedToken(byOwner[key]) {
+				trade.Bot = bot
+				return
+			}
 		}
-		if byMint, ok := tokenChanges[account]; ok && received(byMint[constants.TOKENS.SOL]) {
-			trade.Bot = botName
+		// A token account owned by a listed wallet
+		owner := tu.adapter.GetTokenAccountOwner(key)
+		if owner == "" || excluded[owner] || checkedOwners[owner] {
+			continue
+		}
+		checkedOwners[owner] = true
+		if bot := constants.GetBotName(owner); bot != "" && receivedToken(byOwner[owner]) {
+			trade.Bot = bot
 			return
 		}
 	}
