@@ -262,8 +262,11 @@ func (a *TransactionAdapter) Warnings() []string {
 	return append([]string(nil), a.warnings...)
 }
 
-// urlPattern matches a URL; group 1 is the scheme, group 2 the host
-var urlPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*)://(?:[^\s/?#@"'<>]*@)?([^\s/?#"'<>]+)[^\s"'<>]*`)
+// urlPattern matches a URL, also with JSON-escaped slashes (https:\/\/...);
+// group 1 is the scheme, group 2 the host. The user info runs to the last
+// '@' of the authority, so a password containing '@' is not taken for the
+// host.
+var urlPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*):(?:\\?/){2}(?:[^\s/\\?#"'<>]*@)?([^\s/\\?#"'<>@]+)[^\s"'<>]*`)
 
 // fetcherWarning formats a fetcher error for Warnings. RPC client errors often
 // quote the endpoint URL, whose path, query or user info may hold an API key,
@@ -1470,8 +1473,7 @@ func tokenAmounts(accountKeys []string, byKey map[string]*types.TokenAmount) []*
 	result := make([]*types.TokenAmount, len(accountKeys))
 	for i, accountKey := range accountKeys {
 		if amount, ok := byKey[accountKey]; ok && accountKey != "" {
-			c := *amount
-			result[i] = &c
+			result[i] = amount.Copy() // UIAmount points into tx.Meta otherwise
 		}
 	}
 	return result

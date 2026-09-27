@@ -218,7 +218,6 @@ func (p *MeteoraPoolsParser) parseEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 
 	// Token amounts from transfers, else from the instruction args (token A
 	// and token B when the mints come from the accounts in A/B order)

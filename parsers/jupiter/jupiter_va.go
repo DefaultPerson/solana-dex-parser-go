@@ -202,8 +202,8 @@ func (p *JupiterVAParser) parseOpen(data []byte, ci types.ClassifiedInstruction,
 		Signature: p.Adapter.Signature(),
 	}
 	if balance != nil {
-		transfer.Info.SourceBalance = &balance.Post
-		transfer.Info.SourcePreBalance = &balance.Pre
+		transfer.Info.SourceBalance = balance.Post.Copy()
+		transfer.Info.SourcePreBalance = balance.Pre.Copy()
 	}
 	transfers = append(transfers, transfer)
 
@@ -269,8 +269,8 @@ func (p *JupiterVAParser) parseWithdraw(data []byte, ci types.ClassifiedInstruct
 		Signature: p.Adapter.Signature(),
 	}
 	if balance != nil {
-		transfer.Info.DestinationBalance = &balance.Post
-		transfer.Info.DestinationPreBalance = &balance.Pre
+		transfer.Info.DestinationBalance = balance.Post.Copy()
+		transfer.Info.DestinationPreBalance = balance.Pre.Copy()
 	}
 	transfers = append(transfers, transfer)
 

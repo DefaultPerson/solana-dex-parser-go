@@ -111,7 +111,6 @@ func (p *MeteoraDLMMPoolParser) ParseAddLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 
 	if len(accounts) > 1 {
 		event.PoolId = accounts[1]
@@ -201,7 +200,6 @@ func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 	event.PoolId = accountAt(poolIndex)
 	event.PoolLpMint = event.PoolId
 
@@ -252,7 +250,6 @@ func (p *MeteoraDLMMPoolParser) ParseCreateLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 	for _, t := range p.Utils.GetLPTransfers(transfers) {
 		if t.Info.TokenAmount.UIAmount == nil {
 			continue

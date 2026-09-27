@@ -147,7 +147,6 @@ func (p *MeteoraDAMMPoolParser) ParseCreateLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 	event.PoolId = accountAt(poolIndex)
 
 	if lpToken != nil {
@@ -208,7 +207,6 @@ func (p *MeteoraDAMMPoolParser) ParseAddLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 
 	if len(accounts) > 0 {
 		event.PoolId = accounts[0]
@@ -273,7 +271,6 @@ func (p *MeteoraDAMMPoolParser) ParseRemoveLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = strconv.Itoa(index)
 
 	if len(accounts) > 1 {
 		event.PoolId = accounts[1]
