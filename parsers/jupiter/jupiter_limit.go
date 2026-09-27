@@ -9,6 +9,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // JupiterLimitOrderParser parses Jupiter Limit Order transactions (V1)
@@ -106,13 +107,9 @@ func (p *JupiterLimitOrderParser) parseInitializeOrder(instruction interface{}, 
 		return transfers
 	}
 
-	innerIdx := innerIndex
-	if innerIdx < 0 {
-		innerIdx = 0
-	}
-	idx := fmt.Sprintf("%d-%d", outerIndex, innerIdx)
+	idx := utils.FormatIdx(outerIndex, innerIndex)
 
-	instTransfers := p.GetTransfersForInstruction(programId, outerIndex, innerIdx, nil)
+	instTransfers := p.GetTransfersForInstruction(programId, outerIndex, innerIndex, nil)
 	var transfer *types.TransferData
 	for i := range instTransfers {
 		if instTransfers[i].Info.Mint == mint {
@@ -202,13 +199,9 @@ func (p *JupiterLimitOrderParser) parseCancelOrder(instruction interface{}, prog
 		return transfers
 	}
 
-	innerIdx := innerIndex
-	if innerIdx < 0 {
-		innerIdx = 0
-	}
-	idx := fmt.Sprintf("%d-%d", outerIndex, innerIdx)
+	idx := utils.FormatIdx(outerIndex, innerIndex)
 
-	instTransfers := p.GetTransfersForInstruction(programId, outerIndex, innerIdx, nil)
+	instTransfers := p.GetTransfersForInstruction(programId, outerIndex, innerIndex, nil)
 	var transfer *types.TransferData
 	for i := range instTransfers {
 		if instTransfers[i].Info.Mint == mint {

@@ -2,7 +2,7 @@ package jupiter
 
 import (
 	"bytes"
-	"fmt"
+	"math/big"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -36,11 +36,7 @@ func (p *JupiterVAParser) ProcessTrades() []types.TradeInfo {
 		if ci.ProgramId == constants.DEX_PROGRAMS.JUPITER_VA.ID {
 			data := p.Adapter.GetInstructionData(ci.Instruction)
 			if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_VA.FILL_EVENT) {
-				innerIdx := ci.InnerIndex
-				if innerIdx < 0 {
-					innerIdx = 0
-				}
-				trade := p.parseFullFilled(ci.Instruction, fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx))
+				trade := p.parseFullFilled(ci.Instruction, utils.FormatIdx(ci.OuterIndex, ci.InnerIndex))
 				if trade != nil {
 					trades = append(trades, *trade)
 				}
@@ -106,7 +102,7 @@ func (p *JupiterVAParser) parseFullFilled(instruction interface{}, idx string) *
 	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
 }
 
-// getAMM gets the AMM name
+// getAMM gets the AMM name: the first AMM (in execution order) that moved tokens
 func (p *JupiterVAParser) getAMM() string {
 	amms := utils.GetAMMs(p.getTransferActionKeys())
 	if len(amms) > 0 {
@@ -118,13 +114,10 @@ func (p *JupiterVAParser) getAMM() string {
 	return constants.DEX_PROGRAMS.JUPITER_VA.Name
 }
 
-// getTransferActionKeys returns all transfer action keys
+// getTransferActionKeys returns the transfer action keys in execution order,
+// so the AMM chosen from them does not depend on map iteration order
 func (p *JupiterVAParser) getTransferActionKeys() []string {
-	keys := make([]string, 0, len(p.TransferActions))
-	for k := range p.TransferActions {
-		keys = append(keys, k)
-	}
-	return keys
+	return utils.SortedTransferKeys(p.TransferActions)
 }
 
 // ProcessTransfers parses VA transfer operations
@@ -138,17 +131,13 @@ func (p *JupiterVAParser) ProcessTransfers() []types.TransferData {
 				continue
 			}
 
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			idx := fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx)
+			idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 
 			discriminator := data[:16]
 			if bytes.Equal(discriminator, constants.DISCRIMINATORS.JUPITER_VA.OPEN_EVENT) {
-				transfers = append(transfers, p.parseOpen(data, ci.ProgramId, ci.OuterIndex, idx)...)
+				transfers = append(transfers, p.parseOpen(data, ci, idx)...)
 			} else if bytes.Equal(discriminator, constants.DISCRIMINATORS.JUPITER_VA.WITHDRAW_EVENT) {
-				transfers = append(transfers, p.parseWithdraw(data, ci.ProgramId, ci.OuterIndex, idx)...)
+				transfers = append(transfers, p.parseWithdraw(data, ci, idx)...)
 			}
 		}
 	}
@@ -157,15 +146,16 @@ func (p *JupiterVAParser) ProcessTransfers() []types.TransferData {
 }
 
 // parseOpen parses VA open event
-func (p *JupiterVAParser) parseOpen(data []byte, programId string, outerIndex int, idx string) []types.TransferData {
+func (p *JupiterVAParser) parseOpen(data []byte, ci types.ClassifiedInstruction, idx string) []types.TransferData {
 	var transfers []types.TransferData
+	programId := ci.ProgramId
 
-	instructions := p.Adapter.Instructions()
-	if outerIndex >= len(instructions) {
+	// The VA instruction that emitted the event
+	order := findEmittingInstruction(p.Adapter, p.ClassifiedInstructions, ci)
+	if order == nil {
 		return transfers
 	}
-
-	eventInstruction := instructions[outerIndex]
+	eventInstruction := order.Instruction
 
 	// Parse event data
 	eventData := data[16:]
@@ -185,27 +175,14 @@ func (p *JupiterVAParser) parseOpen(data []byte, programId string, outerIndex in
 	source := accounts[5]
 	destination := accounts[6]
 
-	var balance *types.BalanceChange
-	if event.InputMint == constants.TOKENS.SOL {
-		balanceChanges := p.Adapter.GetAccountSolBalanceChanges(false)
-		balance = balanceChanges[user]
-	} else {
-		tokenChanges := p.Adapter.GetAccountTokenBalanceChanges(false)
-		if userTokens, ok := tokenChanges[user]; ok {
-			balance = userTokens[event.InputMint]
-		}
-	}
+	// The deposit is the event's amount; the balances are the user's
+	// (owner-level, so token accounts of the user are found)
+	balance := p.userBalanceChange(user, event.InputMint)
+	decimals := p.Adapter.GetTokenDecimals(event.InputMint)
+	amount := new(big.Int).SetUint64(event.Deposit)
+	uiAmount := types.ConvertToUIAmount(amount, decimals)
 
-	if balance == nil {
-		return transfers
-	}
-
-	uiAmount := float64(0)
-	if balance.Change.UIAmount != nil {
-		uiAmount = *balance.Change.UIAmount
-	}
-
-	transfers = append(transfers, types.TransferData{
+	transfer := types.TransferData{
 		Type:      "open",
 		ProgramId: programId,
 		Info: types.TransferDataInfo{
@@ -215,31 +192,35 @@ func (p *JupiterVAParser) parseOpen(data []byte, programId string, outerIndex in
 			DestinationOwner: p.Adapter.GetTokenAccountOwner(destination),
 			Mint:             event.InputMint,
 			TokenAmount: types.TokenAmount{
-				Amount:   balance.Change.Amount,
+				Amount:   amount.String(),
 				UIAmount: &uiAmount,
-				Decimals: balance.Change.Decimals,
+				Decimals: decimals,
 			},
-			SourceBalance:    &balance.Post,
-			SourcePreBalance: &balance.Pre,
 		},
 		Idx:       idx,
 		Timestamp: p.Adapter.BlockTime(),
 		Signature: p.Adapter.Signature(),
-	})
+	}
+	if balance != nil {
+		transfer.Info.SourceBalance = &balance.Post
+		transfer.Info.SourcePreBalance = &balance.Pre
+	}
+	transfers = append(transfers, transfer)
 
 	return transfers
 }
 
 // parseWithdraw parses VA withdraw event
-func (p *JupiterVAParser) parseWithdraw(data []byte, programId string, outerIndex int, idx string) []types.TransferData {
+func (p *JupiterVAParser) parseWithdraw(data []byte, ci types.ClassifiedInstruction, idx string) []types.TransferData {
 	var transfers []types.TransferData
+	programId := ci.ProgramId
 
-	instructions := p.Adapter.Instructions()
-	if outerIndex >= len(instructions) {
+	// The VA instruction that emitted the event
+	order := findEmittingInstruction(p.Adapter, p.ClassifiedInstructions, ci)
+	if order == nil {
 		return transfers
 	}
-
-	eventInstruction := instructions[outerIndex]
+	eventInstruction := order.Instruction
 
 	// Parse event data
 	eventData := data[16:]
@@ -255,30 +236,20 @@ func (p *JupiterVAParser) parseWithdraw(data []byte, programId string, outerInde
 		return transfers
 	}
 
+	// withdraw accounts: payer, user, value_average, input_mint, output_mint,
+	// value_average_vault, user_input_account, user_output_account,
+	// intermediate_account (the program id when absent), ...
 	user := accounts[1]
-	source := accounts[8]
+	source := accounts[5]
 
-	var balance *types.BalanceChange
-	if event.Mint == constants.TOKENS.SOL {
-		balanceChanges := p.Adapter.GetAccountSolBalanceChanges(false)
-		balance = balanceChanges[user]
-	} else {
-		tokenChanges := p.Adapter.GetAccountTokenBalanceChanges(false)
-		if userTokens, ok := tokenChanges[user]; ok {
-			balance = userTokens[event.Mint]
-		}
-	}
+	// The withdrawn amount is the event's amount; the balances are the user's
+	// (owner-level, so token accounts of the user are found)
+	balance := p.userBalanceChange(user, event.Mint)
+	decimals := p.Adapter.GetTokenDecimals(event.Mint)
+	amount := new(big.Int).SetUint64(event.Amount)
+	uiAmount := types.ConvertToUIAmount(amount, decimals)
 
-	if balance == nil {
-		return transfers
-	}
-
-	uiAmount := float64(0)
-	if balance.Change.UIAmount != nil {
-		uiAmount = *balance.Change.UIAmount
-	}
-
-	transfers = append(transfers, types.TransferData{
+	transfer := types.TransferData{
 		Type:      "withdraw",
 		ProgramId: programId,
 		Info: types.TransferDataInfo{
@@ -288,17 +259,34 @@ func (p *JupiterVAParser) parseWithdraw(data []byte, programId string, outerInde
 			DestinationOwner: p.Adapter.GetTokenAccountOwner(user),
 			Mint:             event.Mint,
 			TokenAmount: types.TokenAmount{
-				Amount:   balance.Change.Amount,
+				Amount:   amount.String(),
 				UIAmount: &uiAmount,
-				Decimals: balance.Change.Decimals,
+				Decimals: decimals,
 			},
-			SourceBalance:    &balance.Post,
-			SourcePreBalance: &balance.Pre,
 		},
 		Idx:       idx,
 		Timestamp: p.Adapter.BlockTime(),
 		Signature: p.Adapter.Signature(),
-	})
+	}
+	if balance != nil {
+		transfer.Info.DestinationBalance = &balance.Post
+		transfer.Info.DestinationPreBalance = &balance.Pre
+	}
+	transfers = append(transfers, transfer)
 
 	return transfers
+}
+
+// userBalanceChange returns the balance change of wallet user in mint: SOL
+// lamports for SOL, else the sum over the user's token accounts of mint
+func (p *JupiterVAParser) userBalanceChange(user, mint string) *types.BalanceChange {
+	if mint == constants.TOKENS.SOL {
+		if balance := p.Adapter.GetAccountSolBalanceChanges(false)[user]; balance != nil {
+			return balance
+		}
+	}
+	if userTokens, ok := p.Adapter.GetAccountTokenBalanceChanges(true)[user]; ok {
+		return userTokens[mint]
+	}
+	return nil
 }

@@ -168,6 +168,63 @@ type JupiterDCAFilledEvent struct {
 	Fee        *big.Int
 }
 
+// JupiterDCAOrderEvent is a DCA Opened or Closed event. The Closed-only fields
+// (TotalInWithdrawn and after) are zero for Opened.
+type JupiterDCAOrderEvent struct {
+	UserKey           string
+	DCAKey            string
+	InDeposited       *big.Int
+	InputMint         string
+	OutputMint        string
+	CycleFrequency    int64
+	InAmountPerCycle  *big.Int
+	CreatedAt         int64
+	TotalInWithdrawn  *big.Int
+	TotalOutWithdrawn *big.Int
+	UnfilledAmount    *big.Int
+	UserClosed        bool
+}
+
+// ParseJupiterDCAOpenedEvent parses a DCA Opened event
+// Layout: userKey(32) + dcaKey(32) + inDeposited(8) + inputMint(32) +
+// outputMint(32) + cycleFrequency(8) + inAmountPerCycle(8) + createdAt(8) = 160
+func ParseJupiterDCAOpenedEvent(data []byte) (*JupiterDCAOrderEvent, error) {
+	if len(data) < 160 {
+		return nil, ErrInsufficientData
+	}
+	return &JupiterDCAOrderEvent{
+		UserKey:           base58.Encode(data[0:32]),
+		DCAKey:            base58.Encode(data[32:64]),
+		InDeposited:       new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[64:72])),
+		InputMint:         base58.Encode(data[72:104]),
+		OutputMint:        base58.Encode(data[104:136]),
+		CycleFrequency:    int64(binary.LittleEndian.Uint64(data[136:144])),
+		InAmountPerCycle:  new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[144:152])),
+		CreatedAt:         int64(binary.LittleEndian.Uint64(data[152:160])),
+		TotalInWithdrawn:  new(big.Int),
+		TotalOutWithdrawn: new(big.Int),
+		UnfilledAmount:    new(big.Int),
+	}, nil
+}
+
+// ParseJupiterDCAClosedEvent parses a DCA Closed event: the Opened fields
+// followed by totalInWithdrawn(8) + totalOutWithdrawn(8) + unfilledAmount(8) +
+// userClosed(1) = 185
+func ParseJupiterDCAClosedEvent(data []byte) (*JupiterDCAOrderEvent, error) {
+	if len(data) < 185 {
+		return nil, ErrInsufficientData
+	}
+	event, err := ParseJupiterDCAOpenedEvent(data)
+	if err != nil {
+		return nil, err
+	}
+	event.TotalInWithdrawn.SetUint64(binary.LittleEndian.Uint64(data[160:168]))
+	event.TotalOutWithdrawn.SetUint64(binary.LittleEndian.Uint64(data[168:176]))
+	event.UnfilledAmount.SetUint64(binary.LittleEndian.Uint64(data[176:184]))
+	event.UserClosed = data[184] != 0
+	return event, nil
+}
+
 // JupiterLimitOrderV2TradeLayout represents Jupiter Limit Order V2 trade event
 type JupiterLimitOrderV2TradeLayout struct {
 	OrderKey           [32]byte
@@ -499,7 +556,7 @@ type JupiterVAWithdrawLayout struct {
 
 // ParseJupiterVAWithdrawLayout parses Jupiter VA withdraw event
 func ParseJupiterVAWithdrawLayout(data []byte) (*JupiterVAWithdrawLayout, error) {
-	if len(data) < 90 { // 32+32+8+1+1+8+8+8 = 98
+	if len(data) < 98 { // 32+32+8+1+1+8+8+8
 		return nil, ErrInsufficientData
 	}
 
