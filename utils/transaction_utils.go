@@ -812,6 +812,82 @@ func (tu *TransactionUtils) ApplyToken2022TransferFee(trade *types.TradeInfo, tr
 	})
 }
 
+// ApplyToken2022InputTransferFee makes the input of a trade what the user
+// actually sent when the trade reports what the pool received from a
+// Token-2022 transfer that withheld a transfer fee (TransferFee extension):
+// the user's transfer is larger than the credit of its destination.
+// transfers are all transfers of the transaction (SortedTransfers). The
+// transfer must come from the user (authority or source owner), be its
+// destination's only credit, and the destination must be credited exactly
+// the trade's input; the withheld amount is reported in Fees with Type
+// "transferFee". A trade that already reports what the user sent is left
+// unchanged.
+func (tu *TransactionUtils) ApplyToken2022InputTransferFee(trade *types.TradeInfo, transfers []types.TransferData) {
+	if trade == nil || trade.InputToken.Mint == "" || trade.InputToken.Mint == constants.TOKENS.SOL {
+		return
+	}
+	mint := trade.InputToken.Mint
+	input, ok := new(big.Int).SetString(trade.InputToken.AmountRaw, 10)
+	if !ok || input.Sign() <= 0 {
+		return
+	}
+	for i := range transfers {
+		t := &transfers[i]
+		if t.ProgramId != constants.TOKEN_2022_PROGRAM_ID || t.Info.Mint != mint ||
+			(t.Info.Authority != trade.User && tu.adapter.GetTokenAccountOwner(t.Info.Source) != trade.User) {
+			continue
+		}
+		sent := parseAmount(t.Info.TokenAmount.Amount)
+		if sent.Cmp(input) <= 0 {
+			continue
+		}
+		dest := t.Info.Destination
+		post := tu.adapter.GetTokenAccountBalance([]string{dest})[0]
+		if post == nil {
+			continue
+		}
+		preAmount := new(big.Int)
+		if pre := tu.adapter.GetTokenAccountPreBalance([]string{dest})[0]; pre != nil {
+			preAmount = parseAmount(pre.Amount)
+		}
+		incoming, outgoing := new(big.Int), new(big.Int)
+		for _, other := range transfers {
+			if other.Info.Mint != mint {
+				continue
+			}
+			amount := parseAmount(other.Info.TokenAmount.Amount)
+			if other.Info.Destination == dest {
+				incoming.Add(incoming, amount)
+			}
+			if other.Info.Source == dest {
+				outgoing.Add(outgoing, amount)
+			}
+		}
+		if incoming.Cmp(sent) != 0 {
+			continue // other credits: the fee cannot be attributed
+		}
+		// credited = post - pre + outgoing
+		credited := new(big.Int).Sub(parseAmount(post.Amount), preAmount)
+		credited.Add(credited, outgoing)
+		if credited.Cmp(input) != 0 {
+			continue
+		}
+
+		withheld := new(big.Int).Sub(sent, input)
+		decimals := trade.InputToken.Decimals
+		trade.InputToken.AmountRaw = sent.String()
+		trade.InputToken.Amount = types.ConvertToUIAmount(sent, decimals)
+		trade.Fees = append(trade.Fees, types.FeeInfo{
+			Mint:      mint,
+			Amount:    types.ConvertToUIAmount(withheld, decimals),
+			AmountRaw: withheld.String(),
+			Decimals:  decimals,
+			Type:      "transferFee",
+		})
+		return
+	}
+}
+
 // SortedTransferKeys returns the keys of transferActions in execution order of
 // their first transfer (numeric idx), so that iteration is deterministic.
 func SortedTransferKeys(transferActions map[string][]types.TransferData) []string {

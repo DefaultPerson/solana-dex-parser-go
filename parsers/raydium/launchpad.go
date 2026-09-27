@@ -80,10 +80,17 @@ func (p *RaydiumLaunchpadParser) createTradeInfo(event *types.MemeEvent) *types.
 	}
 
 	// Fees from the TradeEvent (protocol, platform, creator, share), all in
-	// the quote mint; Fee is their exact sum
+	// the quote mint; Fee is their exact sum. A Token-2022 transfer fee of
+	// the base mint is listed in Fees only.
 	if len(event.Fees) > 0 {
 		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-		trade.Fee = utils.TotalFee(event.Fees)
+		var quoteFees []types.FeeInfo
+		for _, f := range event.Fees {
+			if f.Type != "transferFee" {
+				quoteFees = append(quoteFees, f)
+			}
+		}
+		trade.Fee = utils.TotalFee(quoteFees)
 	}
 
 	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
@@ -209,8 +216,12 @@ func decodeLCPTradeEvent(data []byte) *RaydiumLCPTradeEvent {
 
 // decodeTradeInstruction decodes a trade instruction with the TradeEvent it
 // emits. Accounts (IDL): 0 payer, 3 platform_config, 4 pool_state, 9 base
-// mint, 10 quote mint. The event amounts are what the user paid (buys:
-// amount_in includes the fees) and received (sells: amount_out after fees).
+// mint, 10 quote mint. The event's quote amounts are what the user paid
+// (buys: amount_in includes the fees) and received (sells: amount_out after
+// fees). Its base amounts are the pool's side: for a Token-2022 base mint
+// with a transfer fee the user sends more (sells) and receives less (buys),
+// so the event reports the user's amounts, with the withheld amount in Fees
+// ("transferFee").
 func (p *RaydiumLaunchpadEventParser) decodeTradeInstruction(ci types.ClassifiedInstruction, ordered []types.ClassifiedInstruction, pos int, ixName string) *types.MemeEvent {
 	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 11 {
@@ -288,7 +299,22 @@ func (p *RaydiumLaunchpadEventParser) decodeTradeInstruction(ci types.Classified
 			Type:      f.feeType,
 		})
 	}
+	p.applyUserSideAmounts(event)
 	return event
+}
+
+// applyUserSideAmounts replaces the pool-side base amount of a trade event
+// with what the user sent or received when a Token-2022 transfer fee was
+// withheld (utils.TransactionUtils.ApplyToken2022InputTransferFee and
+// ApplyToken2022TransferFee), adding the withheld amount to Fees
+func (p *RaydiumLaunchpadEventParser) applyUserSideAmounts(event *types.MemeEvent) {
+	txUtils := utils.NewTransactionUtils(p.adapter)
+	transfers := utils.SortedTransfers(p.transferActions)
+	trade := &types.TradeInfo{User: event.User, InputToken: *event.InputToken, OutputToken: *event.OutputToken}
+	txUtils.ApplyToken2022InputTransferFee(trade, transfers)
+	txUtils.ApplyToken2022TransferFee(trade, transfers)
+	*event.InputToken, *event.OutputToken = trade.InputToken, trade.OutputToken
+	event.Fees = append(event.Fees, trade.Fees...)
 }
 
 func uiAmountPtr(val *big.Int, decimals uint8) *float64 {

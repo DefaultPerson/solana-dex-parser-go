@@ -824,6 +824,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		trades = deduplicateTrades(utils.SortTradesByIdx(trades))
 		allTransfers := utils.SortedTransfers(transferActions)
 		for i := range trades {
+			txUtils.ApplyToken2022InputTransferFee(&trades[i], allTransfers)
 			txUtils.ApplyToken2022TransferFee(&trades[i], allTransfers)
 		}
 		if returnTrades {
