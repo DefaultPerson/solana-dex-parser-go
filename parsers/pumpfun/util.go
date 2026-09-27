@@ -71,7 +71,7 @@ func getPumpswapBuyInfo(
 	}, feeToken.Mint, feeToken.Decimals)
 
 	return pumpswapTradeInfo(
-		getTradeType(inputToken.Mint, outputToken.Mint), event.Pool, event.User,
+		pumpswapTradeType(true, inputToken.Mint, outputToken.Mint), event.Pool, event.User,
 		inputToken, event.UserQuoteIn(),
 		outputToken, event.BaseAmountOut,
 		feeToken, fees, info,
@@ -93,7 +93,7 @@ func getPumpswapSellInfo(
 	}, feeToken.Mint, feeToken.Decimals)
 
 	return pumpswapTradeInfo(
-		getTradeType(inputToken.Mint, outputToken.Mint), event.Pool, event.User,
+		pumpswapTradeType(false, inputToken.Mint, outputToken.Mint), event.Pool, event.User,
 		inputToken, event.BaseAmountIn,
 		outputToken, event.UserQuoteAmountOut,
 		feeToken, fees, info,
@@ -155,9 +155,14 @@ type tokenInfo struct {
 	Decimals uint8
 }
 
-// getTradeType determines trade type from mints
-func getTradeType(inputMint, outputMint string) types.TradeType {
-	if inputMint == constants.TOKENS.SOL || inputMint == constants.TOKENS.USDC || inputMint == constants.TOKENS.USDT {
+// pumpswapTradeType returns the type of a PumpSwap trade: utils.GetTradeType
+// when either mint is SOL or a stablecoin, else (a pool quoted in another
+// token) the event's side, buy or sell of the pool's base token
+func pumpswapTradeType(buy bool, inputMint, outputMint string) types.TradeType {
+	if constants.IsQuoteToken(inputMint) || constants.IsQuoteToken(outputMint) {
+		return utils.GetTradeType(inputMint, outputMint)
+	}
+	if buy {
 		return types.TradeTypeBuy
 	}
 	return types.TradeTypeSell
