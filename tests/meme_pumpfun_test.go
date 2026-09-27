@@ -368,3 +368,37 @@ func mustDecode58(t testing.TB, s string) []byte {
 	}
 	return b
 }
+
+// streamer item 4: when a CreateEvent carries no quote_mint, the quote mint
+// of create_v2 is remaining account 16. Synthetic: the real USDC create_v2
+// of 3MVawF with its CreateEvent cut right before quote_mint (all real
+// create_v2 events carry it).
+func TestMemePumpfunCreateV2QuoteFromAccounts(t *testing.T) {
+	const outer, inner = 2, 19
+	tx := cloneTx(t, loadFixture(t, sigPumpUSDCCreateBuy))
+	data := memeInnerData(t, tx, outer, inner)
+	usdc := mustDecode58(t, usdcMint)
+	cut := -1
+	for i := 16; i+32 <= len(data); i++ {
+		if string(data[i:i+32]) == string(usdc) {
+			cut = i
+		}
+	}
+	if cut < 0 {
+		t.Fatal("quote_mint not found in the CreateEvent")
+	}
+	memeSetInnerData(t, tx, outer, inner, data[:cut])
+	r := dexparserParse(tx)
+	var create *types.MemeEvent
+	for i := range r.MemeEvents {
+		if r.MemeEvents[i].Type == types.TradeTypeCreate {
+			create = &r.MemeEvents[i]
+		}
+	}
+	if create == nil || create.QuoteMint != usdcMint || create.CreatorFeeBps != nil {
+		t.Errorf("create event %+v", create)
+	}
+	if raw := loadMemeRaw(t, sigPumpUSDCCreateBuy); raw.accounts(outer, -1)[16] != usdcMint {
+		t.Errorf("create_v2 account 16 is %s", raw.accounts(outer, -1)[16])
+	}
+}
