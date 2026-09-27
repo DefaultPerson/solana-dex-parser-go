@@ -35,3 +35,33 @@ func TotalFee(fees []types.FeeInfo) *types.FeeInfo {
 		Dex:       first.Dex,
 	}
 }
+
+// FeeComponents returns the distinct fees of a trade: its Fee and Fees,
+// except a Fee that is only the total of the Fees charged in its mint. Two
+// conventions exist: the Pump.fun, PumpSwap, LaunchLab, Meteora DBC and
+// meme parsers set Fee to the total of their fee components (as upstream
+// does), the AMM parsers set Fee to the LP fee and list the other fees in
+// Fees. Token-2022 transfer fees ("transferFee") never count toward a total.
+func FeeComponents(trade *types.TradeInfo) []types.FeeInfo {
+	if trade == nil {
+		return nil
+	}
+	var fees []types.FeeInfo
+	if trade.Fee != nil && !isFeeTotal(*trade.Fee, trade.Fees) {
+		fees = append(fees, *trade.Fee)
+	}
+	return append(fees, trade.Fees...)
+}
+
+// isFeeTotal reports whether fee is the sum of the components (other than
+// transfer fees) of its mint
+func isFeeTotal(fee types.FeeInfo, components []types.FeeInfo) bool {
+	var same []types.FeeInfo
+	for _, f := range components {
+		if f.Mint == fee.Mint && f.Type != "transferFee" {
+			same = append(same, f)
+		}
+	}
+	amount, ok := new(big.Int).SetString(fee.AmountRaw, 10)
+	return ok && len(same) > 0 && fee.Type == "" && SumFeeAmounts(same).Cmp(amount) == 0
+}

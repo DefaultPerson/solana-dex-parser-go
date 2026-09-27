@@ -941,10 +941,7 @@ func routeAggregateTrades(adapt *adapter.TransactionAdapter, trades, routes []ty
 					route.AMMs = append(route.AMMs, amm)
 				}
 			}
-			if trade.Fee != nil {
-				route.Fees = append(route.Fees, *trade.Fee)
-			}
-			route.Fees = append(route.Fees, trade.Fees...)
+			route.Fees = append(route.Fees, utils.FeeComponents(&trade)...)
 		}
 		if hops > 0 {
 			result = append(result, route)

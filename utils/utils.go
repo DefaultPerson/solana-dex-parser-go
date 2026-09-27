@@ -183,8 +183,8 @@ func compareIdx(a, b string) int {
 // Trades are ordered by idx (execution order) first; the input token is the
 // first trade's input token and the output token the last trade's output
 // token, with the amounts summed over the trades using those mints. Fees lists
-// the explicit fees of all trades (Fee is set when exactly one trade has one)
-// and AMMs the AMMs of all trades.
+// the explicit fees of all trades, each once (FeeComponents; Fee is set when
+// exactly one trade has one) and AMMs the AMMs of all trades.
 // The returned trade is always a new value and never aliases an element of trades.
 func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.TradeInfo {
 	if len(trades) == 0 {
@@ -259,18 +259,19 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 		signer = append([]string(nil), inputTrade.Signer...)
 	}
 
-	// Explicit fees reported by the parsers for the individual trades
+	// Explicit fees reported by the parsers for the individual trades, each
+	// counted once (see FeeComponents)
 	var fee *types.FeeInfo
 	var fees []types.FeeInfo
 	feeCount := 0
-	for _, trade := range trades {
+	for i := range trades {
+		trade := &trades[i]
 		if trade.Fee != nil && !isZeroAmount(trade.Fee.AmountRaw) {
 			feeCount++
 			f := *trade.Fee
 			fee = &f
-			fees = append(fees, f)
 		}
-		for _, f := range trade.Fees {
+		for _, f := range FeeComponents(trade) {
 			if !isZeroAmount(f.AmountRaw) {
 				fees = append(fees, f)
 			}
