@@ -107,13 +107,16 @@ func (p *HeavenEventParser) ParseInstructions(instructions []types.ClassifiedIns
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
 	sortExecutionOrder(ordered)
 
-	// outer groups with a Heaven pool creation: the token's Metaplex
-	// create instruction there is the Heaven CREATE event
-	createGroups := map[int]bool{}
+	// Heaven pool creations by base mint: the Metaplex create of that mint
+	// in the same transaction is the Heaven CREATE event (on mainnet it is
+	// a separate outer instruction before create_standard_liquidity_pool)
+	poolCreations := map[string][]string{}
 	for _, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if ci.ProgramId == constants.DEX_PROGRAMS.HEAVEN.ID && len(data) >= 8 && bytes.Equal(data[:8], constants.DISCRIMINATORS.HEAVEN.CREATE_POOL) {
-			createGroups[ci.OuterIndex] = true
+			if accounts := p.adapter.GetInstructionAccounts(ci.Instruction); len(accounts) > 6 {
+				poolCreations[accounts[5]] = accounts
+			}
 		}
 	}
 
@@ -135,8 +138,8 @@ func (p *HeavenEventParser) ParseInstructions(instructions []types.ClassifiedIns
 				event = p.decodeInitialBuyEvent(ci)
 			}
 		case constants.METAPLEX_PROGRAM_ID:
-			if createGroups[ci.OuterIndex] && len(data) >= 1 && bytes.Equal(data[:1], constants.DISCRIMINATORS.METAPLEX.CREATE_MINT) {
-				event = p.decodeCreateEvent(data[1:], ci)
+			if len(poolCreations) > 0 && len(data) >= 1 && bytes.Equal(data[:1], constants.DISCRIMINATORS.METAPLEX.CREATE_MINT) {
+				event = p.decodeCreateEvent(data[1:], ci, poolCreations)
 			}
 		}
 
@@ -240,10 +243,17 @@ func (p *HeavenEventParser) decodeTradeEvent(data []byte, ci types.ClassifiedIns
 
 // decodeCreateEvent decodes the Metaplex create instruction of a token
 // launched with a Heaven pool (upstream decodes it the same way): data is the
-// CreateArgs variant, then name, symbol, uri; accounts 2 mint, 4 payer.
-func (p *HeavenEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedInstruction) *types.MemeEvent {
+// CreateArgs variant, then name, symbol, uri; accounts 2 mint, 4 payer. The
+// quote mint, pool and platform config come from the pool creation of that
+// mint (accounts 6, 10, 11 of create_standard_liquidity_pool); a Metaplex
+// create of any other mint is not a Heaven event.
+func (p *HeavenEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedInstruction, poolCreations map[string][]string) *types.MemeEvent {
 	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 5 {
+		return nil
+	}
+	creation := poolCreations[accounts[2]]
+	if creation == nil {
 		return nil
 	}
 
@@ -264,10 +274,15 @@ func (p *HeavenEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedIn
 		User:      accounts[4],
 		Creator:   accounts[4],
 		BaseMint:  accounts[2],
-		QuoteMint: constants.TOKENS.SOL,
+		QuoteMint: creation[6],
 		Name:      name,
 		Symbol:    symbol,
 		URI:       uri,
+	}
+	if len(creation) > 11 {
+		event.BondingCurve = creation[10]
+		event.Pool = creation[10]
+		event.PlatformConfig = creation[11]
 	}
 	if d, ok := p.adapter.SPLDecimalsMap[accounts[2]]; ok {
 		event.Decimals = &d

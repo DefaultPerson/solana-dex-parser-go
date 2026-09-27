@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"strings"
@@ -282,5 +283,48 @@ func TestMemeMoonitLogLinesWithFrameWords(t *testing.T) {
 		feeOf(got.Fees, "dex") != feeOf(want.Fees, "dex") || feeOf(got.Fees, "helio") != feeOf(want.Fees, "helio") {
 		t.Errorf("with program output lines: %+v %+v fees %+v, want %+v %+v fees %+v",
 			got.InputToken, got.OutputToken, got.Fees, want.InputToken, want.OutputToken, want.Fees)
+	}
+}
+
+const (
+	sigHeavenCreate    = "4cXFmAnXhxckHFe724davHDxrJYGE7LsQgMKTeuXWBUUuqUFkZWPvQVgjQSER7wqiXzUjCX9M89CYRdMaaA127Ck"
+	sigHeavenCreateOld = "386d3SbqXr7iRTk7PF2g8A5ocUREam1zNAn3yrfmsFhGVHsmAcJcLqag7SxudQMQEPuUERoPiTCnUvCyp2hjhgXe"
+)
+
+// meme-7: real Heaven launches (the oldest signature of their pools, found
+// with getProgramAccounts on the Heaven program) run the Metaplex create as
+// outer 5 and create_standard_liquidity_pool as outer 10, so a CREATE event
+// limited to the pool creation's outer group was never emitted. The CREATE
+// takes mint and payer from the Metaplex create (accounts 2 and 4, the
+// signer) and quote mint, pool and platform config from the pool creation
+// of that mint (accounts 6, 10, 11) instead of assuming SOL.
+func TestMemeHeavenCreate(t *testing.T) {
+	for _, sig := range []string{sigHeavenCreate, sigHeavenCreateOld} {
+		raw := loadMemeRaw(t, sig)
+		meta, pool := raw.accounts(5, -1), raw.accounts(10, -1)
+		if raw.program(5, -1) != constants.METAPLEX_PROGRAM_ID || raw.program(10, -1) != constants.DEX_PROGRAMS.HEAVEN.ID || meta[2] != pool[5] {
+			t.Fatalf("%.8s: fixture layout", sig)
+		}
+		e := memeEventAt(t, memeParse(t, sig), "5")
+		if e.Type != types.TradeTypeCreate || e.Protocol != constants.DEX_PROGRAMS.HEAVEN.Name || e.BaseMint != meta[2] ||
+			e.User != raw.keys[0] || e.Creator != raw.keys[0] || meta[4] != raw.keys[0] || e.QuoteMint != pool[6] ||
+			e.Pool != pool[10] || e.BondingCurve != pool[10] || e.PlatformConfig != pool[11] ||
+			e.Name == "" || !bytes.Contains(raw.data(5, -1), []byte(e.Name)) {
+			t.Errorf("%.8s: create %+v", sig, e)
+		}
+		if e.Decimals == nil || *e.Decimals != raw.decimals[meta[2]] {
+			t.Errorf("%.8s: create decimals %v, want %d", sig, e.Decimals, raw.decimals[meta[2]])
+		}
+	}
+
+	// Synthetic: every Heaven pool on mainnet (getProgramAccounts,
+	// 2026-09-27) is quoted in WSOL, so the pool creation of 4cXFmAnX is
+	// pointed at USDC as its quote mint; the CREATE must follow it.
+	tx := cloneTx(t, loadFixture(t, sigHeavenCreate))
+	idx := len(rawAccountKeys(tx))
+	tx.Meta.LoadedAddresses.Readonly = append(tx.Meta.LoadedAddresses.Readonly, usdcMint)
+	tx.Transaction.Message.Instructions[10].(map[string]interface{})["accounts"].([]interface{})[6] = float64(idx)
+	if e := memeEventAt(t, dexparserParse(tx), "5"); e.Type != types.TradeTypeCreate || e.QuoteMint != usdcMint {
+		t.Errorf("create with a USDC pool: %+v", e)
 	}
 }
