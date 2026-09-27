@@ -366,16 +366,12 @@ func (p *DFlowShredParser) buildTradeInfo(swap *DFlowSwapData) *types.TradeInfo 
 	slippageBps := int(swap.SlippageBps)
 	inDecimals, outDecimals := p.decimals(swap.InputMint), p.decimals(swap.OutputMint)
 
+	// A route can end in the mint it starts with (circular arbitrage) or
+	// join any two mints, so one known side does not give the direction:
+	// SWAP unless both mints are known and differ
 	tradeType := types.TradeTypeSwap
-	switch {
-	case swap.InputMint != "" && swap.InputMint == swap.OutputMint:
-		// a circular (arbitrage) route buys nothing: SWAP
-	case swap.InputMint != "" && swap.OutputMint != "":
+	if swap.InputMint != "" && swap.OutputMint != "" && swap.InputMint != swap.OutputMint {
 		tradeType = utils.GetTradeType(swap.InputMint, swap.OutputMint)
-	case constants.IsQuoteToken(swap.InputMint):
-		tradeType = types.TradeTypeBuy
-	case constants.IsQuoteToken(swap.OutputMint):
-		tradeType = types.TradeTypeSell
 	}
 
 	return &types.TradeInfo{

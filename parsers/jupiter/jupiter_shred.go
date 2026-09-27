@@ -301,24 +301,15 @@ func (p *JupiterShredParser) decimals(mint string) uint8 {
 	return constants.TOKEN_DECIMALS[mint]
 }
 
-// shredTradeType is utils.GetTradeType for mints that may be unknown (""):
-// the direction is SWAP unless a known side is SOL or a stablecoin. A trade
-// that ends in the mint it starts with (a circular arbitrage route) is a
-// SWAP too.
+// shredTradeType is utils.GetTradeType when both mints are known. A route
+// can end in the mint it starts with (circular arbitrage) or join any two
+// mints, so one known side does not give the direction: SWAP when a mint is
+// unknown ("") or both are the same.
 func shredTradeType(inMint, outMint string) types.TradeType {
-	if inMint != "" && inMint == outMint {
+	if inMint == "" || outMint == "" || inMint == outMint {
 		return types.TradeTypeSwap
 	}
-	if inMint != "" && outMint != "" {
-		return utils.GetTradeType(inMint, outMint)
-	}
-	if constants.IsQuoteToken(inMint) {
-		return types.TradeTypeBuy
-	}
-	if constants.IsQuoteToken(outMint) {
-		return types.TradeTypeSell
-	}
-	return types.TradeTypeSwap
+	return utils.GetTradeType(inMint, outMint)
 }
 
 func (p *JupiterShredParser) buildTradeInfo(data *JupiterRouteData) *types.TradeInfo {

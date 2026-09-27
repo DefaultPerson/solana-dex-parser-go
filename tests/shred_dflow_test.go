@@ -107,15 +107,19 @@ func TestShredDFlowSwaps(t *testing.T) {
 					if tr.InputToken.Mint != c.inMint || tr.OutputToken.Mint != c.outMint {
 						t.Errorf("full: mints %s -> %s, want %s -> %s", tr.InputToken.Mint, tr.OutputToken.Mint, c.inMint, c.outMint)
 					}
+					if want := utils.GetTradeType(c.inMint, c.outMint); tr.Type != want {
+						t.Errorf("full: type %s, want %s", tr.Type, want)
+					}
 					continue
 				}
-				// Pre-execution: only the native destination names its mint
+				// Pre-execution: only the native destination names its mint,
+				// and one known side does not give a route's direction (G4)
 				wantOut := ""
 				if c.dstNative {
 					wantOut = solMint
 				}
-				if tr.InputToken.Mint != "" || tr.OutputToken.Mint != wantOut {
-					t.Errorf("pre-exec: mints %q -> %q, want \"\" -> %q", tr.InputToken.Mint, tr.OutputToken.Mint, wantOut)
+				if tr.InputToken.Mint != "" || tr.OutputToken.Mint != wantOut || tr.Type != types.TradeTypeSwap {
+					t.Errorf("pre-exec: %s %q -> %q, want SWAP \"\" -> %q", tr.Type, tr.InputToken.Mint, tr.OutputToken.Mint, wantOut)
 				}
 			}
 		})

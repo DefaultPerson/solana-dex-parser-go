@@ -269,21 +269,20 @@ func (p *RaydiumV4ShredParser) decodeSwap(accounts []string, data []byte, v2, ex
 	return swap
 }
 
-// shredTradeType is utils.GetTradeType for mints that may be unknown (""):
-// the direction is SWAP unless a known side is SOL or a stablecoin. A trade
-// that ends in the mint it starts with (a circular arbitrage route) is a
-// SWAP too.
+// shredTradeType is utils.GetTradeType for mints that may be unknown ("").
+// The two mints of a pool differ, so a known WSOL side decides alone: WSOL
+// in is a BUY and WSOL out a SELL whatever the other mint is. Any other
+// single known side does not (USDC in is a BUY against a token but a SELL
+// against SOL) and gives SWAP, as do two equal mints.
 func shredTradeType(inMint, outMint string) types.TradeType {
-	if inMint != "" && inMint == outMint {
+	switch {
+	case inMint != "" && inMint == outMint:
 		return types.TradeTypeSwap
-	}
-	if inMint != "" && outMint != "" {
+	case inMint != "" && outMint != "":
 		return utils.GetTradeType(inMint, outMint)
-	}
-	if constants.IsQuoteToken(inMint) {
+	case inMint == constants.TOKENS.SOL:
 		return types.TradeTypeBuy
-	}
-	if constants.IsQuoteToken(outMint) {
+	case outMint == constants.TOKENS.SOL:
 		return types.TradeTypeSell
 	}
 	return types.TradeTypeSwap
