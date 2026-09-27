@@ -35,7 +35,7 @@ func (tu *TransactionUtils) GetDexInfo(classifier *classifier.InstructionClassif
 	}
 
 	for _, programId := range programIds {
-		if isAuthorityEntry(programId) {
+		if constants.IsKnownAuthority(programId) {
 			continue
 		}
 		prog := constants.GetDexProgramByID(programId)
@@ -57,19 +57,6 @@ func hasTag(prog constants.DexProgram, tag string) bool {
 		if t == tag {
 			return true
 		}
-	}
-	return false
-}
-
-// isAuthorityEntry reports whether id is listed in DEX_PROGRAMS as a wallet or
-// authority (Jupiter DCA keepers, OKX router authority) rather than a program
-func isAuthorityEntry(id string) bool {
-	switch id {
-	case constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER1.ID,
-		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER2.ID,
-		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER3.ID,
-		constants.DEX_PROGRAMS.OKX_ROUTER.ID:
-		return true
 	}
 	return false
 }

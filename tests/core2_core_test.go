@@ -8,7 +8,10 @@ import (
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // Regression tests for the core follow-up (WP core2): no aliasing of cached
@@ -103,4 +106,25 @@ func hasWarning(warnings []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestCore2AuthoritiesFromConstants: GetDexInfo skipped a hardcoded list of
+// wallet entries, so a wallet added to constants.KNOWN_AUTHORITIES was still
+// treated as a route. The test registers the Raydium route program of 51nj as
+// an authority for its duration.
+func TestCore2AuthoritiesFromConstants(t *testing.T) {
+	tx := loadFixture(t, sigT22Fee)
+	info := func() types.DexInfo {
+		a := adapter.NewTransactionAdapter(tx, nil)
+		return utils.NewTransactionUtils(a).GetDexInfo(classifier.NewInstructionClassifier(a))
+	}
+	if got := info(); got.Route != "RaydiumRoute" {
+		t.Fatalf("fixture: DexInfo %+v, want route RaydiumRoute", got)
+	}
+	saved := constants.KNOWN_AUTHORITIES
+	constants.KNOWN_AUTHORITIES = append(append([]string{}, saved...), constants.DEX_PROGRAMS.RAYDIUM_ROUTE.ID)
+	defer func() { constants.KNOWN_AUTHORITIES = saved }()
+	if got := info(); got.Route != "" || got.AMM != "RaydiumCPMM" {
+		t.Errorf("with the route listed as authority: DexInfo %+v, want AMM RaydiumCPMM", got)
+	}
 }
