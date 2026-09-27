@@ -145,6 +145,24 @@ func (r *BinaryReader) ReadString() (string, error) {
 	return str, nil
 }
 
+// ReadVecLength reads a Borsh u32 vector length and checks that that many
+// elements of elemSize bytes fit in the remaining buffer, so callers never
+// allocate or loop from an untrusted count.
+func (r *BinaryReader) ReadVecLength(elemSize int) (int, error) {
+	n, err := r.ReadU32()
+	if err != nil {
+		return 0, err
+	}
+	if elemSize < 1 {
+		elemSize = 1
+	}
+	if uint64(n)*uint64(elemSize) > uint64(r.Remaining()) {
+		r.err = ErrBufferOverflow
+		return 0, r.err
+	}
+	return int(n), nil
+}
+
 // ReadPubkey reads a 32-byte public key and returns it as base58 string
 func (r *BinaryReader) ReadPubkey() (string, error) {
 	bytes, err := r.ReadFixedArray(32)
@@ -204,10 +222,26 @@ func (r *BinaryReader) Slice(length int) ([]byte, error) {
 	return r.buffer[r.offset : r.offset+length], nil
 }
 
-// checkBounds verifies that length bytes can be read from current offset
+// Errors returned by BinaryReader reads.
+var (
+	ErrBufferOverflow = errors.New("buffer overflow: trying to read beyond buffer length")
+	ErrNegativeLength = errors.New("negative length")
+)
+
+// checkBounds verifies that length bytes can be read from current offset.
+// Errors are sticky: once a read has failed, every later read fails with the
+// same error, so decoders can check HasError() once after a sequence of reads.
 func (r *BinaryReader) checkBounds(length int) error {
-	if r.offset+length > len(r.buffer) {
-		return errors.New("buffer overflow: trying to read beyond buffer length")
+	if r.err != nil {
+		return r.err
+	}
+	if length < 0 {
+		r.err = ErrNegativeLength
+		return r.err
+	}
+	if length > len(r.buffer)-r.offset {
+		r.err = ErrBufferOverflow
+		return r.err
 	}
 	return nil
 }
