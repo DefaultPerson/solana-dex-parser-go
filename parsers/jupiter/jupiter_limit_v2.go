@@ -174,8 +174,7 @@ func (p *JupiterLimitOrderV2Parser) fillPayouts(order *types.ClassifiedInstructi
 		if outerIndexOf(t.Idx) != event.OuterIndex || utils.CompareIdx(t.Idx, from) <= 0 || utils.CompareIdx(t.Idx, to) >= 0 {
 			continue
 		}
-		native := t.Info.Mint == constants.TOKENS.SOL && outputMint == constants.TOKENS.SOL
-		if t.Info.Mint != outputMint && !native {
+		if t.Info.Mint != outputMint {
 			continue
 		}
 		switch t.Info.Destination {
