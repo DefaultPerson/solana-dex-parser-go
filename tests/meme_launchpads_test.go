@@ -250,3 +250,37 @@ func TestMemeMoonitWithoutLogs(t *testing.T) {
 		}
 	}
 }
+
+// Program output that contains "failed", "success" or "invoke [" must not
+// end or open an invocation frame: a "Program log:" line with those words
+// made the Moonit TradeEvent logs unusable, so amounts fell back to the
+// slippage-bounded args. Synthetic: the real 2XYu86 sell with such lines
+// added inside the Moonit invocation; the result must equal the real one.
+func TestMemeMoonitLogLinesWithFrameWords(t *testing.T) {
+	want := memeEventAt(t, memeParse(t, sigMoonitSell), "2")
+	if len(want.Fees) == 0 {
+		t.Fatalf("real sell has no TradeEvent fees: %+v", want)
+	}
+	tx := cloneTx(t, loadFixture(t, sigMoonitSell))
+	var logs []string
+	for _, l := range tx.Meta.LogMessages {
+		logs = append(logs, l)
+		if l == "Program log: Instruction: Sell" {
+			logs = append(logs,
+				"Program log: slippage check failed once, retrying",
+				"Program log: step success",
+				"Program log: Program 11111111111111111111111111111111 invoke [2]",
+				"Program return: "+constants.DEX_PROGRAMS.MOONIT.ID+" AAAA")
+		}
+	}
+	if len(logs) != len(tx.Meta.LogMessages)+4 {
+		t.Fatalf("fixture: no Sell log line")
+	}
+	tx.Meta.LogMessages = logs
+	got := memeEventAt(t, dexparserParse(tx), "2")
+	if got.InputToken.AmountRaw != want.InputToken.AmountRaw || got.OutputToken.AmountRaw != want.OutputToken.AmountRaw ||
+		feeOf(got.Fees, "dex") != feeOf(want.Fees, "dex") || feeOf(got.Fees, "helio") != feeOf(want.Fees, "helio") {
+		t.Errorf("with program output lines: %+v %+v fees %+v, want %+v %+v fees %+v",
+			got.InputToken, got.OutputToken, got.Fees, want.InputToken, want.OutputToken, want.Fees)
+	}
+}

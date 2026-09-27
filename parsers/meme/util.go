@@ -127,7 +127,10 @@ func tokenInfoFromRaw(a *adapter.TransactionAdapter, mint string, amount *big.In
 // itself (not its CPIs). It returns nil when the logs are missing, truncated
 // or do not nest cleanly, so callers never attribute data to the wrong
 // instruction. Invocations follow execution order, which is the order of
-// the program's instructions sorted by (outer, inner) index.
+// the program's instructions sorted by (outer, inner) index. Only the
+// runtime's own "Program <id> invoke [n]", "Program <id> success" and
+// "Program <id> failed..." lines open and close frames; program output such
+// as "Program log: ... failed" never does.
 func programDataByInvocation(logs []string, programId string) [][][]byte {
 	if len(logs) == 0 {
 		return nil
@@ -136,18 +139,10 @@ func programDataByInvocation(logs []string, programId string) [][][]byte {
 	var result [][][]byte
 	var current []int // index into result for each stack frame of programId, -1 otherwise
 	for _, line := range logs {
-		switch {
-		case strings.HasPrefix(line, "Program ") && strings.Contains(line, " invoke ["):
-			id := strings.TrimPrefix(line, "Program ")
-			id = id[:strings.Index(id, " ")]
-			stack = append(stack, id)
-			if id == programId {
-				result = append(result, nil)
-				current = append(current, len(result)-1)
-			} else {
-				current = append(current, -1)
-			}
-		case strings.HasPrefix(line, "Program data: "):
+		if strings.HasPrefix(line, "Log truncated") {
+			return nil
+		}
+		if strings.HasPrefix(line, "Program data: ") {
 			if len(stack) == 0 {
 				return nil
 			}
@@ -158,18 +153,33 @@ func programDataByInvocation(logs []string, programId string) [][][]byte {
 				}
 				result[k] = append(result[k], data)
 			}
-		case strings.HasPrefix(line, "Program ") && (strings.HasSuffix(line, " success") || strings.Contains(line, " failed")):
-			if len(stack) == 0 {
-				return nil
+			continue
+		}
+		if !strings.HasPrefix(line, "Program ") || strings.HasPrefix(line, "Program log:") ||
+			strings.HasPrefix(line, "Program return:") || strings.HasPrefix(line, "Program consumption:") {
+			continue
+		}
+		rest := strings.TrimPrefix(line, "Program ")
+		sp := strings.IndexByte(rest, ' ')
+		if sp < 0 {
+			continue
+		}
+		id, verb := rest[:sp], rest[sp+1:]
+		switch {
+		case strings.HasPrefix(verb, "invoke ["):
+			stack = append(stack, id)
+			if id == programId {
+				result = append(result, nil)
+				current = append(current, len(result)-1)
+			} else {
+				current = append(current, -1)
 			}
-			id := strings.TrimPrefix(line, "Program ")
-			if i := strings.Index(id, " "); i < 0 || id[:i] != stack[len(stack)-1] {
+		case verb == "success" || strings.HasPrefix(verb, "failed"):
+			if len(stack) == 0 || id != stack[len(stack)-1] {
 				return nil
 			}
 			stack = stack[:len(stack)-1]
 			current = current[:len(current)-1]
-		case strings.HasPrefix(line, "Log truncated"):
-			return nil
 		}
 	}
 	return result
