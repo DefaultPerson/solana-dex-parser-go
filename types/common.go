@@ -181,7 +181,12 @@ func (r *ParseResult) IsArbitrage() bool {
 	return false
 }
 
-// ParseShredResult contains parsing result for shred-stream data (pre-execution instruction analysis)
+// ParseShredResult contains parsing result for shred-stream data (pre-execution instruction analysis).
+//
+// ShredParser decodes instruction arguments, not execution results: without
+// meta only the outer instructions are visible, amounts are the arguments the
+// sender signed (often slippage limits, see ParsedShredInstruction's amount
+// kinds) and decimals are known only when the transaction reveals them.
 type ParseShredResult struct {
 	// State indicates parsing success status - true if shred parsing completed successfully
 	State bool `json:"state"`
@@ -189,10 +194,12 @@ type ParseShredResult struct {
 	// Signature is the transaction signature being analyzed
 	Signature string `json:"signature"`
 
-	// Instructions contains parsed instructions grouped by AMM/DEX name (legacy format)
+	// Instructions contains parsed instructions grouped by AMM/DEX name
+	// (legacy format). Programs without decoded instructions are omitted.
 	Instructions map[string][]interface{} `json:"instructions"`
 
-	// ParsedInstructions contains typed parsed instructions (new format)
+	// ParsedInstructions contains typed parsed instructions (new format), in
+	// execution order (numeric idx)
 	ParsedInstructions []ParsedShredInstruction `json:"parsedInstructions,omitempty"`
 
 	// Slot is the block slot number
@@ -204,9 +211,38 @@ type ParseShredResult struct {
 	// Signer contains transaction signers
 	Signer []string `json:"signer,omitempty"`
 
+	// TxStatus is the execution status: unknown without meta (pre-execution
+	// data), success or failed otherwise
+	TxStatus TransactionStatus `json:"txStatus,omitempty"`
+
+	// HasUnresolvedAccounts is true when address lookup table accounts of a v0
+	// transaction could not be resolved (no meta.loadedAddresses and no
+	// ParseConfig.AddressLookupTables / ALTsFetcher entry). Such accounts are
+	// empty strings; decoders never guess them.
+	HasUnresolvedAccounts bool `json:"hasUnresolvedAccounts,omitempty"`
+
 	// Msg contains optional error or status message
 	Msg string `json:"msg,omitempty"`
 }
+
+// ShredAmountKind describes what a trade amount decoded from instruction
+// arguments means
+type ShredAmountKind string
+
+const (
+	// ShredAmountExact is the exact amount the user sends or receives
+	ShredAmountExact ShredAmountKind = "exact"
+	// ShredAmountMax is a slippage limit: the most the user may send
+	ShredAmountMax ShredAmountKind = "max"
+	// ShredAmountMin is a slippage limit: the least the user accepts
+	ShredAmountMin ShredAmountKind = "min"
+	// ShredAmountQuote is the router's expected amount; the limit follows
+	// from the trade's SlippageBps
+	ShredAmountQuote ShredAmountKind = "quote"
+	// ShredAmountUnknown means the amount is only known after execution (it
+	// is reported as 0)
+	ShredAmountUnknown ShredAmountKind = "unknown"
+)
 
 // ParsedShredInstruction represents a typed parsed shred instruction
 type ParsedShredInstruction struct {
@@ -239,6 +275,16 @@ type ParsedShredInstruction struct {
 
 	// Idx is the instruction index in format "outer" or "outer-inner"
 	Idx string `json:"idx"`
+
+	// InputAmountKind and OutputAmountKind tell what the input and output
+	// amounts of Trade (or MemeEvent) are, since they come from the
+	// instruction arguments rather than from execution
+	InputAmountKind  ShredAmountKind `json:"inputAmountKind,omitempty"`
+	OutputAmountKind ShredAmountKind `json:"outputAmountKind,omitempty"`
+
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty strings)
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // EventParser is a generic event parser configuration for single discriminator events
