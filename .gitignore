@@ -33,10 +33,6 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Test data and fixtures
-testdata/trades/
-testdata/fixtures/
-
 # Build output
 dist/
 build/

@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mr-tron/base58"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/mr-tron/base58"
 )
 
 // DecodeInstructionData decodes instruction data from various formats
@@ -146,6 +146,12 @@ func SortTradesByIdx(trades []types.TradeInfo) []types.TradeInfo {
 	return sorted
 }
 
+// CompareIdx compares two idx strings in format "outer" or "outer-inner" numerically.
+// An outer idx ("5") sorts before its inner idxs ("5-0", "5-1").
+func CompareIdx(a, b string) int {
+	return compareIdx(a, b)
+}
+
 // compareIdx compares two idx strings in format "main-sub"
 func compareIdx(a, b string) int {
 	aParts := strings.Split(a, "-")
@@ -158,8 +164,8 @@ func compareIdx(a, b string) int {
 		return aMain - bMain
 	}
 
-	aSub := 0
-	bSub := 0
+	aSub := -1
+	bSub := -1
 	if len(aParts) > 1 {
 		aSub, _ = strconv.Atoi(aParts[1])
 	}
