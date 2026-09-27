@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"math/big"
@@ -166,4 +167,17 @@ func jupFindSig(t *testing.T, prefix string) string {
 	}
 	t.Fatalf("no fixture %s", prefix)
 	return ""
+}
+
+// jupInstruction returns the first instruction of program whose data starts
+// with the Anchor discriminator of global:<name>.
+func jupInstruction(t *testing.T, sig, program, name string) jupRawIx {
+	t.Helper()
+	for _, x := range jupRawInstructions(t, sig) {
+		if x.Program == program && len(x.Data) >= 8 && bytes.Equal(x.Data[:8], jupDisc("global:"+name)) {
+			return x
+		}
+	}
+	t.Fatalf("%.8s: no %s instruction", sig, name)
+	return jupRawIx{}
 }

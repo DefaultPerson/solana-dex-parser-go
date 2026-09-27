@@ -29,22 +29,20 @@ func NewJupiterLimitOrderV2Parser(
 	}
 }
 
-// ProcessTrades parses Jupiter Limit Order V2 trades
+// ProcessTrades parses Jupiter Limit Order V2 (Trigger) fills from their
+// TradeEvent. The user is the order's maker: the maker sold making_amount of
+// the input mint and received the output the program paid out, after the fee.
 func (p *JupiterLimitOrderV2Parser) ProcessTrades() []types.TradeInfo {
 	var trades []types.TradeInfo
 
 	for _, ci := range p.ClassifiedInstructions {
-		if ci.ProgramId == constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID {
-			data := p.Adapter.GetInstructionData(ci.Instruction)
-			if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.TRADE_EVENT) {
-				innerIdx := ci.InnerIndex
-				if innerIdx < 0 {
-					innerIdx = 0
-				}
-				trade := p.parseFlashFilled(data, ci.OuterIndex, fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx))
-				if trade != nil {
-					trades = append(trades, *trade)
-				}
+		if ci.ProgramId != constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID {
+			continue
+		}
+		data := p.Adapter.GetInstructionData(ci.Instruction)
+		if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.TRADE_EVENT) {
+			if trade := p.parseFlashFilled(data, ci); trade != nil {
+				trades = append(trades, *trade)
 			}
 		}
 	}
@@ -52,99 +50,145 @@ func (p *JupiterLimitOrderV2Parser) ProcessTrades() []types.TradeInfo {
 	return trades
 }
 
-// parseFlashFilled parses flash filled trade event
-func (p *JupiterLimitOrderV2Parser) parseFlashFilled(data []byte, outerIndex int, idx string) *types.TradeInfo {
-	instructions := p.Adapter.Instructions()
-	if outerIndex >= len(instructions) {
-		return nil
-	}
+// orderInstruction returns the Limit Order V2 instruction that emitted the
+// event ci: the last non-event instruction of the program before ci in the same
+// outer instruction (the outer instruction itself when the program is called
+// directly)
+func (p *JupiterLimitOrderV2Parser) orderInstruction(ci types.ClassifiedInstruction) *types.ClassifiedInstruction {
+	return findEmittingInstruction(p.Adapter, p.ClassifiedInstructions, ci)
+}
 
-	eventInstruction := instructions[outerIndex]
-
-	// Parse event data
-	eventData := data[16:]
-	layout, err := ParseJupiterLimitOrderV2TradeLayout(eventData)
+// parseFlashFilled parses the TradeEvent of a fill_order or flash_fill_order
+func (p *JupiterLimitOrderV2Parser) parseFlashFilled(data []byte, ci types.ClassifiedInstruction) *types.TradeInfo {
+	layout, err := ParseJupiterLimitOrderV2TradeLayout(data[16:])
 	if err != nil {
 		return nil
 	}
 	event := layout.ToObject()
 
-	// Get outer instruction accounts
-	accounts := p.Adapter.GetInstructionAccounts(eventInstruction)
-	outerData := p.Adapter.GetInstructionData(eventInstruction)
+	order := p.orderInstruction(ci)
+	if order == nil {
+		return nil
+	}
+	accounts := p.Adapter.GetInstructionAccounts(order.Instruction)
+	orderData := p.Adapter.GetInstructionData(order.Instruction)
 
-	var inputToken, outputToken *types.TokenInfo
-
-	// Determine token info based on instruction discriminator
-	if len(outerData) >= 8 && bytes.Equal(outerData[:8], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.UNKNOWN) {
-		// Unknown instruction
-		if len(accounts) > 4 {
-			if tokenInfo, ok := p.Adapter.SPLTokenMap[accounts[3]]; ok {
-				inputToken = &tokenInfo
-			}
-			if tokenInfo, ok := p.Adapter.SPLTokenMap[accounts[4]]; ok {
-				outputToken = &tokenInfo
-			}
+	// Accounts per the limit_order_2 IDL:
+	// fill_order: taker, maker, order, taker_input_mint_account,
+	//   taker_output_mint_account, maker_output_mint_account, fee_account,
+	//   order_input_mint_account, input_mint, input_token_program, output_mint, ...
+	// flash_fill_order: taker, maker, order, input_mint_reserve,
+	//   maker_output_mint_account, taker_output_mint_account, fee_account,
+	//   input_token_program, output_mint, ...
+	var maker, inputMint, outputMint, makerOutput, feeAccount string
+	if parsers.MatchDiscriminator(orderData, constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.UNKNOWN) {
+		if len(accounts) < 11 {
+			return nil
 		}
+		maker, makerOutput, feeAccount = accounts[1], accounts[5], accounts[6]
+		inputMint, outputMint = accounts[8], accounts[10]
 	} else {
-		// FlashFillOrder instruction
-		if len(accounts) > 8 {
-			if tokenInfo, ok := p.Adapter.SPLTokenMap[accounts[3]]; ok {
-				inputToken = &tokenInfo
-			}
-			outputToken = &types.TokenInfo{
-				Mint:     accounts[8],
-				Decimals: p.Adapter.GetTokenDecimals(accounts[8]),
-			}
+		if len(accounts) < 9 {
+			return nil
+		}
+		maker, makerOutput, feeAccount = accounts[1], accounts[4], accounts[6]
+		inputMint, outputMint = p.Adapter.GetSplTokenMint(accounts[3]), accounts[8]
+		if tokenInfo, ok := p.Adapter.SPLTokenMap[accounts[3]]; ok && tokenInfo.Mint != "" {
+			inputMint = tokenInfo.Mint
 		}
 	}
-
-	if inputToken == nil || outputToken == nil {
+	if inputMint == "" || outputMint == "" {
 		return nil
 	}
 
-	// Jupiter fee 0.1%
-	feeAmount := new(big.Int).Div(event.TakingAmount, big.NewInt(1000))
-	outAmount := new(big.Int).Sub(event.TakingAmount, feeAmount)
+	// The program pays taking_amount minus the order's fee (fee_bps) to the
+	// maker and the fee to fee_account; both transfers are in the fill
+	received, fee := p.fillPayouts(order, ci, outputMint, maker, makerOutput, feeAccount)
+	outAmount := received
+	if outAmount == nil {
+		outAmount = new(big.Int).Set(event.TakingAmount)
+		if fee != nil && fee.Cmp(outAmount) <= 0 {
+			outAmount.Sub(outAmount, fee)
+		}
+	}
 
-	inUIAmount := types.ConvertToUIAmount(event.MakingAmount, inputToken.Decimals)
-	outUIAmount := types.ConvertToUIAmount(outAmount, outputToken.Decimals)
-	feeUIAmount := types.ConvertToUIAmount(feeAmount, outputToken.Decimals)
+	inputDecimals := p.Adapter.GetTokenDecimals(inputMint)
+	outputDecimals := p.Adapter.GetTokenDecimals(outputMint)
 
 	trade := &types.TradeInfo{
-		Type: utils.GetTradeType(inputToken.Mint, outputToken.Mint),
+		Type: utils.GetTradeType(inputMint, outputMint),
 		InputToken: types.TokenInfo{
-			Mint:      inputToken.Mint,
-			Amount:    inUIAmount,
+			Mint:      inputMint,
+			Amount:    types.ConvertToUIAmount(event.MakingAmount, inputDecimals),
 			AmountRaw: event.MakingAmount.String(),
-			Decimals:  inputToken.Decimals,
+			Decimals:  inputDecimals,
 		},
 		OutputToken: types.TokenInfo{
-			Mint:      outputToken.Mint,
-			Amount:    outUIAmount,
+			Mint:      outputMint,
+			Amount:    types.ConvertToUIAmount(outAmount, outputDecimals),
 			AmountRaw: outAmount.String(),
-			Decimals:  outputToken.Decimals,
+			Decimals:  outputDecimals,
 		},
-		Fee: &types.FeeInfo{
-			Mint:      outputToken.Mint,
-			Amount:    feeUIAmount,
-			AmountRaw: feeAmount.String(),
-			Decimals:  outputToken.Decimals,
-		},
-		User:      event.Taker,
+		User:      maker,
 		ProgramId: constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID,
 		AMM:       p.getAMM(),
 		Route:     p.DexInfo.Route,
 		Slot:      p.Adapter.Slot(),
 		Timestamp: p.Adapter.BlockTime(),
 		Signature: p.Adapter.Signature(),
-		Idx:       idx,
+		Idx:       utils.FormatIdx(ci.OuterIndex, ci.InnerIndex),
+	}
+	if fee != nil && fee.Sign() > 0 {
+		trade.Fee = &types.FeeInfo{
+			Mint:      outputMint,
+			Amount:    types.ConvertToUIAmount(fee, outputDecimals),
+			AmountRaw: fee.String(),
+			Decimals:  outputDecimals,
+			Dex:       constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.Name,
+			Type:      "protocol",
+			Recipient: feeAccount,
+		}
 	}
 
 	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
 }
 
-// getAMM gets the AMM name
+// fillPayouts sums the output-mint transfers of a fill (between the order
+// instruction and its event) to the maker's output account and to the fee
+// account. A nil result means no such transfer was found.
+func (p *JupiterLimitOrderV2Parser) fillPayouts(order *types.ClassifiedInstruction, event types.ClassifiedInstruction, outputMint, maker, makerOutput, feeAccount string) (*big.Int, *big.Int) {
+	from := utils.FormatIdx(order.OuterIndex, order.InnerIndex)
+	to := utils.FormatIdx(event.OuterIndex, event.InnerIndex)
+	var received, fee *big.Int
+	add := func(sum *big.Int, amount string) *big.Int {
+		v, ok := new(big.Int).SetString(amount, 10)
+		if !ok {
+			return sum
+		}
+		if sum == nil {
+			return v
+		}
+		return sum.Add(sum, v)
+	}
+	for _, t := range utils.SortedTransfers(p.TransferActions) {
+		if outerIndexOf(t.Idx) != event.OuterIndex || utils.CompareIdx(t.Idx, from) <= 0 || utils.CompareIdx(t.Idx, to) >= 0 {
+			continue
+		}
+		native := t.Info.Mint == constants.TOKENS.SOL && outputMint == constants.TOKENS.SOL
+		if t.Info.Mint != outputMint && !native {
+			continue
+		}
+		switch t.Info.Destination {
+		case makerOutput, maker:
+			received = add(received, t.Info.TokenAmount.Amount)
+		case feeAccount:
+			fee = add(fee, t.Info.TokenAmount.Amount)
+		}
+	}
+	return received, fee
+}
+
+// getAMM gets the AMM name: the first AMM (in execution order) that moved tokens
 func (p *JupiterLimitOrderV2Parser) getAMM() string {
 	amms := utils.GetAMMs(p.getTransferActionKeys())
 	if len(amms) > 0 {
@@ -156,13 +200,10 @@ func (p *JupiterLimitOrderV2Parser) getAMM() string {
 	return constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.Name
 }
 
-// getTransferActionKeys returns all transfer action keys
+// getTransferActionKeys returns the transfer action keys in execution order,
+// so the AMM chosen from them does not depend on map iteration order
 func (p *JupiterLimitOrderV2Parser) getTransferActionKeys() []string {
-	keys := make([]string, 0, len(p.TransferActions))
-	for k := range p.TransferActions {
-		keys = append(keys, k)
-	}
-	return keys
+	return utils.SortedTransferKeys(p.TransferActions)
 }
 
 // ProcessTransfers parses Limit Order V2 transfer operations
@@ -176,16 +217,15 @@ func (p *JupiterLimitOrderV2Parser) ProcessTransfers() []types.TransferData {
 				continue
 			}
 
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			idx := fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx)
+			idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 
 			if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.CREATE_ORDER_EVENT) {
-				transfers = append(transfers, p.parseInitializeOrder(data, ci.ProgramId, ci.OuterIndex, idx)...)
+				transfers = append(transfers, p.parseInitializeOrder(data, ci, idx)...)
 			} else if bytes.Equal(data[:8], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.CANCEL_ORDER) {
-				transfers = append(transfers, p.parseCancelOrder(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)...)
+				transfers = append(transfers, p.parseCancelOrder(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, "cancelOrder")...)
+			} else if bytes.Equal(data[:8], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER_V2.CANCEL_DUST_ORDER) {
+				// cancel_dust_order has the account layout of cancel_order
+				transfers = append(transfers, p.parseCancelOrder(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, "cancelDustOrder")...)
 			}
 		}
 	}
@@ -208,15 +248,15 @@ func (p *JupiterLimitOrderV2Parser) ProcessTransfers() []types.TransferData {
 }
 
 // parseInitializeOrder parses create order event
-func (p *JupiterLimitOrderV2Parser) parseInitializeOrder(data []byte, programId string, outerIndex int, idx string) []types.TransferData {
+func (p *JupiterLimitOrderV2Parser) parseInitializeOrder(data []byte, ci types.ClassifiedInstruction, idx string) []types.TransferData {
 	var transfers []types.TransferData
+	programId := ci.ProgramId
 
-	instructions := p.Adapter.Instructions()
-	if outerIndex >= len(instructions) {
+	order := p.orderInstruction(ci)
+	if order == nil {
 		return transfers
 	}
-
-	eventInstruction := instructions[outerIndex]
+	eventInstruction := order.Instruction
 
 	// Parse event data
 	eventData := data[16:]
@@ -280,7 +320,7 @@ func (p *JupiterLimitOrderV2Parser) parseInitializeOrder(data []byte, programId 
 }
 
 // parseCancelOrder parses cancel order instruction
-func (p *JupiterLimitOrderV2Parser) parseCancelOrder(instruction interface{}, programId string, outerIndex int, innerIndex int) []types.TransferData {
+func (p *JupiterLimitOrderV2Parser) parseCancelOrder(instruction interface{}, programId string, outerIndex int, innerIndex int, transferType string) []types.TransferData {
 	var transfers []types.TransferData
 
 	accounts := p.Adapter.GetInstructionAccounts(instruction)
@@ -312,13 +352,9 @@ func (p *JupiterLimitOrderV2Parser) parseCancelOrder(instruction interface{}, pr
 		return transfers
 	}
 
-	innerIdx := innerIndex
-	if innerIdx < 0 {
-		innerIdx = 0
-	}
-	idx := fmt.Sprintf("%d-%d", outerIndex, innerIdx)
+	idx := utils.FormatIdx(outerIndex, innerIndex)
 
-	instTransfers := p.GetTransfersForInstruction(programId, outerIndex, innerIdx, nil)
+	instTransfers := p.GetTransfersForInstruction(programId, outerIndex, innerIndex, nil)
 	var transfer *types.TransferData
 	for i := range instTransfers {
 		if instTransfers[i].Info.Mint == mint {
@@ -360,7 +396,7 @@ func (p *JupiterLimitOrderV2Parser) parseCancelOrder(instruction interface{}, pr
 	}
 
 	transfers = append(transfers, types.TransferData{
-		Type:      "cancelOrder",
+		Type:      transferType,
 		ProgramId: programId,
 		Info: types.TransferDataInfo{
 			Authority:             authorityStr,
@@ -386,7 +422,7 @@ func (p *JupiterLimitOrderV2Parser) parseCancelOrder(instruction interface{}, pr
 				solUIAmount = *solBalance.Change.UIAmount
 			}
 			transfers = append(transfers, types.TransferData{
-				Type:      "cancelOrder",
+				Type:      transferType,
 				ProgramId: programId,
 				Info: types.TransferDataInfo{
 					Authority:             authorityStr,
