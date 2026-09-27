@@ -132,9 +132,13 @@ func TestGetBotNames(t *testing.T) {
 		"MevX":      true,
 	}
 
+	got := make(map[string]bool, len(names))
 	for _, name := range names {
-		if !expected[name] {
-			t.Errorf("Unexpected bot name: %s", name)
+		got[name] = true
+	}
+	for name := range expected {
+		if !got[name] {
+			t.Errorf("Missing bot name: %s", name)
 		}
 	}
 }
