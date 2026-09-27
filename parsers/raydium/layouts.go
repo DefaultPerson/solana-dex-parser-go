@@ -438,7 +438,9 @@ func (l *RaydiumLCPTradeV2Layout) ToObject() *RaydiumLCPTradeEvent {
 	}
 }
 
-// LogType represents Raydium log types
+// LogType represents the Raydium AMM v4 "ray_log" types (raydium-amm
+// program/src/log.rs). The payload is bincode: little-endian integers,
+// pubkeys as 32 bytes.
 type LogType uint8
 
 const (
@@ -448,6 +450,19 @@ const (
 	LogTypeSwapBaseIn  LogType = 3
 	LogTypeSwapBaseOut LogType = 4
 )
+
+// InitLog is written by initialize2: the initial pool amounts
+type InitLog struct {
+	LogType      LogType
+	Time         uint64
+	PcDecimals   uint8
+	CoinDecimals uint8
+	PcLotSize    uint64
+	CoinLotSize  uint64
+	PcAmount     *big.Int
+	CoinAmount   *big.Int
+	Market       string
+}
 
 // DepositLog represents a deposit log
 type DepositLog struct {
@@ -503,7 +518,9 @@ type SwapBaseOutLog struct {
 	DeductIn   *big.Int
 }
 
-// DecodeRaydiumLog decodes a Raydium log from base64
+// DecodeRaydiumLog decodes the payload of a "ray_log:" line (already base64
+// decoded) into *InitLog, *DepositLog, *WithdrawLog, *SwapBaseInLog or
+// *SwapBaseOutLog. It returns nil for an unknown type or a short payload.
 func DecodeRaydiumLog(data []byte) interface{} {
 	if len(data) < 1 {
 		return nil
@@ -513,7 +530,26 @@ func DecodeRaydiumLog(data []byte) interface{} {
 	reader := utils.GetBinaryReader(data[1:])
 	defer reader.Release()
 
+	result := decodeRaydiumLog(logType, reader)
+	if reader.HasError() {
+		return nil
+	}
+	return result
+}
+
+func decodeRaydiumLog(logType LogType, reader *utils.BinaryReader) interface{} {
 	switch logType {
+	case LogTypeInit:
+		l := &InitLog{LogType: logType}
+		l.Time, _ = reader.ReadU64()
+		l.PcDecimals, _ = reader.ReadU8()
+		l.CoinDecimals, _ = reader.ReadU8()
+		l.PcLotSize, _ = reader.ReadU64()
+		l.CoinLotSize, _ = reader.ReadU64()
+		l.PcAmount = reader.ReadU64AsBigInt()
+		l.CoinAmount = reader.ReadU64AsBigInt()
+		l.Market, _ = reader.ReadPubkey()
+		return l
 	case LogTypeDeposit:
 		return &DepositLog{
 			LogType:    logType,
@@ -569,10 +605,11 @@ func DecodeRaydiumLog(data []byte) interface{} {
 	return nil
 }
 
-// Swap direction constants
+// Swap direction constants: the direction field of the swap logs
+// (raydium-amm program/src/math.rs SwapDirection)
 const (
-	SwapDirectionCoinToPC = 0 // Token A -> Token B (e.g., SOL -> USDC)
-	SwapDirectionPCToCoin = 1 // Token B -> Token A (e.g., USDC -> SOL)
+	SwapDirectionPCToCoin = 1 // pc (quote) in, coin (base) out
+	SwapDirectionCoinToPC = 2 // coin (base) in, pc (quote) out
 )
 
 // SwapOperation represents parsed swap details

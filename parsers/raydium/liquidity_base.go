@@ -1,12 +1,12 @@
 package raydium
 
 import (
-	"fmt"
 	"math/big"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // ParseEventConfig holds configuration for parsing pool events
@@ -17,7 +17,9 @@ type ParseEventConfig struct {
 	TokenAmountOffsets *TokenAmountOffsets
 }
 
-// TokenAmountOffsets holds byte offsets for token amounts in instruction data
+// TokenAmountOffsets holds byte offsets of u64 amounts in the instruction data,
+// used when the transfers do not provide the amounts. A negative offset means
+// the instruction data has no such amount.
 type TokenAmountOffsets struct {
 	Token0 int
 	Token1 int
@@ -46,7 +48,8 @@ type PoolActionGetter interface {
 	GetEventConfig(eventType types.PoolEventType, instructionType interface{}) *ParseEventConfig
 }
 
-// ParseRaydiumInstruction parses a Raydium instruction into a pool event
+// ParseRaydiumInstruction parses a Raydium instruction into a pool event.
+// innerIndex is the instruction's inner index, -1 for an outer instruction.
 func (p *RaydiumLiquidityParserBase) ParseRaydiumInstruction(
 	instruction interface{},
 	programId string,
@@ -66,6 +69,8 @@ func (p *RaydiumLiquidityParserBase) ParseRaydiumInstruction(
 	switch v := instructionType.(type) {
 	case types.PoolEventType:
 		eventType = v
+	case InstructionTypeInfo:
+		eventType = v.Type
 	case struct {
 		Name string
 		Type types.PoolEventType
@@ -89,13 +94,14 @@ func (p *RaydiumLiquidityParserBase) ParseRaydiumInstruction(
 		return nil
 	}
 
-	return p.parseEvent(instruction, outerIndex, data, filteredTransfers, config)
+	return p.parseEvent(instruction, outerIndex, innerIndex, data, filteredTransfers, config)
 }
 
 // parseEvent parses instruction into pool event
 func (p *RaydiumLiquidityParserBase) parseEvent(
 	instruction interface{},
-	index int,
+	outerIndex int,
+	innerIndex int,
 	data []byte,
 	transfers []types.TransferData,
 	config *ParseEventConfig,
@@ -142,7 +148,7 @@ func (p *RaydiumLiquidityParserBase) parseEvent(
 
 	// Create PoolEvent with embedded base
 	base := p.Adapter.GetPoolEventBase(config.EventType, programId)
-	base.Idx = intToString(index)
+	base.Idx = utils.FormatIdx(outerIndex, innerIndex)
 
 	event := &types.PoolEvent{
 		PoolEventBase:  base,
@@ -166,7 +172,7 @@ func (p *RaydiumLiquidityParserBase) parseEvent(
 	if token0 != nil && token0.Info.TokenAmount.UIAmount != nil {
 		event.Token0Amount = token0.Info.TokenAmount.UIAmount
 		event.Token0AmountRaw = token0.Info.TokenAmount.Amount
-	} else if config.TokenAmountOffsets != nil && len(data) > config.TokenAmountOffsets.Token0+8 {
+	} else if config.TokenAmountOffsets != nil && hasU64At(data, config.TokenAmountOffsets.Token0) {
 		amt := readU64LE(data, config.TokenAmountOffsets.Token0)
 		uiAmt := types.ConvertToUIAmount(amt, token0Decimals)
 		event.Token0Amount = &uiAmt
@@ -176,7 +182,7 @@ func (p *RaydiumLiquidityParserBase) parseEvent(
 	if token1 != nil && token1.Info.TokenAmount.UIAmount != nil {
 		event.Token1Amount = token1.Info.TokenAmount.UIAmount
 		event.Token1AmountRaw = token1.Info.TokenAmount.Amount
-	} else if config.TokenAmountOffsets != nil && len(data) > config.TokenAmountOffsets.Token1+8 {
+	} else if config.TokenAmountOffsets != nil && hasU64At(data, config.TokenAmountOffsets.Token1) {
 		amt := readU64LE(data, config.TokenAmountOffsets.Token1)
 		uiAmt := types.ConvertToUIAmount(amt, token1Decimals)
 		event.Token1Amount = &uiAmt
@@ -186,7 +192,7 @@ func (p *RaydiumLiquidityParserBase) parseEvent(
 	if lpToken != nil && lpToken.Info.TokenAmount.UIAmount != nil {
 		event.LpAmount = lpToken.Info.TokenAmount.UIAmount
 		event.LpAmountRaw = lpToken.Info.TokenAmount.Amount
-	} else if config.TokenAmountOffsets != nil && len(data) > config.TokenAmountOffsets.Lp+8 {
+	} else if config.TokenAmountOffsets != nil && hasU64At(data, config.TokenAmountOffsets.Lp) {
 		amt := readU64LE(data, config.TokenAmountOffsets.Lp)
 		uiAmt := types.ConvertToUIAmount(amt, 0)
 		event.LpAmount = &uiAmt
@@ -208,8 +214,10 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-func intToString(i int) string {
-	return fmt.Sprintf("%d", i)
+// hasU64At reports whether data holds a u64 at offset (a negative offset
+// means the instruction has no such field)
+func hasU64At(data []byte, offset int) bool {
+	return offset >= 0 && offset+8 <= len(data)
 }
 
 func readU64LE(data []byte, offset int) *big.Int {

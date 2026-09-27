@@ -33,6 +33,9 @@ func (p *RaydiumCPMMPoolParser) GetPoolAction(data []byte) interface{} {
 	if bytes.Equal(instructionType, constants.DISCRIMINATORS.RAYDIUM_CPMM.CREATE) {
 		return types.PoolEventTypeCreate
 	}
+	if bytes.Equal(instructionType, constants.DISCRIMINATORS.RAYDIUM_CPMM.INITIALIZE_WITH_PERMISSION) {
+		return InstructionTypeInfo{Name: "initializeWithPermission", Type: types.PoolEventTypeCreate}
+	}
 	if bytes.Equal(instructionType, constants.DISCRIMINATORS.RAYDIUM_CPMM.ADD_LIQUIDITY) {
 		return types.PoolEventTypeAdd
 	}
@@ -44,15 +47,25 @@ func (p *RaydiumCPMMPoolParser) GetPoolAction(data []byte) interface{} {
 
 // GetEventConfig gets the event configuration for a pool event type
 func (p *RaydiumCPMMPoolParser) GetEventConfig(eventType types.PoolEventType, instructionType interface{}) *ParseEventConfig {
+	// initialize_with_permission has payer and creator first: pool_state 4, lp_mint 7
+	if info, ok := instructionType.(InstructionTypeInfo); ok && info.Name == "initializeWithPermission" {
+		return &ParseEventConfig{
+			EventType:          types.PoolEventTypeCreate,
+			PoolIdIndex:        4,
+			LpMintIndex:        7,
+			TokenAmountOffsets: &TokenAmountOffsets{Token0: 8, Token1: 16, Lp: -1},
+		}
+	}
 	configs := map[types.PoolEventType]*ParseEventConfig{
 		types.PoolEventTypeCreate: {
 			EventType:   types.PoolEventTypeCreate,
 			PoolIdIndex: 3,
 			LpMintIndex: 6,
+			// initialize args: init_amount_0, init_amount_1, open_time (no LP amount)
 			TokenAmountOffsets: &TokenAmountOffsets{
 				Token0: 8,
 				Token1: 16,
-				Lp:     0,
+				Lp:     -1,
 			},
 		},
 		types.PoolEventTypeAdd: {
@@ -85,11 +98,7 @@ func (p *RaydiumCPMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId == constants.DEX_PROGRAMS.RAYDIUM_CPMM.ID {
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			event := p.ParseRaydiumInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx, p)
+			event := p.ParseRaydiumInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
 			if event != nil {
 				events = append(events, *event)
 			}

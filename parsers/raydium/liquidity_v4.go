@@ -59,11 +59,7 @@ func (p *RaydiumV4PoolParser) ProcessLiquidity() []types.PoolEvent {
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId == constants.DEX_PROGRAMS.RAYDIUM_V4.ID ||
 			ci.ProgramId == constants.DEX_PROGRAMS.RAYDIUM_AMM.ID {
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			event := p.ParseRaydiumInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx, p)
+			event := p.ParseRaydiumInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
 			if event != nil {
 				events = append(events, *event)
 			}

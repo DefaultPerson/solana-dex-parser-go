@@ -6,6 +6,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // InstructionTypeInfo holds instruction type info with name
@@ -30,90 +31,84 @@ func NewRaydiumCLPoolParser(
 	}
 }
 
-// GetPoolAction gets the pool action type from instruction data
+// GetPoolAction gets the pool action type from instruction data.
+// create_pool and create_customizable_pool create a pool (CREATE); opening a
+// position deposits liquidity into an existing pool (ADD), as in upstream
+// RaydiumCLPoolV2Parser. close_position moves no tokens and is not an event.
 func (p *RaydiumCLPoolParser) GetPoolAction(data []byte) interface{} {
 	if len(data) < 8 {
 		return nil
 	}
 	instructionType := data[:8]
+	cl := constants.DISCRIMINATORS.RAYDIUM_CL
 
-	// CREATE discriminators
-	createDiscs := map[string][]byte{
-		"openPosition":   constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.OPEN_POSITION,
-		"openPositionV2": constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.OPEN_POSITION_V2,
-		"createPool":     constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.CREATE_POOL,
+	actions := []struct {
+		name string
+		disc []byte
+		typ  types.PoolEventType
+	}{
+		{"createPool", cl.CREATE.CREATE_POOL, types.PoolEventTypeCreate},
+		{"createCustomizablePool", cl.CREATE.CREATE_CUSTOMIZABLE_POOL, types.PoolEventTypeCreate},
+		{"openPosition", cl.CREATE.OPEN_POSITION, types.PoolEventTypeAdd},
+		{"openPositionV2", cl.CREATE.OPEN_POSITION_V2, types.PoolEventTypeAdd},
+		{"openPositionWithToken22Nft", cl.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22, types.PoolEventTypeAdd},
+		{"increaseLiquidity", cl.ADD_LIQUIDITY.INCREASE_LIQUIDITY, types.PoolEventTypeAdd},
+		{"increaseLiquidityV2", cl.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2, types.PoolEventTypeAdd},
+		{"decreaseLiquidity", cl.REMOVE_LIQUIDITY.DECREASE_LIQUIDITY, types.PoolEventTypeRemove},
+		{"decreaseLiquidityV2", cl.REMOVE_LIQUIDITY.DECREASE_LIQUIDITY_V2, types.PoolEventTypeRemove},
 	}
-	for name, disc := range createDiscs {
-		if bytes.Equal(instructionType, disc) {
-			return InstructionTypeInfo{Name: name, Type: types.PoolEventTypeCreate}
+	for _, a := range actions {
+		if bytes.Equal(instructionType, a.disc) {
+			return InstructionTypeInfo{Name: a.name, Type: a.typ}
 		}
 	}
-
-	// ADD_LIQUIDITY discriminators
-	addDiscs := map[string][]byte{
-		"increaseLiquidity":       constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY,
-		"increaseLiquidityV2":     constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2,
-		"openPositionWithToken22": constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22,
-	}
-	for name, disc := range addDiscs {
-		if bytes.Equal(instructionType, disc) {
-			return InstructionTypeInfo{Name: name, Type: types.PoolEventTypeAdd}
-		}
-	}
-
-	// REMOVE_LIQUIDITY discriminators
-	removeDiscs := map[string][]byte{
-		"decreaseLiquidity":   constants.DISCRIMINATORS.RAYDIUM_CL.REMOVE_LIQUIDITY.DECREASE_LIQUIDITY,
-		"decreaseLiquidityV2": constants.DISCRIMINATORS.RAYDIUM_CL.REMOVE_LIQUIDITY.DECREASE_LIQUIDITY_V2,
-	}
-	for name, disc := range removeDiscs {
-		if bytes.Equal(instructionType, disc) {
-			return InstructionTypeInfo{Name: name, Type: types.PoolEventTypeRemove}
-		}
-	}
-
 	return nil
 }
 
-// GetEventConfig gets the event configuration for a pool event type
+// GetEventConfig gets the event configuration for a pool event type.
+// Account indices and amount offsets follow the raydium_clmm IDL:
+//   - open_position / open_position_v2: pool_state 5; args tick_lower_index,
+//     tick_upper_index, tick_array_lower_start_index,
+//     tick_array_upper_start_index (i32 each), liquidity u128 @24,
+//     amount_0_max @40, amount_1_max @48
+//   - open_position_with_token22_nft: pool_state 4, same args
+//   - increase_liquidity(_v2): pool_state 2; liquidity u128 @8,
+//     amount_0_max @24, amount_1_max @32
+//   - decrease_liquidity(_v2): pool_state 3; liquidity u128 @8,
+//     amount_0_min @24, amount_1_min @32
+//
+// The data amounts are limits, used only when the transfers are missing.
 func (p *RaydiumCLPoolParser) GetEventConfig(eventType types.PoolEventType, instructionType interface{}) *ParseEventConfig {
 	info, ok := instructionType.(InstructionTypeInfo)
 	if !ok {
 		return nil
 	}
 
-	switch eventType {
-	case types.PoolEventTypeCreate:
-		poolIdIndex := 4
-		if info.Name == "openPosition" || info.Name == "openPositionV2" {
-			poolIdIndex = 5
+	switch info.Name {
+	case "openPosition", "openPositionV2", "openPositionWithToken22Nft":
+		poolIdIndex := 5
+		if info.Name == "openPositionWithToken22Nft" {
+			poolIdIndex = 4
 		}
 		return &ParseEventConfig{
-			EventType:   types.PoolEventTypeCreate,
-			PoolIdIndex: poolIdIndex,
-			LpMintIndex: poolIdIndex,
+			EventType:          types.PoolEventTypeAdd,
+			PoolIdIndex:        poolIdIndex,
+			LpMintIndex:        poolIdIndex,
+			TokenAmountOffsets: &TokenAmountOffsets{Token0: 40, Token1: 48, Lp: 24},
 		}
-	case types.PoolEventTypeAdd:
+	case "increaseLiquidity", "increaseLiquidityV2":
 		return &ParseEventConfig{
-			EventType:   types.PoolEventTypeAdd,
-			PoolIdIndex: 2,
-			LpMintIndex: 2,
-			TokenAmountOffsets: &TokenAmountOffsets{
-				Token0: 32,
-				Token1: 24,
-				Lp:     8,
-			},
+			EventType:          types.PoolEventTypeAdd,
+			PoolIdIndex:        2,
+			LpMintIndex:        2,
+			TokenAmountOffsets: &TokenAmountOffsets{Token0: 24, Token1: 32, Lp: 8},
 		}
-	case types.PoolEventTypeRemove:
+	case "decreaseLiquidity", "decreaseLiquidityV2":
 		return &ParseEventConfig{
-			EventType:   types.PoolEventTypeRemove,
-			PoolIdIndex: 3,
-			LpMintIndex: 3,
-			TokenAmountOffsets: &TokenAmountOffsets{
-				Token0: 32,
-				Token1: 24,
-				Lp:     8,
-			},
+			EventType:          types.PoolEventTypeRemove,
+			PoolIdIndex:        3,
+			LpMintIndex:        3,
+			TokenAmountOffsets: &TokenAmountOffsets{Token0: 24, Token1: 32, Lp: 8},
 		}
 	}
 	return nil
@@ -124,17 +119,50 @@ func (p *RaydiumCLPoolParser) ProcessLiquidity() []types.PoolEvent {
 	var events []types.PoolEvent
 
 	for _, ci := range p.ClassifiedInstructions {
-		if ci.ProgramId == constants.DEX_PROGRAMS.RAYDIUM_CL.ID {
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			event := p.ParseRaydiumInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx, p)
-			if event != nil {
-				events = append(events, *event)
-			}
+		if ci.ProgramId != constants.DEX_PROGRAMS.RAYDIUM_CL.ID {
+			continue
+		}
+		var event *types.PoolEvent
+		data := p.Adapter.GetInstructionData(ci.Instruction)
+		if info, ok := p.GetPoolAction(data).(InstructionTypeInfo); ok && info.Type == types.PoolEventTypeCreate {
+			event = p.parseCreateEvent(ci)
+		} else {
+			event = p.ParseRaydiumInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
+		}
+		if event != nil {
+			events = append(events, *event)
 		}
 	}
 
 	return events
+}
+
+// parseCreateEvent parses create_pool and create_customizable_pool. They
+// create the pool but move no tokens (liquidity comes with the first
+// position), so the event carries the pool, config and mints only. Accounts:
+// pool_creator 0, amm_config 1, pool_state 2, token_mint_0 3, token_mint_1 4.
+// As in upstream, the quote mint (SOL or a stablecoin) is token1.
+func (p *RaydiumCLPoolParser) parseCreateEvent(ci types.ClassifiedInstruction) *types.PoolEvent {
+	accounts := p.Adapter.GetInstructionAccounts(ci.Instruction)
+	if len(accounts) < 5 {
+		return nil
+	}
+	token0Mint, token1Mint := accounts[3], accounts[4]
+	if utils.GetTradeType(token0Mint, token1Mint) == types.TradeTypeBuy {
+		token0Mint, token1Mint = token1Mint, token0Mint
+	}
+	token0Decimals := p.Adapter.GetTokenDecimals(token0Mint)
+	token1Decimals := p.Adapter.GetTokenDecimals(token1Mint)
+
+	base := p.Adapter.GetPoolEventBase(types.PoolEventTypeCreate, ci.ProgramId)
+	base.Idx = utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+	return &types.PoolEvent{
+		PoolEventBase:  base,
+		PoolId:         accounts[2],
+		Config:         accounts[1],
+		Token0Mint:     token0Mint,
+		Token1Mint:     token1Mint,
+		Token0Decimals: &token0Decimals,
+		Token1Decimals: &token1Decimals,
+	}
 }
