@@ -2,10 +2,12 @@ package utils
 
 import (
 	"encoding/base64"
+	"math/big"
 	"strconv"
 	"strings"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // ProgramLog is a payload a program wrote to the transaction log, attributed
@@ -200,4 +202,66 @@ func (tu *TransactionUtils) GetRayLogs() []ProgramLog {
 		return nil
 	}
 	return ParseRayLogs(logs, outerProgramIds(tu.adapter))
+}
+
+// EventSwap is a swap as a program reports it in its own event: the amounts
+// the user actually sent and received (transfer fees of Token-2022 mints
+// included in the input and excluded from the output) and the fees the
+// program charged.
+type EventSwap struct {
+	InputMint    string
+	InputAmount  *big.Int
+	OutputMint   string
+	OutputAmount *big.Int
+	Fee          *types.FeeInfo  // main trading fee, if reported
+	Fees         []types.FeeInfo // further fees (protocol, host, referral, transfer fees)
+}
+
+// NewEventTrade builds the trade of a swap reported by a program event.
+// Decimals come from the transaction's token balances.
+func (tu *TransactionUtils) NewEventTrade(swap EventSwap, dexInfo types.DexInfo, idx string) *types.TradeInfo {
+	if swap.InputMint == "" || swap.OutputMint == "" || swap.InputAmount == nil || swap.OutputAmount == nil {
+		return nil
+	}
+	inDecimals := tu.adapter.GetTokenDecimals(swap.InputMint)
+	outDecimals := tu.adapter.GetTokenDecimals(swap.OutputMint)
+	return &types.TradeInfo{
+		Type: GetTradeType(swap.InputMint, swap.OutputMint),
+		InputToken: types.TokenInfo{
+			Mint:      swap.InputMint,
+			Amount:    types.ConvertToUIAmount(swap.InputAmount, inDecimals),
+			AmountRaw: swap.InputAmount.String(),
+			Decimals:  inDecimals,
+		},
+		OutputToken: types.TokenInfo{
+			Mint:      swap.OutputMint,
+			Amount:    types.ConvertToUIAmount(swap.OutputAmount, outDecimals),
+			AmountRaw: swap.OutputAmount.String(),
+			Decimals:  outDecimals,
+		},
+		Fee:       swap.Fee,
+		Fees:      swap.Fees,
+		User:      tu.getSwapSigner(),
+		ProgramId: dexInfo.ProgramId,
+		AMM:       dexInfo.AMM,
+		Route:     dexInfo.Route,
+		Slot:      tu.adapter.Slot(),
+		Timestamp: tu.adapter.BlockTime(),
+		Signature: tu.adapter.Signature(),
+		Idx:       idx,
+	}
+}
+
+// NewEventFee returns the FeeInfo of a fee a program reported in an event
+func (tu *TransactionUtils) NewEventFee(mint string, amount uint64, feeType, dex string) types.FeeInfo {
+	decimals := tu.adapter.GetTokenDecimals(mint)
+	raw := new(big.Int).SetUint64(amount)
+	return types.FeeInfo{
+		Mint:      mint,
+		Amount:    types.ConvertToUIAmount(raw, decimals),
+		AmountRaw: raw.String(),
+		Decimals:  decimals,
+		Dex:       dex,
+		Type:      feeType,
+	}
 }
