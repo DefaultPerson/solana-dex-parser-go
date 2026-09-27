@@ -1,7 +1,9 @@
 package constants
 
 // BOT_FEE_ACCOUNTS maps bot names to their fee account addresses
-// Trading bots are detected by SOL transfers to these fee accounts
+// Trading bots are detected by SOL transfers to these fee accounts.
+// Closed or inactive accounts stay listed: they are still valid for older transactions.
+// Activity notes were checked on 2026-09-27.
 var BOT_FEE_ACCOUNTS = map[string][]string{
 	"Trojan": {
 		"9yMwSPk9mrXSN7yDHUuZurAh1sjbJsfpUqjZ7SvVtdco",
@@ -54,7 +56,7 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 	},
 	"Maestro": {
 		"MaestroUL88UBnZr3wfoN7hqmNWFi3ZYCGqZoJJHE36",
-		"FRMxAnZgkW58zbYcE7Bxqsg99VWpJh6sMP5xLzAWNabN",
+		"FRMxAnZgkW58zbYcE7Bxqsg99VWpJh6sMP5xLzAWNabN", // closed; last activity 2024-10-25
 	},
 	"Bloom": {
 		"7HeD6sLLqAnKVRuSfc1Ko3BSPMNKWgGTiWLKXJF31vKM",
@@ -62,7 +64,8 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 	"BananaGun": {
 		"47hEzz83VFR23rLTEeVm9A7eFzjJwjvdupPPmX3cePqF",
 		"4BBNEVRgrxVKv9f7pMNE788XM1tt379X9vNjpDH2KCL7",
-		"8r2hZoDfk5hDWJ1sDujAi2Qr45ZyZw5EQxAXiMZWLKh2",
+		"8r2hZoDfk5hDWJ1sDujAi2Qr45ZyZw5EQxAXiMZWLKh2", // last activity 2024-03-17
+		// WSOL token accounts (owners 45ruCyfd..., 8r2hZoDf..., 45ruCyfd...); last activity 2024-02/04
 		"Cj297UauzMX64FU9dKJZRUBWszJ7tEWpVheasq4CfATV",
 		"HKMh8nV3ysSofRi23LsfVGLGQKB415QAEfZT96kCcVj4",
 		"7tQiiBdKoScWQkB1RmVuML7DBGnR31cuKPEtMM7Vy5SA",
@@ -82,16 +85,22 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 	},
 	"STBot": {
 		"F34kcgMgCF7mYWkwLN3WN7KrFprr2NbwxuLvXx4fbztj",
-		"96aFQc9qyqpjMfqdUeurZVYRrrwPJG2uPV6pceu4B1yb",
-		"BTQyUXhxiLrFPD5JUANCwg4ViibmNY39McmWk4bVNxLA",
-		"4vfFG2xGZsjXQgA6ZCTzA1PgUGLppFHY9eGnh3ZVGUuz",
-		"A7XTexV13EPnhtH55qhT7qmFkgYCMAMnfXk89VWu9PCJ",
-		"GreGavLfh5sK1BeQ2WYvmk352wbyNNzQdCmqWCV8QSib",
+		"96aFQc9qyqpjMfqdUeurZVYRrrwPJG2uPV6pceu4B1yb", // closed; last activity 2026-02-14
+		"BTQyUXhxiLrFPD5JUANCwg4ViibmNY39McmWk4bVNxLA", // closed; last activity 2025-06-18
+		"4vfFG2xGZsjXQgA6ZCTzA1PgUGLppFHY9eGnh3ZVGUuz", // closed; last activity 2025-06-18
+		"A7XTexV13EPnhtH55qhT7qmFkgYCMAMnfXk89VWu9PCJ", // closed; last activity 2025-10-08
+		"GreGavLfh5sK1BeQ2WYvmk352wbyNNzQdCmqWCV8QSib", // closed; last activity 2025-10-08
 	},
 	"MevX": {
 		"3kxSQybWEeQZsMuNWMRJH4TxrhwoDwfv41TNMLRzFP5A",
-		"BS3CyJ9rRC4Tp8G7f86r6hGvuu3XdrVGNVpbNM9U5WRZ",
+		"BS3CyJ9rRC4Tp8G7f86r6hGvuu3XdrVGNVpbNM9U5WRZ", // closed; last activity 2026-02-08
 		"4Lpvp1q69SHentfYcMBUrkgvppeEx6ovHCSYjg4UYXiq",
+	},
+
+	// Added 2026-09 (audit). Closed as of 2026-09-27, but received a SOL fee in 10 of 10
+	// sampled transactions invoking the Nova program (NoVA1TmD..., 2025-07-17..2025-09-19).
+	"Nova": {
+		"noVaE91mUL5jTb8e9Vf6dqJdNPzJpEQ3uAdnQ8h4nVz",
 	},
 }
 
