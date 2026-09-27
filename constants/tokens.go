@@ -12,6 +12,13 @@ var TOKENS = struct {
 	EURC   string
 	USDY   string
 	FDUSD  string
+
+	// Added 2026-09 (audit); mint, decimals and program verified with getAccountInfo
+	// jsonParsed and the Jupiter token API ("stable" tag)
+	USDS   string
+	JUPUSD string
+	CASH   string
+	USDE   string
 }{
 	NATIVE: "11111111111111111111111111111111",
 	SOL:    "So11111111111111111111111111111111111111112", // Wrapped SOL
@@ -23,6 +30,11 @@ var TOKENS = struct {
 	EURC:   "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
 	USDY:   "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
 	FDUSD:  "9zNQRsGLjNKwCUU5Gq5LR8beUCPzQMVMqKAi3SSZh54u",
+
+	USDS:   "USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA",
+	JUPUSD: "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD",
+	CASH:   "CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH", // Token-2022
+	USDE:   "DEkqHyPN7GMRJ5cArtQFAWefqbZb33Hyf6s5iCwjEonT",
 }
 
 // TOKEN_DECIMALS maps token addresses to their decimal precision
@@ -36,13 +48,19 @@ var TOKEN_DECIMALS = map[string]uint8{
 	"HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr": 6, // EURC
 	"A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6": 6, // USDY
 	"9zNQRsGLjNKwCUU5Gq5LR8beUCPzQMVMqKAi3SSZh54u": 6, // FDUSD
+	"USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA":  6, // USDS
+	"JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD":  6, // JupUSD
+	"CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH": 6, // CASH
+	"DEkqHyPN7GMRJ5cArtQFAWefqbZb33Hyf6s5iCwjEonT": 9, // USDe
 }
 
-// IsStablecoin checks if a token is a known stablecoin
+// IsStablecoin checks if a token is a known stablecoin.
+// USDY is a yield-accruing note priced above $1, so it is not treated as one.
 func IsStablecoin(mint string) bool {
 	switch mint {
 	case TOKENS.USDC, TOKENS.USDT, TOKENS.USD1, TOKENS.USDG,
-		TOKENS.PYUSD, TOKENS.EURC, TOKENS.USDY, TOKENS.FDUSD:
+		TOKENS.PYUSD, TOKENS.EURC, TOKENS.FDUSD,
+		TOKENS.USDS, TOKENS.JUPUSD, TOKENS.CASH, TOKENS.USDE:
 		return true
 	default:
 		return false
