@@ -4,7 +4,7 @@ package constants
 type DexProgram struct {
 	ID   string   // Program ID
 	Name string   // Human-readable name
-	Tags []string // Tags: "route", "amm", "bot", "vault"
+	Tags []string // Tags: "route", "amm", "bot", "vault", "pricing" (quote engine, not a DEX program)
 }
 
 // DEX_PROGRAMS contains all supported DEX program configurations
@@ -103,9 +103,10 @@ var DEX_PROGRAMS = struct {
 	OKX_DEX_V2 DexProgram
 	JUPITER_Z  DexProgram
 	GMGN       DexProgram
-	// Scorch swap program (SCoRcH8c...); SCORCH (ojh19oja..., the Jupiter-labelled ID) is
-	// its pricing program, invoked by CPI without token transfers of its own
-	SCORCH_SWAP DexProgram
+	// Scorch pricing program (ojh19oja..., the ID in the Jupiter label list). It moves no
+	// tokens and is not a DEX program: it is left out of DEX_PROGRAM_IDS and skipped for
+	// transfer grouping, so it is never chosen as the AMM. Swaps run in SCORCH.
+	SCORCH_PRICING DexProgram
 }{
 	// DEX Aggregators
 	JUPITER: DexProgram{
@@ -473,8 +474,9 @@ var DEX_PROGRAMS = struct {
 		Name: "AlphaQ",
 		Tags: []string{"amm"},
 	},
+	// Scorch swap program; it CPIs SCORCH_PRICING, then moves the tokens
 	SCORCH: DexProgram{
-		ID:   "ojh19ojaKduoJZuaJADhcVGp4xt1TcdAvZmpVsCorch",
+		ID:   "SCoRcH8c2dpjvcJD6FiPbCSQyQgu3PcUAWj2Xxx3mqn",
 		Name: "Scorch",
 		Tags: []string{"amm"},
 	},
@@ -523,10 +525,10 @@ var DEX_PROGRAMS = struct {
 		Name: "GMGN",
 		Tags: []string{"bot"},
 	},
-	SCORCH_SWAP: DexProgram{
-		ID:   "SCoRcH8c2dpjvcJD6FiPbCSQyQgu3PcUAWj2Xxx3mqn",
-		Name: "Scorch",
-		Tags: []string{"amm"},
+	SCORCH_PRICING: DexProgram{
+		ID:   "ojh19ojaKduoJZuaJADhcVGp4xt1TcdAvZmpVsCorch",
+		Name: "ScorchPricing",
+		Tags: []string{"pricing"},
 	},
 }
 
@@ -677,7 +679,6 @@ var DEX_PROGRAM_IDS = append([]string{
 	DEX_PROGRAMS.OKX_DEX_V2.ID,
 	DEX_PROGRAMS.JUPITER_Z.ID,
 	DEX_PROGRAMS.GMGN.ID,
-	DEX_PROGRAMS.SCORCH_SWAP.ID,
 }, jupiterLabelProgramIDs()...)
 
 func jupiterLabelProgramIDs() []string {
@@ -712,6 +713,7 @@ var SKIP_PROGRAM_IDS = []string{
 	"pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", // Pumpswap Fee
 	"MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", // SPL Memo (CPI'd by Whirlpool *_v2 before transfers)
 	"Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo", // SPL Memo v1
+	"ojh19ojaKduoJZuaJADhcVGp4xt1TcdAvZmpVsCorch", // Scorch pricing (CPI'd by Scorch SCoRcH8c... before its transfers)
 }
 
 // Token program constants
@@ -961,8 +963,6 @@ func namedDexProgram(id string) DexProgram {
 		return DEX_PROGRAMS.JUPITER_Z
 	case DEX_PROGRAMS.GMGN.ID:
 		return DEX_PROGRAMS.GMGN
-	case DEX_PROGRAMS.SCORCH_SWAP.ID:
-		return DEX_PROGRAMS.SCORCH_SWAP
 	default:
 		return DexProgram{}
 	}

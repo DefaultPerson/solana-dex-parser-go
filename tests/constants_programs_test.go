@@ -57,7 +57,6 @@ func TestConstantsNewPrograms(t *testing.T) {
 		{"TessVdML9pBGgG9yGks7o4HewRaXVAMuoVj4x83GLQH", "TesseraV", "amm"},
 		{"ALPHAQmeA7bjrVuccPsYPiCvsi428SNwte66Srvs4pHA", "AlphaQ", "amm"},
 		{"ZERor4xhbUycZ6gb9ntrhqscUcZmAbQDjEAtCf4hbZY", "ZeroFi", "amm"},
-		{"ojh19ojaKduoJZuaJADhcVGp4xt1TcdAvZmpVsCorch", "Scorch", "amm"},
 		{"SCoRcH8c2dpjvcJD6FiPbCSQyQgu3PcUAWj2Xxx3mqn", "Scorch", "amm"},
 		{"QuaNtZsgYRe5Z9Bk4LZ4cTD9tbkVoyCNf1R2BN9bBDv", "Quantum", "amm"},
 		{"MNFSTqtC93rEfYHB6hF82sKdZpUDFWkViLByLd1k1Ms", "Manifest", "amm"},
@@ -182,6 +181,54 @@ func TestConstantsMemoProgramSkipped(t *testing.T) {
 	for _, tr := range res.Trades {
 		if strings.HasPrefix(tr.ProgramId, "Memo") || tr.AMM == "" {
 			t.Errorf("trade attributed to the Memo program: program=%s amm=%q", tr.ProgramId, tr.AMM)
+		}
+	}
+}
+
+// constants-11 (brief task 7): Scorch swaps run in SCoRcH8c..., which CPIs the pricing
+// program ojh19oja... right before its two token transfers. The pricing program is not a
+// DEX program and is skipped for grouping; before the fix it was the "amm" entry SCORCH,
+// the transfers were grouped under "ojh19oja...:2-7" / ":5-1" and the Scorch hop was
+// reported with programId ojh19oja....
+func TestConstantsScorchPricingIsNotAMM(t *testing.T) {
+	const swap, pricing = "SCoRcH8c2dpjvcJD6FiPbCSQyQgu3PcUAWj2Xxx3mqn", "ojh19ojaKduoJZuaJADhcVGp4xt1TcdAvZmpVsCorch"
+	if constants.DEX_PROGRAMS.SCORCH.ID != swap || constants.DEX_PROGRAMS.SCORCH_PRICING.ID != pricing {
+		t.Fatalf("SCORCH=%s SCORCH_PRICING=%s", constants.DEX_PROGRAMS.SCORCH.ID, constants.DEX_PROGRAMS.SCORCH_PRICING.ID)
+	}
+	if constants.IsDexProgram(pricing) {
+		t.Errorf("pricing program %s is a DEX program", pricing)
+	}
+	for _, id := range constants.DEX_PROGRAM_IDS {
+		if id == pricing {
+			t.Errorf("pricing program %s is in DEX_PROGRAM_IDS", pricing)
+		}
+	}
+	skipped := false
+	for _, id := range constants.SKIP_PROGRAM_IDS {
+		skipped = skipped || id == pricing
+	}
+	if !skipped {
+		t.Errorf("pricing program %s missing from SKIP_PROGRAM_IDS", pricing)
+	}
+	for sig, key := range map[string]string{
+		"3Nb6n7meLAN6SB2EgbFbRYxvLGnj42TbQh2eA7Awr5h8euTt1icygUfAnd1pc19nAUA1513BPZdaFNNW6LAEouNV": swap + ":2-6",
+		"41NE3vcJ2aXixCvWvPV5fb6d1PxDfHT7GNGS5nFJqKMnJcy5g6iGkqkxt8nUWYaK9HLS8fuz6s5d4MhsmTC6AjEL": swap + ":5-0",
+	} {
+		tx := loadFixture(t, sig)
+		ctx := newParseContext(tx, nil)
+		for k := range ctx.TransferActions {
+			if strings.HasPrefix(k, pricing) {
+				t.Errorf("%s: transfers grouped under pricing key %s", sig[:8], k)
+			}
+		}
+		if n := len(ctx.TransferActions[key]); n != 2 {
+			t.Errorf("%s: group %s has %d transfers, want 2", sig[:8], key, n)
+		}
+		res := dexparser.NewDexParser().ParseAll(tx, nil)
+		for _, tr := range res.Trades {
+			if tr.ProgramId == pricing {
+				t.Errorf("%s: trade %s %s attributed to the pricing program", sig[:8], tr.Type, tr.Idx)
+			}
 		}
 	}
 }
