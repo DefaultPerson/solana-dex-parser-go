@@ -39,7 +39,7 @@ func (tu *TransactionUtils) GetDexInfo(classifier *classifier.InstructionClassif
 			continue
 		}
 		prog := constants.GetDexProgramByID(programId)
-		if prog.Name == "" || hasTag(prog, "vault") {
+		if prog.Name == "" || constants.IsVaultProgram(programId) {
 			continue
 		}
 		if hasTag(prog, "amm") {
@@ -60,17 +60,6 @@ func hasTag(prog constants.DexProgram, tag string) bool {
 	}
 	return false
 }
-
-// vaultPrograms lists the DEX programs tagged "vault"
-var vaultPrograms = func() map[string]bool {
-	m := make(map[string]bool)
-	for _, id := range constants.DEX_PROGRAM_IDS {
-		if prog := constants.GetDexProgramByID(id); hasTag(prog, "vault") {
-			m[id] = true
-		}
-	}
-	return m
-}()
 
 // GetTransferActions extracts transfer actions from transaction
 func (tu *TransactionUtils) GetTransferActions(extraTypes []string) map[string][]types.TransferData {
@@ -189,7 +178,7 @@ func (tu *TransactionUtils) isIgnoredProgram(programId string) bool {
 			return true
 		}
 	}
-	return vaultPrograms[programId]
+	return constants.IsVaultProgram(programId)
 }
 
 // ProcessSwapData processes swap data from transfers
