@@ -30,7 +30,7 @@ const (
 	// legacy migrate (+ PumpSwap create_pool 2-22 and PumpSwap buy at 7)
 	sigPumpMigrate = "5fiQbExgdp1FAjDnrv9aEpXajCMUtm1c3E7NnsDdu4CtKr5xBpALdK7ENzx5LN1SzZKJk7cxbWWc84T7yHwb8p2x"
 	// sell_v2 at 3-0
-	sigPumpSellV2 = "2DdZiRsXJWVkD1nD31bcBQpZPKmmmd1gG1T4GAFcLDw6f7Zpxao876E6pPcreUqMmKLWjmxo5FRvq6WynU2pPXaW"
+	shredSigPumpSellV2 = "2DdZiRsXJWVkD1nD31bcBQpZPKmmmd1gG1T4GAFcLDw6f7Zpxao876E6pPcreUqMmKLWjmxo5FRvq6WynU2pPXaW"
 	// legacy sell at 3
 	sigPumpSell = "46sErg2LPybXGCbwsY6bESNbLT3ysp1U8DE1Hw46soEF4g4bmGUhhhbd42dvuVjGi6LRLekhmyW3ArZxU6dpyoGt"
 	// PumpSwap buy_exact_quote_in at 5
@@ -146,7 +146,7 @@ func TestShredPumpfunV2Instructions(t *testing.T) {
 	pumpTrade(t, res, buy, types.TradeTypeBuy, tok(solMint, le64At(buy.data, 16), 9), tok(buy.accounts[2], le64At(buy.data, 8), 6), types.ShredAmountMax, types.ShredAmountExact)
 
 	// sell_v2 (amount, min_sol_output), inner
-	tx = loadFixture(t, sigPumpSellV2)
+	tx = loadFixture(t, shredSigPumpSellV2)
 	sell := findIx(t, tx, constants.DEX_PROGRAMS.PUMP_FUN.ID, d.SELL_V2)
 	res = parseShred(t, tx, nil)
 	pumpTrade(t, res, sell, types.TradeTypeSell, tok(sell.accounts[1], le64At(sell.data, 8), 6), tok(sell.accounts[2], le64At(sell.data, 16), 9), types.ShredAmountExact, types.ShredAmountMin)

@@ -46,6 +46,12 @@ func constAnchorTable() map[string][]byte {
 	return map[string][]byte{
 		// Jupiter V6
 		"JUPITER.ROUTE_EVENT":                            cpiEv("SwapEvent"),
+		"PUMPFUN.MIGRATE_BONDING_CURVE_CREATOR":          ix("migrate_bonding_curve_creator"),
+		"PUMPSWAP.BOOST_BUY_AND_BURN":                    ix("boost_buy_and_burn"),
+		"PUMPSWAP.BOOST_BUY_AND_BURN_EVENT":              cpiEv("BoostBuyAndBurnEvent"),
+		"RAYDIUM_LCP.CREATE_EVENT_LOG":                   logEv("PoolCreateEvent"),
+		"RAYDIUM_LCP.CLAIM_VESTED_EVENT":                 cpiEv("ClaimVestedEvent"),
+		"RAYDIUM_LCP.CREATE_VESTING_EVENT":               cpiEv("CreateVestingEvent"),
 		"JUPITER.ROUTE":                                  ix("route"),
 		"JUPITER.ROUTE_EXACT_OUT":                        ix("exact_out_route"),
 		"JUPITER.ROUTE_WITH_TOKEN_LEDGER":                ix("route_with_token_ledger"),

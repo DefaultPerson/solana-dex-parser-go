@@ -151,7 +151,6 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:       "Boopfun",
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
-		AmountCheckSkip:   "the Boopfun parser reports output 0 for this buy (the user received 74720036786781967); owned by the meme package",
 	},
 	{
 		Name:               "Boopfun SELL",
