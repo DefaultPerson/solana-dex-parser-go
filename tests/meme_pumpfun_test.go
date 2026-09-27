@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/mr-tron/base58"
@@ -209,12 +211,26 @@ func TestMemePumpfunUserSideAmounts(t *testing.T) {
 }
 
 // Legacy 121-byte TradeEvents (no fee fields) still decode, with no fees.
+// They end after real_sol_reserves and real_token_reserves (IDL offsets 105
+// and 113), which were decoded but not surfaced.
 func TestMemePumpfunLegacyTradeEvent(t *testing.T) {
 	r := memeParse(t, sigPumpLegacyEvent)
 	tr := memeTradeAt(t, r, "4-3")
 	if tr.Type != types.TradeTypeBuy || tr.InputToken.AmountRaw != "10000000" || tr.OutputToken.AmountRaw != "357547484171" ||
 		tr.Fee != nil || len(tr.Fees) != 0 || len(tr.Pool) != 1 || tr.Pool[0] != "7L7PmfSpSEdZP6H5VA8C6S11yFShgG1BVJJuyp9aSuff" {
 		t.Errorf("legacy buy %s in %s out %s fee %+v pool %v", tr.Type, tr.InputToken.AmountRaw, tr.OutputToken.AmountRaw, tr.Fee, tr.Pool)
+	}
+
+	payload := loadMemeRaw(t, sigPumpLegacyEvent).data(4, 3)
+	if len(payload) != 16+121 || !bytes.Equal(payload[:16], constants.DISCRIMINATORS.PUMPFUN.TRADE_EVENT) {
+		t.Fatalf("fixture: 4-3 is not a 121-byte TradeEvent (%d bytes)", len(payload))
+	}
+	payload = payload[16:]
+	e := memeEventAt(t, r, "4-3")
+	if e.VirtualQuoteReserves != u64s(binary.LittleEndian.Uint64(payload[89:])) || e.VirtualBaseReserves != u64s(binary.LittleEndian.Uint64(payload[97:])) ||
+		e.RealQuoteReserves != u64s(binary.LittleEndian.Uint64(payload[105:])) || e.RealBaseReserves != u64s(binary.LittleEndian.Uint64(payload[113:])) ||
+		e.RealQuoteReserves == "0" || e.CreatorFeeBps != nil || len(e.Fees) != 0 {
+		t.Errorf("legacy event reserves virtual %s/%s real %s/%s, fees %+v", e.VirtualQuoteReserves, e.VirtualBaseReserves, e.RealQuoteReserves, e.RealBaseReserves, e.Fees)
 	}
 }
 

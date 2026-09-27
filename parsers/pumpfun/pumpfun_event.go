@@ -45,6 +45,7 @@ type pumpfunTradeEvent struct {
 	VirtualTokenReserves  uint64
 	RealSolReserves       uint64
 	RealTokenReserves     uint64
+	HasRealReserves       bool // real_sol_reserves, real_token_reserves present
 	HasFees               bool // fee_recipient .. creator_fee present
 	FeeRecipient          string
 	FeeBasisPoints        uint64
@@ -165,7 +166,7 @@ func (p *PumpfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 
 // decodePumpfunTradeEvent decodes a TradeEvent field by field in IDL order
 // (pump-fun/pump-public-docs idl/pump.json). The oldest events end after
-// virtual_token_reserves (121 bytes); every later program version appended
+// real_token_reserves (121 bytes); every later program version appended
 // fields, so decoding stops cleanly at the end of the data.
 func decodePumpfunTradeEvent(data []byte) *pumpfunTradeEvent {
 	reader := utils.GetBinaryReader(data)
@@ -187,6 +188,7 @@ func decodePumpfunTradeEvent(data []byte) *pumpfunTradeEvent {
 	t := newTailReader(reader)
 	evt.RealSolReserves = t.u64()
 	evt.RealTokenReserves = t.u64()
+	evt.HasRealReserves = t.ok
 	evt.FeeRecipient = t.pubkey()
 	evt.FeeBasisPoints = t.u64() // u64 in the IDL (not u16)
 	evt.Fee = t.u64()
@@ -336,6 +338,8 @@ func (p *PumpfunEventParser) tradeEventToMeme(evt *pumpfunTradeEvent, ordered []
 		event.CreatorFee = uiPtr(u64(evt.CreatorFee), quoteDecimals)
 		bps := evt.CreatorFeeBasisPoints
 		event.CreatorFeeBps = &bps
+	}
+	if evt.HasRealReserves {
 		event.RealBaseReserves = strconv.FormatUint(evt.RealTokenReserves, 10)
 		event.RealQuoteReserves = strconv.FormatUint(evt.RealSolReserves, 10)
 	}
