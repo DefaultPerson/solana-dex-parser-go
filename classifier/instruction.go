@@ -2,7 +2,6 @@ package classifier
 
 import (
 	"bytes"
-	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -13,6 +12,9 @@ import (
 type InstructionClassifier struct {
 	adapter        *adapter.TransactionAdapter
 	instructionMap map[string][]types.ClassifiedInstruction
+	// programOrder lists program IDs in first-appearance order: outer
+	// instructions first, then inner instructions (execution order).
+	programOrder []string
 }
 
 // NewInstructionClassifier creates a new InstructionClassifier
@@ -58,7 +60,10 @@ func (ic *InstructionClassifier) addInstruction(classified types.ClassifiedInstr
 		return
 	}
 
-	instructions := ic.instructionMap[classified.ProgramId]
+	instructions, ok := ic.instructionMap[classified.ProgramId]
+	if !ok {
+		ic.programOrder = append(ic.programOrder, classified.ProgramId)
+	}
 	instructions = append(instructions, classified)
 	ic.instructionMap[classified.ProgramId] = instructions
 }
@@ -80,10 +85,11 @@ func (ic *InstructionClassifier) GetMultiInstructions(programIds []string) []typ
 	return result
 }
 
-// GetInstructionByDiscriminator finds an instruction by its discriminator
+// GetInstructionByDiscriminator finds the first instruction (in program
+// first-appearance order) whose data starts with discriminator
 func (ic *InstructionClassifier) GetInstructionByDiscriminator(discriminator []byte, slice int) *types.ClassifiedInstruction {
-	for _, instructions := range ic.instructionMap {
-		for _, instruction := range instructions {
+	for _, programId := range ic.programOrder {
+		for _, instruction := range ic.instructionMap[programId] {
 			data := ic.adapter.GetInstructionData(instruction.Instruction)
 			if len(data) >= slice && bytes.Equal(discriminator, data[:slice]) {
 				return &instruction
@@ -93,15 +99,16 @@ func (ic *InstructionClassifier) GetInstructionByDiscriminator(discriminator []b
 	return nil
 }
 
-// GetAllProgramIds returns all non-system program IDs in deterministic order
+// GetAllProgramIds returns all non-system program IDs in first-appearance
+// order: programs of outer instructions in instruction order, then programs
+// that only appear in inner instructions, in inner instruction order.
 func (ic *InstructionClassifier) GetAllProgramIds() []string {
 	var result []string
-	for programId := range ic.instructionMap {
+	for _, programId := range ic.programOrder {
 		if !isSystemProgram(programId) && !isSkipProgram(programId) {
 			result = append(result, programId)
 		}
 	}
-	sort.Strings(result)
 	return result
 }
 
