@@ -86,14 +86,14 @@ func TestCore2TipTotal(t *testing.T) {
 //
 // Synthetic: no real transaction with a tip CPI'd inside a swap group was
 // found (295 fixtures, 1280 cached bot transactions). Built from the real
-// Orca swap 5AzH3HAp by copying its outer Jito tip transfer into the Orca
-// instruction's inner instructions.
+// Raydium V4 swapBaseIn 4qUyABFn by copying its outer Jito tip transfer into
+// the swap instruction's inner instructions.
 func TestCore2TipIsNotTradeFee(t *testing.T) {
-	const sig = "5AzH3HApZUEnGECG5Xk26jgUpbiRAzRsAqTRHiTj7Jf6bX3jfSXZCj5zqREvgnYwzgD2mUXw9g6FrN2hVtJZF5JN"
+	const sig = "4qUyABFnkT7wesZehkrYXYvUVtoS5XERm397ZUXAn7TRrXgrupFtEoPLZnzqh91SW8ZZZhaiQWxb4eVWftNhPmmC"
 	orig := loadFixture(t, sig)
 	keys := rawAccountKeys(orig)
 	var tip map[string]interface{}
-	orcaOuter := -1
+	ammOuter := -1
 	for i, ix := range orig.Transaction.Message.Instructions {
 		m := ix.(map[string]interface{})
 		switch keys[jsonInt(m["programIdIndex"])] {
@@ -101,16 +101,16 @@ func TestCore2TipIsNotTradeFee(t *testing.T) {
 			if accs := m["accounts"].([]interface{}); len(accs) == 2 && constants.GetTipProvider(keys[jsonInt(accs[1])]) == "Jito" {
 				tip = m
 			}
-		case constants.DEX_PROGRAMS.ORCA.ID:
-			orcaOuter = i
+		case constants.DEX_PROGRAMS.RAYDIUM_V4.ID:
+			ammOuter = i
 		}
 	}
-	if tip == nil || orcaOuter < 0 {
-		t.Fatal("fixture: no Jito tip or no outer Orca instruction")
+	if tip == nil || ammOuter < 0 {
+		t.Fatal("fixture: no Jito tip or no outer Raydium V4 instruction")
 	}
 	tx := cloneTx(t, orig)
 	for i := range tx.Meta.InnerInstructions {
-		if tx.Meta.InnerInstructions[i].Index == orcaOuter {
+		if tx.Meta.InnerInstructions[i].Index == ammOuter {
 			inner := map[string]interface{}{"programIdIndex": tip["programIdIndex"], "accounts": tip["accounts"], "data": tip["data"], "stackHeight": 2}
 			tx.Meta.InnerInstructions[i].Instructions = append(tx.Meta.InnerInstructions[i].Instructions, inner)
 		}

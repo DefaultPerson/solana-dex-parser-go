@@ -37,14 +37,17 @@ const (
 // fees as trade fees (up to 99.99% of the output). D8. core-7, amm-v1, parity-24.
 func TestCoreNoInventedTradeFee(t *testing.T) {
 	cases := []struct {
-		sig  string
-		note string
+		sig    string
+		note   string
+		oldFee string // the invented fee; "" = the network fee
 	}{
-		{"mLQ2LNtkgyRoTd62NoAoDs4pUBNqFXVx1TT4eTfnxZvmE3389x9zZZEEDC4SaEo49egH51ySS5gnwVvP7iQXq9v", "swap then pay: fee was 39039682 of 39041035 USDC"},
-		{"5sV51YrwGRFwpwgnWHWKCq3TWmCQ47XnsNuMNAKs7Jypf9g6H9JTPnY6ZqW5tfSTBwBL8Un5MPxK5cKZsSkaacty", "SOL arbitrage: fee was 114528994"},
-		{"5nFMqRsLrVP4JVaLS1wpSNzrhgyWRkaMfEMKdBxXgPVFM2wGHKRKyiF2Zp6VrWp3XCpbzmW5Fi5cuDff4jhAA9gN", "USDT->USDC forwarded"},
-		{"NeF1UiWXKUbuswNNw14gJ2uup7yrV6KyXijQ7dsjLYanj9dnsBSeqGPDVZ3wP3NfhXQ84rJncRo5XwbrbSdWVWW", "SOL output: fee was the network fee"},
+		{"mLQ2LNtkgyRoTd62NoAoDs4pUBNqFXVx1TT4eTfnxZvmE3389x9zZZEEDC4SaEo49egH51ySS5gnwVvP7iQXq9v", "swap then pay: fee was 39039682 of 39041035 USDC", "39039682"},
+		{"5sV51YrwGRFwpwgnWHWKCq3TWmCQ47XnsNuMNAKs7Jypf9g6H9JTPnY6ZqW5tfSTBwBL8Un5MPxK5cKZsSkaacty", "SOL arbitrage: fee was 114528994", "114528994"},
+		{"5nFMqRsLrVP4JVaLS1wpSNzrhgyWRkaMfEMKdBxXgPVFM2wGHKRKyiF2Zp6VrWp3XCpbzmW5Fi5cuDff4jhAA9gN", "USDT->USDC forwarded", "-"},
+		{"NeF1UiWXKUbuswNNw14gJ2uup7yrV6KyXijQ7dsjLYanj9dnsBSeqGPDVZ3wP3NfhXQ84rJncRo5XwbrbSdWVWW", "SOL output: fee was the network fee", ""},
 	}
+	// fee types the programs report in their events
+	eventTypes := map[string]bool{"lp": true, "trade": true, "protocol": true, "creator": true, "host": true, "referral": true, "limitOrder": true, "transferFee": true, "compounding": true, "partner": true}
 	for _, c := range cases {
 		sig := c.sig
 		tx, r := parseFixture(t, sig, nil)
@@ -52,22 +55,20 @@ func TestCoreNoInventedTradeFee(t *testing.T) {
 		if agg == nil {
 			t.Fatalf("%.8s: no aggregate", sig)
 		}
-		// none of these transactions has a protocol fee event or a transfer to
-		// a known fee account
-		ctx := newParseContext(tx, nil)
-		for _, ts := range ctx.TransferActions {
-			for _, x := range ts {
-				if x.IsFee {
-					t.Fatalf("%.8s: fixture has an explicit fee transfer", sig)
-				}
+		oldFee := c.oldFee
+		if oldFee == "" {
+			oldFee = adapter.NewTransactionAdapter(tx, nil).Fee().Amount
+		}
+		trades := append([]types.TradeInfo{*agg}, r.Trades...)
+		for _, tr := range trades {
+			fees := tr.Fees
+			if tr.Fee != nil {
+				fees = append([]types.FeeInfo{*tr.Fee}, fees...)
 			}
-		}
-		if agg.Fee != nil || len(agg.Fees) != 0 {
-			t.Errorf("%.8s (%s): aggregate fee %v %v, want none", sig, c.note, agg.Fee, agg.Fees)
-		}
-		for _, tr := range r.Trades {
-			if tr.Fee != nil && tr.Fee.AmountRaw == agg.OutputToken.AmountRaw {
-				t.Errorf("%.8s: trade fee equals the output", sig)
+			for _, f := range fees {
+				if !eventTypes[f.Type] || f.AmountRaw == oldFee || f.AmountRaw == agg.OutputToken.AmountRaw {
+					t.Errorf("%.8s (%s): fee %+v is not a program-reported fee", sig, c.note, f)
+				}
 			}
 		}
 	}
