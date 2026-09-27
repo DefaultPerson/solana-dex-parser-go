@@ -483,3 +483,41 @@ func TestAmmNewLiquidityInstructions(t *testing.T) {
 		})
 	}
 }
+
+// TestMeteoraDLMMRebalance: rebalance_liquidity reports its Rebalancing
+// event as a REMOVE (withdrawn amounts) and an ADD (added amounts), each
+// only when tokens moved; it is never a trade. 4JzgTwf6 deposits WSOL into
+// the pool (outer 6); 4NVTUy8M rebalances a position without moving tokens.
+// Truth: the reserve's balance change and the Rebalancing event.
+func TestMeteoraDLMMRebalance(t *testing.T) {
+	program := constants.DEX_PROGRAMS.METEORA.ID
+
+	tx := loadFixture(t, "4JzgTwf6JAd1zopZjda33kuZ2GWauYTS5ZbCXGkxtaKd2zRt6MYJx5MRhaupAK1cewrYSRTSH7h4pcb7v24nVD3R")
+	ctx := newParseContext(tx, nil)
+	accounts := ctx.Adapter.GetInstructionAccounts(instructionAt(t, ctx, program, 6, -1).Instruction)
+	evt := ctx.Adapter.GetInstructionData(instructionAt(t, ctx, program, 6, 3).Instruction)
+	if !constants.MatchDiscriminator(evt, constants.DISCRIMINATORS.METEORA_DLMM.EVENTS["rebalancing"]) {
+		t.Fatal("6-3 is not a Rebalancing event")
+	}
+	// Rebalancing: lb_pair, position, owner, active_bin_id i32, x_withdrawn @116,
+	// x_added @124, y_withdrawn @132, y_added @140
+	yAdded := u64At(evt, 140)
+	if got := tokenDelta(ctx, accounts[6]).String(); got != yAdded || u64At(evt, 116) != "0" || u64At(evt, 132) != "0" {
+		t.Fatalf("reserve_y change %s, Rebalancing y_added %s", got, yAdded)
+	}
+	r := dexparser.NewDexParser().ParseAll(tx, nil)
+	if len(r.Trades) != 0 || len(r.Liquidities) != 1 {
+		t.Fatalf("want one liquidity event and no trade, got %+v / %+v", r.Liquidities, r.Trades)
+	}
+	e := r.Liquidities[0]
+	if e.Type != types.PoolEventTypeAdd || e.Idx != "6" || e.PoolId != accounts[1] || e.Token1Mint != accounts[8] || e.Token1AmountRaw != yAdded ||
+		e.Token0Mint != accounts[7] || e.Token0AmountRaw != "0" {
+		t.Errorf("got %s idx=%s pool=%s %s %s / %s %s, want ADD of %s y at %s", e.Type, e.Idx, e.PoolId, e.Token0Mint, e.Token0AmountRaw, e.Token1Mint, e.Token1AmountRaw, yAdded, accounts[1])
+	}
+
+	tx = loadFixture(t, "4NVTUy8M1xWeSji87Aq5gMwN3hYXjToovpHmKqtrwkrPFicoTffYv2dFRLnSC8ZyFxNfZ9rUVtfuhPpyze8dWQDq")
+	r = dexparser.NewDexParser().ParseAll(tx, nil)
+	if len(r.Liquidities) != 0 || len(r.Trades) != 0 {
+		t.Errorf("rebalance without token movement: got liquidities %+v trades %+v", r.Liquidities, r.Trades)
+	}
+}

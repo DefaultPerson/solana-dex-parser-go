@@ -2,12 +2,14 @@ package meteora
 
 import (
 	"bytes"
+	"encoding/binary"
 	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
+	"github.com/mr-tron/base58"
 )
 
 // MeteoraDLMMPoolParser parses Meteora DLMM pool events
@@ -63,6 +65,11 @@ func (p *MeteoraDLMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId == constants.DEX_PROGRAMS.METEORA.ID {
+			data := p.Adapter.GetInstructionData(ci.Instruction)
+			if constants.MatchDiscriminator(data, constants.DISCRIMINATORS.METEORA_DLMM.OTHER["rebalanceLiquidity"]) {
+				events = append(events, p.parseRebalance(ci)...)
+				continue
+			}
 			event := p.ParseInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
 			if event != nil {
 				events = append(events, *event)
@@ -278,4 +285,78 @@ func (p *MeteoraDLMMPoolParser) normalizeTokens(transfers []types.TransferData) 
 	}
 
 	return token0, token1
+}
+
+// parseRebalance parses rebalance_liquidity, which can withdraw from some
+// bins and deposit into others in one instruction. Its Rebalancing self-CPI
+// event (lb_pair, position, owner, active_bin_id i32, x_withdrawn_amount,
+// x_added_amount, y_withdrawn_amount, y_added_amount, ...) gives both
+// sides: a REMOVE event with the withdrawn and an ADD event with the added
+// amounts, each only when it moved tokens. Accounts: lb_pair 1,
+// token_x_mint 7, token_y_mint 8.
+func (p *MeteoraDLMMPoolParser) parseRebalance(ci types.ClassifiedInstruction) []types.PoolEvent {
+	accounts := p.Adapter.GetInstructionAccounts(ci.Instruction)
+	if len(accounts) < 9 {
+		return nil
+	}
+	var data []byte
+	for _, other := range p.ClassifiedInstructions {
+		if other.ProgramId != ci.ProgramId || other.OuterIndex != ci.OuterIndex || other.InnerIndex <= ci.InnerIndex {
+			continue
+		}
+		d := p.Adapter.GetInstructionData(other.Instruction)
+		if !isAnchorEvent(d) {
+			break
+		}
+		if constants.MatchDiscriminator(d, constants.DISCRIMINATORS.METEORA_DLMM.EVENTS["rebalancing"]) {
+			data = d
+			break
+		}
+	}
+	const amounts = 16 + 3*32 + 4
+	if len(data) < amounts+4*8 || base58.Encode(data[16:48]) != accounts[1] {
+		return nil
+	}
+	u64 := func(offset int) uint64 { return binary.LittleEndian.Uint64(data[offset : offset+8]) }
+	xWithdrawn, xAdded, yWithdrawn, yAdded := u64(amounts), u64(amounts+8), u64(amounts+16), u64(amounts+24)
+
+	mintX, mintY := accounts[7], accounts[8]
+	token0Mint, token1Mint := mintX, mintY
+	if utils.GetTradeType(mintX, mintY) == types.TradeTypeBuy {
+		token0Mint, token1Mint = mintY, mintX
+	}
+	decimals0, decimals1 := p.Adapter.GetTokenDecimals(token0Mint), p.Adapter.GetTokenDecimals(token1Mint)
+
+	var events []types.PoolEvent
+	for _, side := range []struct {
+		eventType types.PoolEventType
+		x, y      uint64
+	}{{types.PoolEventTypeRemove, xWithdrawn, yWithdrawn}, {types.PoolEventTypeAdd, xAdded, yAdded}} {
+		if side.x == 0 && side.y == 0 {
+			continue
+		}
+		amount0, amount1 := side.x, side.y
+		if token0Mint != mintX {
+			amount0, amount1 = side.y, side.x
+		}
+		ui0 := types.ConvertToUIAmountUint64(amount0, decimals0)
+		ui1 := types.ConvertToUIAmountUint64(amount1, decimals1)
+		d0, d1 := decimals0, decimals1
+		event := types.PoolEvent{
+			PoolEventBase:   p.Adapter.GetPoolEventBase(side.eventType, ci.ProgramId),
+			PoolId:          accounts[1],
+			PoolLpMint:      accounts[1],
+			Token0Mint:      token0Mint,
+			Token0Amount:    &ui0,
+			Token0AmountRaw: strconv.FormatUint(amount0, 10),
+			Token0Decimals:  &d0,
+			Token1Mint:      token1Mint,
+			Token1Amount:    &ui1,
+			Token1AmountRaw: strconv.FormatUint(amount1, 10),
+			Token1Decimals:  &d1,
+		}
+		event.Idx = utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+		events = append(events, event)
+	}
+	return events
 }
