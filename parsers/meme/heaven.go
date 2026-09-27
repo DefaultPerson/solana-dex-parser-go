@@ -2,8 +2,6 @@ package meme
 
 import (
 	"bytes"
-	"fmt"
-	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -101,193 +99,188 @@ func NewHeavenEventParser(
 	}
 }
 
-// ParseInstructions parses classified instructions into meme events
+// ParseInstructions parses classified instructions into meme events, in
+// execution order
 func (p *HeavenEventParser) ParseInstructions(instructions []types.ClassifiedInstruction) []*types.MemeEvent {
 	var events []*types.MemeEvent
 
-	for _, ci := range instructions {
-		// Check Heaven program
-		if ci.ProgramId != constants.DEX_PROGRAMS.HEAVEN.ID {
-			continue
-		}
+	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
+	sortExecutionOrder(ordered)
 
+	// outer groups with a Heaven pool creation: the token's Metaplex
+	// create instruction there is the Heaven CREATE event
+	createGroups := map[int]bool{}
+	for _, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 8 {
-			continue
+		if ci.ProgramId == constants.DEX_PROGRAMS.HEAVEN.ID && len(data) >= 8 && bytes.Equal(data[:8], constants.DISCRIMINATORS.HEAVEN.CREATE_POOL) {
+			createGroups[ci.OuterIndex] = true
 		}
+	}
 
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
+	for _, ci := range ordered {
+		data := p.adapter.GetInstructionData(ci.Instruction)
 		var event *types.MemeEvent
 
-		if bytes.Equal(disc, constants.DISCRIMINATORS.HEAVEN.BUY) {
-			event = p.decodeBuyEvent(data[8:], ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)
-		} else if bytes.Equal(disc, constants.DISCRIMINATORS.HEAVEN.SELL) {
-			event = p.decodeSellEvent(data[8:], ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)
-		} else if bytes.Equal(disc, constants.DISCRIMINATORS.HEAVEN.CREATE_POOL) {
-			event = p.decodeInitialBuyEvent(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)
+		switch ci.ProgramId {
+		case constants.DEX_PROGRAMS.HEAVEN.ID:
+			if len(data) < 8 {
+				continue
+			}
+			disc := data[:8]
+			if bytes.Equal(disc, constants.DISCRIMINATORS.HEAVEN.BUY) {
+				event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeBuy)
+			} else if bytes.Equal(disc, constants.DISCRIMINATORS.HEAVEN.SELL) {
+				event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeSell)
+			} else if bytes.Equal(disc, constants.DISCRIMINATORS.HEAVEN.CREATE_POOL) {
+				event = p.decodeInitialBuyEvent(ci)
+			}
+		case constants.METAPLEX_PROGRAM_ID:
+			if createGroups[ci.OuterIndex] && len(data) >= 1 && bytes.Equal(data[:1], constants.DISCRIMINATORS.METAPLEX.CREATE_MINT) {
+				event = p.decodeCreateEvent(data[1:], ci)
+			}
 		}
 
 		if event != nil {
 			event.Signature = p.adapter.Signature()
 			event.Slot = p.adapter.Slot()
 			event.Timestamp = p.adapter.BlockTime()
-			event.Idx = fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx)
+			event.Idx = formatIdx(ci.OuterIndex, ci.InnerIndex)
 			events = append(events, event)
 		}
 	}
 
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].Idx < events[j].Idx
-	})
-
 	return events
 }
 
-func (p *HeavenEventParser) decodeInitialBuyEvent(instruction interface{}, programId string, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeInitialBuyEvent decodes create_standard_liquidity_pool, which
+// includes the creator's initial buy. Accounts (upstream): 4 user, 5 base
+// mint, 6 quote mint, 10 pool, 11 platform config.
+func (p *HeavenEventParser) decodeInitialBuyEvent(ci types.ClassifiedInstruction) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 12 {
 		return nil
 	}
 
 	bondingCurve := accounts[10]
 	userAccount := accounts[4]
-	inputMint := accounts[6]  // quoteMint
-	outputMint := accounts[5] // baseMint
+	quoteMint := accounts[6]
+	baseMint := accounts[5]
 
 	event := &types.MemeEvent{
 		Protocol:       constants.DEX_PROGRAMS.HEAVEN.Name,
 		Type:           types.TradeTypeBuy,
-		BaseMint:       outputMint,
-		QuoteMint:      inputMint,
+		BaseMint:       baseMint,
+		QuoteMint:      quoteMint,
 		BondingCurve:   bondingCurve,
 		Pool:           bondingCurve,
 		User:           userAccount,
 		PlatformConfig: accounts[11],
 	}
 
-	// Get transfers and fill token info
-	transfers := p.getTransfersForInstruction(programId, outerIndex, innerIndex)
-	if len(transfers) >= 2 {
-		trade := p.utils.ProcessSwapData(transfers[:2], types.DexInfo{}, false)
-		if trade != nil {
-			event.InputToken = &trade.InputToken
-			event.OutputToken = &trade.OutputToken
-		}
+	// the initial buy is what the user paid in the quote mint for the base
+	// it received; the pool's seed liquidity is not the user's
+	in, out := userLegs(p.adapter, instructionTransfers(p.transferActions, ci), userAccount, quoteMint, baseMint)
+	if in == nil || out == nil {
+		return nil
 	}
-
+	event.InputToken, event.OutputToken = in, out
 	return event
 }
 
-func (p *HeavenEventParser) decodeBuyEvent(data []byte, instruction interface{}, programId string, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 7 {
+// decodeTradeEvent decodes buy and sell. Accounts (upstream
+// parser-heaven-event.ts): 4 pool, 5 user, 6 base mint, 7 quote mint, 12
+// platform config. Amounts are the user's transfers in the instruction;
+// without them the instruction args are used (amount in, minimum out).
+func (p *HeavenEventParser) decodeTradeEvent(data []byte, ci types.ClassifiedInstruction, tradeType types.TradeType) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+	if len(accounts) < 8 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	solAmount := reader.ReadU64AsBigInt()
-	tokenAmount := reader.ReadU64AsBigInt()
-
+	argIn := reader.ReadU64AsBigInt()
+	argOut := reader.ReadU64AsBigInt()
 	if reader.HasError() {
 		return nil
 	}
 
-	bondingCurve := accounts[6]
-	userAccount := accounts[3]
-	outputMint := accounts[4] // baseMint
-	inputMint := accounts[5]  // quoteMint
-
-	inputUIAmount := types.ConvertToUIAmountUint64(solAmount.Uint64(), 9)
-	outputUIAmount := types.ConvertToUIAmountUint64(tokenAmount.Uint64(), 6)
-
-	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.HEAVEN.Name,
-		Type:         types.TradeTypeBuy,
-		BaseMint:     outputMint,
-		QuoteMint:    inputMint,
-		BondingCurve: bondingCurve,
-		Pool:         bondingCurve,
-		User:         userAccount,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: solAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  9,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: tokenAmount.String(),
-			Amount:    outputUIAmount,
-			Decimals:  6,
-		},
+	pool := accounts[4]
+	user := accounts[5]
+	baseMint := accounts[6]
+	quoteMint := accounts[7]
+	inMint, outMint := quoteMint, baseMint
+	if tradeType == types.TradeTypeSell {
+		inMint, outMint = baseMint, quoteMint
 	}
+
+	event := &types.MemeEvent{
+		Protocol:     constants.DEX_PROGRAMS.HEAVEN.Name,
+		Type:         tradeType,
+		BaseMint:     baseMint,
+		QuoteMint:    quoteMint,
+		BondingCurve: pool,
+		Pool:         pool,
+		User:         user,
+	}
+	if len(accounts) > 12 {
+		event.PlatformConfig = accounts[12]
+	}
+
+	in, out := userLegs(p.adapter, instructionTransfers(p.transferActions, ci), user, inMint, outMint)
+	if in == nil {
+		in = tokenInfoFromRaw(p.adapter, inMint, argIn)
+	}
+	if out == nil {
+		out = tokenInfoFromRaw(p.adapter, outMint, argOut)
+	}
+	event.InputToken, event.OutputToken = in, out
+	return event
 }
 
-func (p *HeavenEventParser) decodeSellEvent(data []byte, instruction interface{}, programId string, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 7 {
+// decodeCreateEvent decodes the Metaplex create instruction of a token
+// launched with a Heaven pool (upstream decodes it the same way): data is the
+// CreateArgs variant, then name, symbol, uri; accounts 2 mint, 4 payer.
+func (p *HeavenEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedInstruction) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+	if len(accounts) < 5 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	tokenAmount := reader.ReadU64AsBigInt()
-	solAmount := reader.ReadU64AsBigInt()
-
+	reader.Skip(1) // CreateArgs variant
+	name, _ := reader.ReadString()
+	symbol, _ := reader.ReadString()
+	uri, _ := reader.ReadString()
 	if reader.HasError() {
 		return nil
 	}
 
-	bondingCurve := accounts[6]
-	userAccount := accounts[3]
-	inputMint := accounts[4]  // baseMint
-	outputMint := accounts[5] // quoteMint
-
-	inputUIAmount := types.ConvertToUIAmountUint64(tokenAmount.Uint64(), 6)
-	outputUIAmount := types.ConvertToUIAmountUint64(solAmount.Uint64(), 9)
-
-	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.HEAVEN.Name,
-		Type:         types.TradeTypeSell,
-		BaseMint:     inputMint,
-		QuoteMint:    outputMint,
-		BondingCurve: bondingCurve,
-		Pool:         bondingCurve,
-		User:         userAccount,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: tokenAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  6,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: solAmount.String(),
-			Amount:    outputUIAmount,
-			Decimals:  9,
-		},
+	event := &types.MemeEvent{
+		Protocol:  constants.DEX_PROGRAMS.HEAVEN.Name,
+		Type:      types.TradeTypeCreate,
+		Timestamp: p.adapter.BlockTime(),
+		User:      accounts[4],
+		Creator:   accounts[4],
+		BaseMint:  accounts[2],
+		QuoteMint: constants.TOKENS.SOL,
+		Name:      name,
+		Symbol:    symbol,
+		URI:       uri,
 	}
-}
-
-func (p *HeavenEventParser) getTransfersForInstruction(programId string, outerIndex int, innerIndex int) []types.TransferData {
-	key := fmt.Sprintf("%s:%d-%d", programId, outerIndex, innerIndex)
-	if transfers, ok := p.transferActions[key]; ok {
-		return transfers
+	if d, ok := p.adapter.SPLDecimalsMap[accounts[2]]; ok {
+		event.Decimals = &d
 	}
-	return nil
+	return event
 }
 
 // ProcessEvents implements the EventParser interface
 func (p *HeavenEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgramHeaven(p.adapter, constants.DEX_PROGRAMS.HEAVEN.ID)
+	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{
+		constants.DEX_PROGRAMS.HEAVEN.ID,
+		constants.METAPLEX_PROGRAM_ID,
+	})
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -297,39 +290,4 @@ func (p *HeavenEventParser) ProcessEvents() []types.MemeEvent {
 		}
 	}
 	return result
-}
-
-// getAllInstructionsForProgramHeaven gets all instructions for Heaven program
-func getAllInstructionsForProgramHeaven(adapter *adapter.TransactionAdapter, programId string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Process outer instructions
-	for i, ix := range adapter.Instructions() {
-		ixProgramId := adapter.GetInstructionProgramId(ix)
-		if ixProgramId == programId {
-			instructions = append(instructions, types.ClassifiedInstruction{
-				ProgramId:   ixProgramId,
-				Instruction: ix,
-				OuterIndex:  i,
-				InnerIndex:  -1,
-			})
-		}
-	}
-
-	// Process inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for j, innerIx := range innerSet.Instructions {
-			ixProgramId := adapter.GetInstructionProgramId(innerIx)
-			if ixProgramId == programId {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   ixProgramId,
-					Instruction: innerIx,
-					OuterIndex:  innerSet.Index,
-					InnerIndex:  j,
-				})
-			}
-		}
-	}
-
-	return instructions
 }

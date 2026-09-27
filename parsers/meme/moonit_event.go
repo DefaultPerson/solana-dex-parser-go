@@ -2,7 +2,6 @@ package meme
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
@@ -16,6 +15,7 @@ type MoonitEventParser struct {
 	adapter         *adapter.TransactionAdapter
 	transferActions map[string][]types.TransferData
 	utils           *utils.TransactionUtils
+	logEvents       map[[2]int]*moonitTradeEvent
 }
 
 // NewMoonitEventParser creates a new Moonit event parser
@@ -47,29 +47,31 @@ func (p *MoonitEventParser) ProcessEvents() []types.MemeEvent {
 	return result
 }
 
-// ParseInstructions parses classified instructions into meme events
+// ParseInstructions parses classified instructions into meme events, in
+// execution order
 func (p *MoonitEventParser) ParseInstructions(instructions []types.ClassifiedInstruction) []*types.MemeEvent {
 	var events []*types.MemeEvent
 
-	for _, ci := range instructions {
+	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
+	sortExecutionOrder(ordered)
+
+	for _, ci := range ordered {
+		if ci.ProgramId != constants.DEX_PROGRAMS.MOONIT.ID {
+			continue
+		}
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 8 {
 			continue
 		}
 
 		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
 		var event *types.MemeEvent
 
 		switch {
 		case bytes.Equal(disc, constants.DISCRIMINATORS.MOONIT.BUY):
-			event = p.decodeBuyEvent(data[8:], ci)
+			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeBuy)
 		case bytes.Equal(disc, constants.DISCRIMINATORS.MOONIT.SELL):
-			event = p.decodeSellEvent(data[8:], ci)
+			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeSell)
 		case bytes.Equal(disc, constants.DISCRIMINATORS.MOONIT.CREATE):
 			event = p.decodeCreateEvent(data[8:], ci)
 		case bytes.Equal(disc, constants.DISCRIMINATORS.MOONIT.MIGRATE):
@@ -80,7 +82,7 @@ func (p *MoonitEventParser) ParseInstructions(instructions []types.ClassifiedIns
 			event.Signature = p.adapter.Signature()
 			event.Slot = p.adapter.Slot()
 			event.Timestamp = p.adapter.BlockTime()
-			event.Idx = fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx)
+			event.Idx = formatIdx(ci.OuterIndex, ci.InnerIndex)
 			events = append(events, event)
 		}
 	}
@@ -88,104 +90,175 @@ func (p *MoonitEventParser) ParseInstructions(instructions []types.ClassifiedIns
 	return events
 }
 
-func (p *MoonitEventParser) decodeBuyEvent(data []byte, ci types.ClassifiedInstruction) *types.MemeEvent {
-	if len(data) < 16 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
-	if len(accounts) < 13 {
-		return nil
-	}
-
-	outputAmount, _ := reader.ReadU64()
-	inputAmount, _ := reader.ReadU64()
-
-	baseMint := accounts[6]
-	pool := accounts[2]
-	user := accounts[0]
-	inputMint := constants.TOKENS.SOL
-	outputMint := baseMint
-
-	inputDecimals := p.adapter.GetTokenDecimals(inputMint)
-	outputDecimals := p.adapter.GetTokenDecimals(outputMint)
-
-	inputAmountBig := new(big.Int).SetUint64(inputAmount)
-	outputAmountBig := new(big.Int).SetUint64(outputAmount)
-
-	event := &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.MOONIT.Name,
-		Type:         types.TradeTypeBuy,
-		BaseMint:     outputMint,
-		QuoteMint:    inputMint,
-		BondingCurve: pool,
-		Pool:         pool,
-		User:         user,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: inputAmountBig.String(),
-			Amount:    types.ConvertToUIAmount(inputAmountBig, inputDecimals),
-			Decimals:  inputDecimals,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: outputAmountBig.String(),
-			Amount:    types.ConvertToUIAmount(outputAmountBig, outputDecimals),
-			Decimals:  outputDecimals,
-		},
-	}
-
-	// Attach transfer data
-	return p.processMemeTransferData(ci, event)
+// moonitTradeEvent is Moonit's TradeEvent (token_launchpad IDL), emitted as
+// a "Program data:" log only: amount, collateral_amount, dex_fee, helio_fee,
+// allocation, curve, cost_token, sender, type (0 buy, 1 sell), label
+type moonitTradeEvent struct {
+	Amount           uint64
+	CollateralAmount uint64
+	DexFee           uint64
+	HelioFee         uint64
+	Curve            string
+	CostToken        string
+	Sender           string
+	IsSell           bool
 }
 
-func (p *MoonitEventParser) decodeSellEvent(data []byte, ci types.ClassifiedInstruction) *types.MemeEvent {
+// moonitTradeEventDisc is sha256("event:TradeEvent")[:8]
+var moonitTradeEventDisc = []byte{189, 219, 127, 211, 78, 230, 97, 238}
+
+// tradeEvents returns the TradeEvent logged by each Moonit instruction, keyed
+// by its (outer, inner) index. Invocations in the logs follow the execution
+// order of all Moonit instructions of the transaction; when the counts
+// disagree (truncated or missing logs) nothing is returned.
+func (p *MoonitEventParser) tradeEvents() map[[2]int]*moonitTradeEvent {
+	if p.logEvents != nil {
+		return p.logEvents
+	}
+	p.logEvents = map[[2]int]*moonitTradeEvent{}
+
+	all := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.MOONIT.ID})
+	sortExecutionOrder(all)
+	invocations := programDataByInvocation(p.adapter.LogMessages(), constants.DEX_PROGRAMS.MOONIT.ID)
+	if len(invocations) != len(all) {
+		return p.logEvents
+	}
+	for k, payloads := range invocations {
+		for _, data := range payloads {
+			if len(data) < 8 || !bytes.Equal(data[:8], moonitTradeEventDisc) {
+				continue
+			}
+			reader := utils.GetBinaryReader(data[8:])
+			evt := &moonitTradeEvent{}
+			evt.Amount, _ = reader.ReadU64()
+			evt.CollateralAmount, _ = reader.ReadU64()
+			evt.DexFee, _ = reader.ReadU64()
+			evt.HelioFee, _ = reader.ReadU64()
+			reader.Skip(8) // allocation
+			evt.Curve, _ = reader.ReadPubkey()
+			evt.CostToken, _ = reader.ReadPubkey()
+			evt.Sender, _ = reader.ReadPubkey()
+			tradeType, _ := reader.ReadU8()
+			evt.IsSell = tradeType == 1
+			ok := !reader.HasError()
+			reader.Release()
+			if ok {
+				p.logEvents[[2]int{all[k].OuterIndex, all[k].InnerIndex}] = evt
+			}
+		}
+	}
+	return p.logEvents
+}
+
+// decodeTradeEvent decodes buy and sell. Accounts (IDL): 0 sender, 2 curve,
+// 4 dex fee, 5 helio fee, 6 mint; later layouts append remaining accounts.
+// Amounts come from the TradeEvent the instruction logs: a buyer pays the
+// collateral plus both fees, a seller receives the collateral minus both
+// fees, in the event's cost token. Without the log the token side comes from
+// the instruction's transfers (else the token_amount arg) and the collateral
+// side from the user's transfers (else the collateral_amount arg, which is
+// the slippage-bounded quote, not the executed amount).
+func (p *MoonitEventParser) decodeTradeEvent(data []byte, ci types.ClassifiedInstruction, tradeType types.TradeType) *types.MemeEvent {
 	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 7 {
 		return nil
 	}
 
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+	argTokens := reader.ReadU64AsBigInt()
+	argCollateral := reader.ReadU64AsBigInt()
+	if reader.HasError() {
+		return nil
+	}
+
 	user := accounts[0]
 	pool := accounts[2]
-	dexFeeMint := accounts[4]
-	helioFeeMint := accounts[5]
 	baseMint := accounts[6]
-
-	collateralMint := p.detectCollateralMint(p.adapter.AccountKeys)
-	tokenAmount, collateralAmount, dexFeeAmount, _ := p.calculateAmounts(baseMint, collateralMint, dexFeeMint, helioFeeMint)
+	collateralMint := constants.TOKENS.SOL
 
 	event := &types.MemeEvent{
 		Protocol:     constants.DEX_PROGRAMS.MOONIT.Name,
-		Type:         types.TradeTypeSell,
+		Type:         tradeType,
 		BaseMint:     baseMint,
-		QuoteMint:    collateralMint,
 		BondingCurve: pool,
 		Pool:         pool,
 		User:         user,
-		InputToken: &types.TokenInfo{
-			Mint:      baseMint,
-			AmountRaw: tokenAmount.Amount,
-			Amount:    getUIAmount(tokenAmount.UIAmount),
-			Decimals:  tokenAmount.Decimals,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      collateralMint,
-			AmountRaw: collateralAmount.Amount,
-			Amount:    getUIAmount(collateralAmount.UIAmount),
-			Decimals:  collateralAmount.Decimals,
-		},
 	}
 
-	// Add fee info
-	if dexFeeAmount.Amount != "0" {
-		feeAmt := getUIAmount(dexFeeAmount.UIAmount)
-		event.ProtocolFee = &feeAmt
+	var base, collateral *types.TokenInfo
+	evt := p.tradeEvents()[[2]int{ci.OuterIndex, ci.InnerIndex}]
+	if evt != nil && evt.Curve == pool && evt.IsSell == (tradeType == types.TradeTypeSell) {
+		if evt.CostToken != "" && evt.CostToken != systemProgramID {
+			collateralMint = evt.CostToken
+		}
+		fees := new(big.Int).Add(new(big.Int).SetUint64(evt.DexFee), new(big.Int).SetUint64(evt.HelioFee))
+		amount := new(big.Int).SetUint64(evt.CollateralAmount)
+		if tradeType == types.TradeTypeBuy {
+			amount.Add(amount, fees)
+		} else if amount.Cmp(fees) >= 0 {
+			amount.Sub(amount, fees)
+		}
+		base = tokenInfoFromRaw(p.adapter, baseMint, new(big.Int).SetUint64(evt.Amount))
+		collateral = tokenInfoFromRaw(p.adapter, collateralMint, amount)
+		event.Fees = p.fees(collateralMint, evt, accounts)
+		if len(event.Fees) > 0 {
+			protocolFee := types.ConvertToUIAmount(fees, collateral.Decimals)
+			event.ProtocolFee = &protocolFee
+		}
+	} else {
+		transfers := instructionTransfers(p.transferActions, ci)
+		if tradeType == types.TradeTypeBuy {
+			collateral, base = userLegs(p.adapter, transfers, user, collateralMint, baseMint)
+		} else {
+			base, collateral = userLegs(p.adapter, transfers, user, baseMint, collateralMint)
+		}
+		if base == nil {
+			base = tokenInfoFromRaw(p.adapter, baseMint, argTokens)
+		}
+		if collateral == nil {
+			collateral = tokenInfoFromRaw(p.adapter, collateralMint, argCollateral)
+		}
 	}
 
+	event.QuoteMint = collateralMint
+	event.InputToken, event.OutputToken = collateral, base
+	if tradeType == types.TradeTypeSell {
+		event.InputToken, event.OutputToken = base, collateral
+	}
 	return event
+}
+
+// systemProgramID is Pubkey::default in base58
+const systemProgramID = "11111111111111111111111111111111"
+
+// fees lists the dex and helio fees of a Moonit trade in the collateral mint
+func (p *MoonitEventParser) fees(mint string, evt *moonitTradeEvent, accounts []string) []types.FeeInfo {
+	decimals := p.adapter.GetTokenDecimals(mint)
+	var fees []types.FeeInfo
+	for _, f := range []struct {
+		amount    uint64
+		feeType   string
+		recipient string
+	}{
+		{evt.DexFee, "dex", accounts[4]},
+		{evt.HelioFee, "helio", accounts[5]},
+	} {
+		if f.amount == 0 {
+			continue
+		}
+		v := new(big.Int).SetUint64(f.amount)
+		fees = append(fees, types.FeeInfo{
+			Mint:      mint,
+			Amount:    types.ConvertToUIAmount(v, decimals),
+			AmountRaw: v.String(),
+			Decimals:  decimals,
+			Dex:       constants.DEX_PROGRAMS.MOONIT.Name,
+			Type:      f.feeType,
+			Recipient: f.recipient,
+		})
+	}
+	return fees
 }
 
 func (p *MoonitEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedInstruction) *types.MemeEvent {
@@ -251,103 +324,6 @@ func (p *MoonitEventParser) decodeMigrateEvent(data []byte, ci types.ClassifiedI
 	}
 }
 
-func (p *MoonitEventParser) detectCollateralMint(accountKeys []string) string {
-	for _, key := range accountKeys {
-		if key == constants.TOKENS.USDC {
-			return constants.TOKENS.USDC
-		}
-		if key == constants.TOKENS.USDT {
-			return constants.TOKENS.USDT
-		}
-	}
-	return constants.TOKENS.SOL
-}
-
-func (p *MoonitEventParser) calculateAmounts(tokenMint, collateralMint, dexFeeMint, helioFeeMint string) (types.TokenAmount, types.TokenAmount, types.TokenAmount, types.TokenAmount) {
-	tokenBalanceChange := p.getTokenBalanceChanges(tokenMint)
-	collateralBalanceChange := p.getTokenBalanceChanges(collateralMint)
-	dexFeeBalanceChange := p.getTokenBalanceChanges(dexFeeMint)
-	helioFeeBalanceChange := p.getTokenBalanceChanges(helioFeeMint)
-
-	return p.createTokenAmount(absInt64(tokenBalanceChange), tokenMint),
-		p.createTokenAmount(absInt64(collateralBalanceChange), collateralMint),
-		p.createTokenAmount(absInt64(dexFeeBalanceChange), dexFeeMint),
-		p.createTokenAmount(absInt64(helioFeeBalanceChange), helioFeeMint)
-}
-
-func (p *MoonitEventParser) getTokenBalanceChanges(mint string) int64 {
-	signer := p.adapter.Signer()
-
-	if mint == constants.TOKENS.SOL {
-		preBalances := p.adapter.PreBalances()
-		postBalances := p.adapter.PostBalances()
-		if len(preBalances) > 0 && len(postBalances) > 0 {
-			return int64(postBalances[0]) - int64(preBalances[0])
-		}
-		return 0
-	}
-
-	var preAmount, postAmount int64
-
-	for _, preBalance := range p.adapter.PreTokenBalances() {
-		if preBalance.Mint == mint && preBalance.Owner == signer {
-			if amt, ok := new(big.Int).SetString(preBalance.UiTokenAmount.Amount, 10); ok {
-				preAmount = amt.Int64()
-			}
-		}
-	}
-
-	for _, postBalance := range p.adapter.PostTokenBalances() {
-		if postBalance.Mint == mint && postBalance.Owner == signer {
-			if amt, ok := new(big.Int).SetString(postBalance.UiTokenAmount.Amount, 10); ok {
-				postAmount = amt.Int64()
-			}
-		}
-	}
-
-	return postAmount - preAmount
-}
-
-func (p *MoonitEventParser) createTokenAmount(amount int64, mint string) types.TokenAmount {
-	decimals := p.adapter.GetTokenDecimals(mint)
-	amtBig := new(big.Int).SetInt64(amount)
-	uiAmount := types.ConvertToUIAmount(amtBig, decimals)
-	return types.TokenAmount{
-		Amount:   amtBig.String(),
-		UIAmount: &uiAmount,
-		Decimals: decimals,
-	}
-}
-
-func (p *MoonitEventParser) processMemeTransferData(ci types.ClassifiedInstruction, event *types.MemeEvent) *types.MemeEvent {
-	innerIdx := ci.InnerIndex
-	if innerIdx < 0 {
-		innerIdx = 0
-	}
-
-	key := fmt.Sprintf("%s:%d-%d", ci.ProgramId, ci.OuterIndex, innerIdx)
-	transfers, ok := p.transferActions[key]
-	if !ok || len(transfers) < 2 {
-		return event
-	}
-
-	// Attach transfer info to input/output tokens
-	for _, transfer := range transfers {
-		if event.InputToken != nil && transfer.Info.Mint == event.InputToken.Mint {
-			event.InputToken.Authority = transfer.Info.Authority
-			event.InputToken.Source = transfer.Info.Source
-			event.InputToken.Destination = transfer.Info.Destination
-		}
-		if event.OutputToken != nil && transfer.Info.Mint == event.OutputToken.Mint {
-			event.OutputToken.Authority = transfer.Info.Authority
-			event.OutputToken.Source = transfer.Info.Source
-			event.OutputToken.Destination = transfer.Info.Destination
-		}
-	}
-
-	return event
-}
-
 // getAllInstructionsForMultiPrograms gets all instructions for multiple program IDs
 func getAllInstructionsForMultiPrograms(adapter *adapter.TransactionAdapter, programIds []string) []types.ClassifiedInstruction {
 	var instructions []types.ClassifiedInstruction
@@ -387,12 +363,4 @@ func getAllInstructionsForMultiPrograms(adapter *adapter.TransactionAdapter, pro
 	}
 
 	return instructions
-}
-
-// getUIAmount safely extracts float64 from *float64
-func getUIAmount(ptr *float64) float64 {
-	if ptr == nil {
-		return 0
-	}
-	return *ptr
 }

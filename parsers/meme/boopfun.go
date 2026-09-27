@@ -2,8 +2,7 @@ package meme
 
 import (
 	"bytes"
-	"fmt"
-	"sort"
+	"math/big"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -100,11 +99,15 @@ func NewBoopfunEventParser(
 	}
 }
 
-// ParseInstructions parses classified instructions into meme events
+// ParseInstructions parses classified instructions into meme events, in
+// execution order
 func (p *BoopfunEventParser) ParseInstructions(instructions []types.ClassifiedInstruction) []*types.MemeEvent {
 	var events []*types.MemeEvent
 
-	for _, ci := range instructions {
+	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
+	sortExecutionOrder(ordered)
+
+	for _, ci := range ordered {
 		if ci.ProgramId != constants.DEX_PROGRAMS.BOOP_FUN.ID {
 			continue
 		}
@@ -115,156 +118,75 @@ func (p *BoopfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 		}
 
 		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
 		var event *types.MemeEvent
 
 		if bytes.Equal(disc, constants.DISCRIMINATORS.BOOPFUN.BUY) {
-			event = p.decodeBuyEvent(data[8:], ci.Instruction, ci.OuterIndex, innerIdx)
+			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeBuy)
 		} else if bytes.Equal(disc, constants.DISCRIMINATORS.BOOPFUN.SELL) {
-			event = p.decodeSellEvent(data[8:], ci.Instruction, ci.OuterIndex, innerIdx)
+			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeSell)
 		} else if bytes.Equal(disc, constants.DISCRIMINATORS.BOOPFUN.CREATE) {
 			event = p.decodeCreateEvent(data[8:], ci.Instruction)
 		} else if bytes.Equal(disc, constants.DISCRIMINATORS.BOOPFUN.COMPLETE) {
-			event = p.decodeCompleteEvent(ci.Instruction, ci.OuterIndex, innerIdx)
+			event = p.decodeCompleteEvent(ci.Instruction)
 		}
 
 		if event != nil {
 			event.Signature = p.adapter.Signature()
 			event.Slot = p.adapter.Slot()
 			event.Timestamp = p.adapter.BlockTime()
-			event.Idx = fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx)
+			event.Idx = formatIdx(ci.OuterIndex, ci.InnerIndex)
 			events = append(events, event)
 		}
 	}
 
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].Idx < events[j].Idx
-	})
-
 	return events
 }
 
-func (p *BoopfunEventParser) decodeBuyEvent(data []byte, instruction interface{}, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeTradeEvent decodes buy_token (args: buy_amount, amount_out_min) and
+// sell_token (args: sell_amount, amount_out_min). Accounts: 0 mint, 1
+// bonding curve, 6 user. The amounts are the user's transfers in the
+// instruction (buys: the SOL paid including the trading fee; sells: the SOL
+// received after it); without them the first argument is used for the input
+// and the output is 0.
+func (p *BoopfunEventParser) decodeTradeEvent(data []byte, ci types.ClassifiedInstruction, tradeType types.TradeType) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 7 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	solAmount := reader.ReadU64AsBigInt()
-
+	argIn := reader.ReadU64AsBigInt()
 	if reader.HasError() {
 		return nil
-	}
-
-	// Get transfers to find token amount
-	programId := p.adapter.GetInstructionProgramId(instruction)
-	transfers := p.getTransfersForInstruction(programId, outerIndex, innerIndex)
-	var tokenAmount uint64
-	for _, t := range transfers {
-		if t.Info.Mint == accounts[0] {
-			if t.Info.TokenAmount.Amount != "" {
-				if amt, err := parseUint64(t.Info.TokenAmount.Amount); err == nil {
-					tokenAmount = amt
-				}
-			}
-			break
-		}
 	}
 
 	mint := accounts[0]
 	quoteMint := constants.TOKENS.SOL
 	user := accounts[6]
-	bondingCurve := accounts[1]
+	inMint, outMint := quoteMint, mint
+	if tradeType == types.TradeTypeSell {
+		inMint, outMint = mint, quoteMint
+	}
 
-	inputUIAmount := types.ConvertToUIAmountUint64(solAmount.Uint64(), 9)
-	outputUIAmount := types.ConvertToUIAmountUint64(tokenAmount, 6)
+	in, out := userLegs(p.adapter, instructionTransfers(p.transferActions, ci), user, inMint, outMint)
+	if in == nil {
+		in = tokenInfoFromRaw(p.adapter, inMint, argIn)
+	}
+	if out == nil {
+		out = tokenInfoFromRaw(p.adapter, outMint, new(big.Int))
+	}
 
 	return &types.MemeEvent{
 		Protocol:     constants.DEX_PROGRAMS.BOOP_FUN.Name,
-		Type:         types.TradeTypeBuy,
-		BondingCurve: bondingCurve,
+		Type:         tradeType,
+		BondingCurve: accounts[1],
+		Pool:         accounts[1],
 		BaseMint:     mint,
 		QuoteMint:    quoteMint,
 		User:         user,
-		InputToken: &types.TokenInfo{
-			Mint:      quoteMint,
-			AmountRaw: solAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  9,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      mint,
-			AmountRaw: fmt.Sprintf("%d", tokenAmount),
-			Amount:    outputUIAmount,
-			Decimals:  6,
-		},
-	}
-}
-
-func (p *BoopfunEventParser) decodeSellEvent(data []byte, instruction interface{}, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 7 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	tokenAmount := reader.ReadU64AsBigInt()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	// Get transfers to find SOL amount
-	programId := p.adapter.GetInstructionProgramId(instruction)
-	transfers := p.getTransfersForInstruction(programId, outerIndex, innerIndex)
-	var solAmount uint64
-	for _, t := range transfers {
-		if t.Info.Mint == constants.TOKENS.SOL {
-			if t.Info.TokenAmount.Amount != "" {
-				if amt, err := parseUint64(t.Info.TokenAmount.Amount); err == nil {
-					solAmount = amt
-				}
-			}
-			break
-		}
-	}
-
-	mint := accounts[0]
-	quoteMint := constants.TOKENS.SOL
-	user := accounts[6]
-	bondingCurve := accounts[1]
-
-	inputUIAmount := types.ConvertToUIAmountUint64(tokenAmount.Uint64(), 6)
-	outputUIAmount := types.ConvertToUIAmountUint64(solAmount, 9)
-
-	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.BOOP_FUN.Name,
-		Type:         types.TradeTypeSell,
-		BondingCurve: bondingCurve,
-		BaseMint:     mint,
-		QuoteMint:    quoteMint,
-		User:         user,
-		InputToken: &types.TokenInfo{
-			Mint:      mint,
-			AmountRaw: tokenAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  6,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      quoteMint,
-			AmountRaw: fmt.Sprintf("%d", solAmount),
-			Amount:    outputUIAmount,
-			Decimals:  9,
-		},
+		InputToken:   in,
+		OutputToken:  out,
 	}
 }
 
@@ -306,7 +228,7 @@ func (p *BoopfunEventParser) decodeCreateEvent(data []byte, instruction interfac
 	}
 }
 
-func (p *BoopfunEventParser) decodeCompleteEvent(instruction interface{}, outerIndex int, innerIndex int) *types.MemeEvent {
+func (p *BoopfunEventParser) decodeCompleteEvent(instruction interface{}) *types.MemeEvent {
 	accounts := p.adapter.GetInstructionAccounts(instruction)
 	if len(accounts) < 11 {
 		return nil
@@ -323,29 +245,9 @@ func (p *BoopfunEventParser) decodeCompleteEvent(instruction interface{}, outerI
 	}
 }
 
-func (p *BoopfunEventParser) getTransfersForInstruction(programId string, outerIndex int, innerIndex int) []types.TransferData {
-	key := fmt.Sprintf("%s:%d-%d", programId, outerIndex, innerIndex)
-	if transfers, ok := p.transferActions[key]; ok {
-		var filtered []types.TransferData
-		for _, t := range transfers {
-			if t.Type == "transfer" || t.Type == "transferChecked" {
-				filtered = append(filtered, t)
-			}
-		}
-		return filtered
-	}
-	return nil
-}
-
-func parseUint64(s string) (uint64, error) {
-	var v uint64
-	_, err := fmt.Sscanf(s, "%d", &v)
-	return v, err
-}
-
 // ProcessEvents implements the EventParser interface
 func (p *BoopfunEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgramBoopfun(p.adapter, constants.DEX_PROGRAMS.BOOP_FUN.ID)
+	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.BOOP_FUN.ID})
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -355,39 +257,4 @@ func (p *BoopfunEventParser) ProcessEvents() []types.MemeEvent {
 		}
 	}
 	return result
-}
-
-// getAllInstructionsForProgramBoopfun gets all instructions for Boopfun program
-func getAllInstructionsForProgramBoopfun(adapter *adapter.TransactionAdapter, programId string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Process outer instructions
-	for i, ix := range adapter.Instructions() {
-		ixProgramId := adapter.GetInstructionProgramId(ix)
-		if ixProgramId == programId {
-			instructions = append(instructions, types.ClassifiedInstruction{
-				ProgramId:   ixProgramId,
-				Instruction: ix,
-				OuterIndex:  i,
-				InnerIndex:  -1,
-			})
-		}
-	}
-
-	// Process inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for j, innerIx := range innerSet.Instructions {
-			ixProgramId := adapter.GetInstructionProgramId(innerIx)
-			if ixProgramId == programId {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   ixProgramId,
-					Instruction: innerIx,
-					OuterIndex:  innerSet.Index,
-					InnerIndex:  j,
-				})
-			}
-		}
-	}
-
-	return instructions
 }
