@@ -105,7 +105,8 @@ func (p *JupiterParser) appendHopTrade(trades []types.TradeInfo, event *JupiterS
 // instruction of the hop's AMM program that executed it. The hops are matched
 // in order against the instructions between the route instruction that
 // emitted the event and the event itself. A hop whose AMM instruction is not
-// found gets the idx of the event.
+// found gets a distinct idx of its own (see fallback below), so that the
+// trade dedupe by idx never merges two hops.
 func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*JupiterSwapEvent) []string {
 	eventIdx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 	result := make([]string, len(events))
@@ -138,14 +139,46 @@ func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*Jup
 		}
 	}
 
+	start := cursor
+	matched := make([]int, len(events)) // inner index of each hop, -1 when unmatched
+	used := make(map[int]bool)
 	for i, event := range events {
+		matched[i] = -1
 		for j := cursor; j < end; j++ {
 			if p.Adapter.GetInstructionProgramId(inner[j]) == event.AMM {
-				result[i] = utils.FormatIdx(ci.OuterIndex, j)
+				matched[i] = j
+				used[j] = true
 				cursor = j + 1
 				break
 			}
 		}
+	}
+
+	// Fallback for an unmatched hop: the first unused instruction after the
+	// previous hop, else any unused instruction from the route's first hop
+	// up to the end of the set (the event itself included), else the event
+	free := func(from int) int {
+		for j := from; j < len(inner); j++ {
+			if !used[j] {
+				return j
+			}
+		}
+		return -1
+	}
+	prev := start
+	for i := range events {
+		j := matched[i]
+		if j < 0 {
+			if j = free(prev); j < 0 {
+				j = free(start)
+			}
+			if j < 0 {
+				continue
+			}
+			used[j] = true
+		}
+		result[i] = utils.FormatIdx(ci.OuterIndex, j)
+		prev = j + 1
 	}
 	return result
 }
@@ -215,9 +248,14 @@ func adjustTokenAmount(token *types.TokenInfo, delta *big.Int) {
 	token.Amount = types.ConvertToUIAmount(amount, token.Decimals)
 }
 
+// anchorEventPrefix is the first 8 bytes of every Anchor self-CPI event:
+// Anchor's EVENT_IX_TAG 0x1d9acb512ea545e4 (sha256("anchor:event")[:8] read as
+// a big-endian u64) in little-endian order. It is the same for all programs.
+var anchorEventPrefix = []byte{0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d}
+
 // isAnchorEvent reports whether instruction data is an Anchor self-CPI event
 func isAnchorEvent(data []byte) bool {
-	return len(data) >= 16 && bytes.Equal(data[:8], constants.DISCRIMINATORS.JUPITER.ROUTE_EVENT[:8])
+	return len(data) >= 16 && bytes.Equal(data[:8], anchorEventPrefix)
 }
 
 // outerIndexOf returns the outer instruction index of an idx ("5" or "5-3"),

@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/mr-tron/base58"
 
+	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/jupiter"
@@ -299,5 +300,83 @@ func TestJupiterHopUnknownAMM(t *testing.T) {
 				t.Errorf("%.8s %s: AMM %q ProgramId %q", sig, tr.Idx, tr.AMM, tr.ProgramId)
 			}
 		}
+	}
+}
+
+// TestJupiterSwapsEventUnmatchedHops: a SwapsEvent hop whose AMM program is not
+// found among the route's inner instructions used to get the event's idx, so
+// several such hops shared one idx and the trade dedupe in ParseAll kept only
+// the first. Synthetic: every real hop's AMM runs as an inner instruction, so
+// the hop AMMs of real multi-hop route_v2 transactions are replaced by
+// unregistered ids that execute nothing. Each hop must still come out as its
+// own trade, with a distinct idx and the hop's amounts.
+func TestJupiterSwapsEventUnmatchedHops(t *testing.T) {
+	tested := 0
+	for _, pre := range []string{"1V8cnQVrAApj", "2jm6y95jSBHP", "2zRhMn1ADKEU", "34sGGDUK4A1x", "NeF1UiWXKUbu", "2d32B4VReyxf", "3VdmWK159atQ", "4YEiZ5wX7cJj", "5pXteqTXGiFk", "3pnp1kpTvnZM", "5iaG7mCfMRQx", "3cbL8koKqz7s", "4wFykYbVDgXK"} {
+		sig := jupFindSig(t, pre)
+		raw, err := readFixture(sig, "json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]interface{}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		var hops []jupHop
+		ids := make(map[string]bool)
+		for _, set := range doc["meta"].(map[string]interface{})["innerInstructions"].([]interface{}) {
+			for _, x := range set.(map[string]interface{})["instructions"].([]interface{}) {
+				ix := x.(map[string]interface{})
+				data, _ := base58.Decode(ix["data"].(string))
+				if len(data) < 20 || !bytes.Equal(data[8:16], jupDisc("event:SwapsEvent")) {
+					continue
+				}
+				hops = jupDecodeSwapsEvent(data[16:])
+				for i := range hops {
+					off := 16 + 4 + i*112 + 80
+					copy(data[off:off+32], bytes.Repeat([]byte{byte(100 + i)}, 32))
+					ids[base58.Encode(data[off:off+32])] = true
+				}
+				ix["data"] = base58.Encode(data)
+			}
+		}
+		if len(hops) < 2 {
+			continue
+		}
+		tested++
+		for id := range ids {
+			if constants.GetProgramName(id) != "Unknown" {
+				t.Fatalf("%s is registered", id)
+			}
+		}
+		raw, _ = json.Marshal(doc)
+		var tx adapter.SolanaTransaction
+		if err := json.Unmarshal(raw, &tx); err != nil {
+			t.Fatal(err)
+		}
+		r := dexparser.NewDexParser().ParseAll(&tx, nil)
+		var got []types.TradeInfo
+		seen := make(map[string]bool)
+		for _, tr := range r.Trades {
+			if ids[tr.ProgramId] {
+				got = append(got, tr)
+				if seen[tr.Idx] {
+					t.Errorf("%.8s: two hops at idx %s", sig, tr.Idx)
+				}
+				seen[tr.Idx] = true
+			}
+		}
+		if len(got) != len(hops) {
+			t.Errorf("%.8s: %d of %d unmatched hops came out as trades (idx %v)", sig, len(got), len(hops), seen)
+			continue
+		}
+		for i, h := range hops {
+			if got[i].InputToken.Mint != h.InMint || got[i].OutputToken.Mint != h.OutMint || got[i].AMM != "Unknown" {
+				t.Errorf("%.8s hop %d: %s -> %s %s, want %s -> %s", sig, i, got[i].InputToken.Mint, got[i].OutputToken.Mint, got[i].AMM, h.InMint, h.OutMint)
+			}
+		}
+	}
+	if tested < 2 {
+		t.Errorf("only %d multi-hop fixtures", tested)
 	}
 }
