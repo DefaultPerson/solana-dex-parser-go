@@ -224,3 +224,29 @@ func TestMemeBoopfunCreateBondingCurve(t *testing.T) {
 		t.Errorf("create %+v, deploy accounts %v", create, deploy[:6])
 	}
 }
+
+// Without usable logs (missing or truncated) Moonit falls back to the
+// instruction's transfers and args instead of attributing a TradeEvent to
+// the wrong instruction. Synthetic: the real 4wQnGcxk buy and 2XYu86 sell
+// with their log messages removed or truncated.
+func TestMemeMoonitWithoutLogs(t *testing.T) {
+	for _, mutate := range []func(logs []string) []string{
+		func(logs []string) []string { return nil },
+		func(logs []string) []string { return append(logs[:len(logs)/2:len(logs)/2], "Log truncated") },
+	} {
+		// buy: the SOL paid is the user's System transfers
+		tx := cloneTx(t, loadFixture(t, sigMoonitBuy11))
+		tx.Meta.LogMessages = mutate(tx.Meta.LogMessages)
+		e := memeEventAt(t, dexparserParse(tx), "1")
+		if e.InputToken.AmountRaw != "1213981" || e.OutputToken.AmountRaw != "3796278637331" || len(e.Fees) != 0 {
+			t.Errorf("buy without logs: %+v %+v fees %+v", e.InputToken, e.OutputToken, e.Fees)
+		}
+		// sell: the curve pays lamports directly; the args give the quote
+		tx = cloneTx(t, loadFixture(t, sigMoonitSell))
+		tx.Meta.LogMessages = mutate(tx.Meta.LogMessages)
+		e = memeEventAt(t, dexparserParse(tx), "2")
+		if e.InputToken.AmountRaw != "59948049312246101" || e.OutputToken.Mint != solMint || e.OutputToken.AmountRaw != "1761102483" {
+			t.Errorf("sell without logs: %+v %+v", e.InputToken, e.OutputToken)
+		}
+	}
+}
