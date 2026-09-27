@@ -282,28 +282,30 @@ func (tu *TransactionUtils) AttachInstructionTransfers(trade *types.TradeInfo, t
 }
 
 // legTransfer returns the transfer that carried a trade leg: the first
-// transfer of mint whose amount is one of amounts, else the first transfer
-// of mint (the amount a program reports can differ from the transferred
-// one, e.g. a self-referral fee paid back to the user in a second
-// transfer). Native SOL transfers of the System program (rent, tips) are
-// not swap legs.
+// transfer of mint whose amount is one of amounts, else the largest
+// transfer of mint. The amount a program reports can be split over several
+// transfers, e.g. a DAMM v1 input over the host fee and the vault deposit,
+// or a DAMM v2 output over the swap output and a self-referral fee; the
+// fee part is the smaller one. Native SOL transfers of the System program
+// (rent, tips) are not swap legs.
 func legTransfer(transfers []types.TransferData, mint string, amounts ...*big.Int) *types.TransferData {
-	var first *types.TransferData
+	var largest *types.TransferData
+	var largestAmount *big.Int
 	for i := range transfers {
 		t := &transfers[i]
 		if t.Info.Mint != mint || t.ProgramId == constants.SYSTEM_PROGRAM_ID {
 			continue
-		}
-		if first == nil {
-			first = t
 		}
 		for _, amount := range amounts {
 			if t.Info.TokenAmount.Amount == amount.String() {
 				return t
 			}
 		}
+		if amount := parseAmount(t.Info.TokenAmount.Amount); largest == nil || amount.Cmp(largestAmount) > 0 {
+			largest, largestAmount = t, amount
+		}
 	}
-	return first
+	return largest
 }
 
 // setLegTransfer copies the token accounts, authority and balances of the

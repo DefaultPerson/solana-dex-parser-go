@@ -528,8 +528,10 @@ func TestMeteoraDLMMSwap2Event(t *testing.T) {
 // mint and amount: in a route the input got the previous hop's output (same
 // amount), a Token-2022 output with a transfer fee (net amount, which no
 // transfer carries) was left without them, or got the next hop's input
-// (NeF1UiWX). Truth: the swap instruction's accounts per IDL and the owner
-// in the token balances. Parser level: inside a Jupiter route ParseAll
+// (NeF1UiWX). When no transfer of the swap carried the leg's amount, the leg
+// took the first transfer of its mint, the DAMM v1 host fee (4uuw76SP).
+// Truth: the swap instruction's accounts per IDL and the owners in the token
+// balances. Parser level: inside a Jupiter route ParseAll
 // reports the route's trade instead of the hops.
 func TestAmmTradeLegTransfers(t *testing.T) {
 	cpmm := constants.DEX_PROGRAMS.RAYDIUM_CPMM.ID
@@ -537,6 +539,7 @@ func TestAmmTradeLegTransfers(t *testing.T) {
 	whirlpool := constants.DEX_PROGRAMS.ORCA.ID
 	dlmm := constants.DEX_PROGRAMS.METEORA.ID
 	rayAMM := constants.DEX_PROGRAMS.RAYDIUM_AMM.ID
+	dammV1 := constants.DEX_PROGRAMS.METEORA_DAMM.ID
 	// CPMM swap_base_input: payer 0, authority 1, input_token_account 4,
 	// output_token_account 5, input_vault 6, output_vault 7
 	cpmmIn, cpmmOut := [3]int{4, 6, 0}, [3]int{7, 5, 1}
@@ -570,6 +573,12 @@ func TestAmmTradeLegTransfers(t *testing.T) {
 		// DLMM swap, X to Y: lb_pair 0, reserve_x 2, reserve_y 3,
 		// user_token_in 4, user_token_out 5, user 10
 		{"dlmm", "2K23xSbLP1SG", dlmm, meteoraParser, 2, 4, "2-5", [3]int{4, 2, 10}, [3]int{3, 5, 0}},
+		// DAMM v1 swap, B to A, with a host fee: user_source_token 1,
+		// user_destination_token 2, a_vault 3, a_token_vault 5,
+		// b_token_vault 6, user 12, host fee account 15. No transfer carries
+		// the Swap in_amount: it is split over the host fee (1 -> 15) and
+		// the vault deposit (1 -> 6)
+		{"damm v1 host fee", "4uuw76SPksFw", dammV1, meteoraParser, 6, -1, "6-0", [3]int{1, 6, 12}, [3]int{5, 2, 3}},
 		// trades from transfers (no ray_log, no Traded event).
 		// Raydium AMM swap: authority 2, pool vaults 4/5, user source 15,
 		// user destination 16, user owner 17
@@ -596,6 +605,9 @@ func TestAmmTradeLegTransfers(t *testing.T) {
 					t.Errorf("%s source %q destination %q authority %q, want %s %s %s", leg.name,
 						leg.token.Source, leg.token.Destination, leg.token.Authority, src, dst, auth)
 				}
+			}
+			if owner := ctx.Adapter.GetTokenAccountOwner(accounts[c.in[1]]); owner == "" || trade.InputToken.DestinationOwner != owner {
+				t.Errorf("input destinationOwner %q, token balances say %q", trade.InputToken.DestinationOwner, owner)
 			}
 			out := trade.OutputToken
 			if owner := ctx.Adapter.GetTokenAccountOwner(accounts[c.out[1]]); owner == "" || out.DestinationOwner != owner {
