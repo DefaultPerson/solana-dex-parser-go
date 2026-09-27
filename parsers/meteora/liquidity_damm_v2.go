@@ -2,11 +2,14 @@ package meteora
 
 import (
 	"bytes"
+	"encoding/binary"
 	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
+	"github.com/mr-tron/base58"
 )
 
 // MeteoraDAMMPoolParser parses Meteora DAMM V2 pool events
@@ -56,6 +59,9 @@ func (p *MeteoraDAMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId == constants.DEX_PROGRAMS.METEORA_DAMM_V2.ID {
 			event := p.ParseInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
+			if event != nil && event.Type != types.PoolEventTypeCreate {
+				p.applyLiquidityChange(ci, event)
+			}
 			if event != nil {
 				events = append(events, *event)
 			}
@@ -306,4 +312,82 @@ func (p *MeteoraDAMMPoolParser) normalizeTokens(transfers []types.TransferData) 
 	}
 
 	return token0, token1
+}
+
+// applyLiquidityChange completes an add/remove event from the
+// EvtLiquidityChange self-CPI of the instruction (cp_amm IDL: pool, position,
+// owner, token_a_amount, token_b_amount, transfer_fee_included_token_a_amount,
+// transfer_fee_included_token_b_amount, ...). The transfers stay the source
+// of the amounts; the event fills a side without a transfer (a one-sided
+// change, or a transaction whose transfers are not grouped with the
+// instruction). For an add the user sends the transfer-fee-included amounts;
+// for a remove the pool sends token_a/b_amount. Accounts: add_liquidity
+// token_a_mint 6, token_b_mint 7; remove_(all_)liquidity and
+// claim_position_fee 7 and 8.
+func (p *MeteoraDAMMPoolParser) applyLiquidityChange(ci types.ClassifiedInstruction, event *types.PoolEvent) {
+	var data []byte
+	for _, other := range p.ClassifiedInstructions {
+		if other.ProgramId != ci.ProgramId || other.OuterIndex != ci.OuterIndex || other.InnerIndex <= ci.InnerIndex {
+			continue
+		}
+		d := p.Adapter.GetInstructionData(other.Instruction)
+		if !isAnchorEvent(d) {
+			break
+		}
+		if constants.MatchDiscriminator(d, constants.DISCRIMINATORS.METEORA_DAMM_V2.EVT_LIQUIDITY_CHANGE) {
+			data = d
+			break
+		}
+	}
+	const amounts = 16 + 3*32
+	if len(data) < amounts+4*8 || base58.Encode(data[16:48]) != event.PoolId {
+		return
+	}
+	accounts := p.Adapter.GetInstructionAccounts(ci.Instruction)
+	mintA := 6
+	if event.Type == types.PoolEventTypeRemove {
+		mintA = 7
+	}
+	if len(accounts) <= mintA+1 {
+		return
+	}
+	amountA := binary.LittleEndian.Uint64(data[amounts : amounts+8])
+	amountB := binary.LittleEndian.Uint64(data[amounts+8 : amounts+16])
+	if event.Type == types.PoolEventTypeAdd {
+		amountA = binary.LittleEndian.Uint64(data[amounts+16 : amounts+24])
+		amountB = binary.LittleEndian.Uint64(data[amounts+24 : amounts+32])
+	}
+	byMint := map[string]uint64{accounts[mintA]: amountA, accounts[mintA+1]: amountB}
+
+	if event.Token0Mint == "" && event.Token1Mint == "" {
+		event.Token0Mint, event.Token1Mint = accounts[mintA], accounts[mintA+1]
+		if utils.GetTradeType(event.Token0Mint, event.Token1Mint) == types.TradeTypeBuy {
+			event.Token0Mint, event.Token1Mint = event.Token1Mint, event.Token0Mint
+		}
+		d0, d1 := p.Adapter.GetTokenDecimals(event.Token0Mint), p.Adapter.GetTokenDecimals(event.Token1Mint)
+		event.Token0Decimals, event.Token1Decimals = &d0, &d1
+	} else if event.Token1Mint == "" {
+		if event.Token0Mint == accounts[mintA] {
+			event.Token1Mint = accounts[mintA+1]
+		} else {
+			event.Token1Mint = accounts[mintA]
+		}
+		d1 := p.Adapter.GetTokenDecimals(event.Token1Mint)
+		event.Token1Decimals = &d1
+	}
+	fill := func(mint string, raw *string, ui **float64, decimals *uint8) {
+		amount, ok := byMint[mint]
+		if !ok || *raw != "" {
+			return
+		}
+		var dec uint8
+		if decimals != nil {
+			dec = *decimals
+		}
+		v := types.ConvertToUIAmountUint64(amount, dec)
+		*raw = strconv.FormatUint(amount, 10)
+		*ui = &v
+	}
+	fill(event.Token0Mint, &event.Token0AmountRaw, &event.Token0Amount, event.Token0Decimals)
+	fill(event.Token1Mint, &event.Token1AmountRaw, &event.Token1Amount, event.Token1Decimals)
 }

@@ -381,3 +381,26 @@ func TestMeteoraDammV2DynamicConfigMints(t *testing.T) {
 		}
 	}
 }
+
+// TestMeteoraDammV2LiquidityChangeEvent: a DAMM v2 add_liquidity whose
+// transfers are not available still gets its amounts from the
+// EvtLiquidityChange self-CPI (streamer item 5). Truth: the real transfers of
+// the same instruction (5-0, 5-1).
+func TestMeteoraDammV2LiquidityChangeEvent(t *testing.T) {
+	tx := loadFixture(t, "67SA1qv4f6ZY948qt7C22dTReS8EcGG8PkVJYdoqSXUxf3h2QPUjdnbu6hqdR79WR1CYxweCePycpcuTFR8WYWbr")
+	ctx := newParseContext(tx, nil)
+	program := constants.DEX_PROGRAMS.METEORA_DAMM_V2.ID
+	full := meteora.NewMeteoraDAMMPoolParser(ctx.Adapter, ctx.TransferActions, ctx.Classifier.GetInstructions(program)).ProcessLiquidity()
+	fromEvent := meteora.NewMeteoraDAMMPoolParser(ctx.Adapter, map[string][]types.TransferData{}, ctx.Classifier.GetInstructions(program)).ProcessLiquidity()
+	if len(full) != 1 || len(fromEvent) != 1 {
+		t.Fatalf("want one event each, got %+v / %+v", full, fromEvent)
+	}
+	a, b := full[0], fromEvent[0]
+	if a.Type != types.PoolEventTypeAdd || a.Token0AmountRaw != transferAmount(t, ctx, 5, 0) || a.Token1AmountRaw != transferAmount(t, ctx, 5, 1) {
+		t.Errorf("with transfers: %s %s %s / %s %s", a.Type, a.Token0Mint, a.Token0AmountRaw, a.Token1Mint, a.Token1AmountRaw)
+	}
+	if b.Token0Mint != a.Token0Mint || b.Token1Mint != a.Token1Mint || b.Token0AmountRaw != a.Token0AmountRaw || b.Token1AmountRaw != a.Token1AmountRaw {
+		t.Errorf("from EvtLiquidityChange: %s %s / %s %s, transfers %s %s / %s %s",
+			b.Token0Mint, b.Token0AmountRaw, b.Token1Mint, b.Token1AmountRaw, a.Token0Mint, a.Token0AmountRaw, a.Token1Mint, a.Token1AmountRaw)
+	}
+}
