@@ -1,7 +1,9 @@
 package constants
 
-// BOT_FEE_ACCOUNTS maps bot names to their fee account addresses
-// Trading bots are detected by SOL transfers to these fee accounts.
+// BOT_FEE_ACCOUNTS maps bot names to their fee account addresses (wallets, or
+// token accounts such as a WSOL account that receives fees). A trade is
+// attributed to a bot when one of these accounts, or a token account owned by
+// one, receives a fee in the transaction (see utils.DetectBot).
 // Closed or inactive accounts stay listed: they are still valid for older transactions.
 // Activity notes were checked on 2026-09-27.
 var BOT_FEE_ACCOUNTS = map[string][]string{
@@ -16,6 +18,7 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 	},
 	"BONKbot": {
 		"ZG98FUCjb8mJ824Gbs6RsgVmr1FhXb2oNiJHa2dwmPd",
+		"HVbzPxiet4ZgAP6CySVouY8RC3MNxgS35MgE3pWvUVC8", // added 2026-09 (audit): WSOL token account of ZG98FUCj...; WSOL fees in CxvksNjw/BBRouter1 txs
 	},
 	"Axiom": {
 		"7LCZckF6XXGQ1hDY6HFXBKWAtiUgL9QY5vj1C4Bn1Qjj",
@@ -69,6 +72,13 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 		"Cj297UauzMX64FU9dKJZRUBWszJ7tEWpVheasq4CfATV",
 		"HKMh8nV3ysSofRi23LsfVGLGQKB415QAEfZT96kCcVj4",
 		"7tQiiBdKoScWQkB1RmVuML7DBGnR31cuKPEtMM7Vy5SA",
+		// Added 2026-09 (audit): each receives 1.00-1.01% of the trade in BANANAjs... router
+		// txs and is never a signer (checked on-chain 2026-09-27)
+		"JBok73TJsWdgeJy2x59TaTFKtngtxeYPvizafTnhvMGV",
+		"6nPV8EChoA3HUZRbFmM6cXDv41NApX9ALKwDw4vYfjWp",
+		"35q8cao77A8ceJVxQaoN5w9kyTjTJUsmQcy2RRNrJBMc",
+		"3spK1TmrAnFUDRN2bErDAVw225tLE7uFpQeP9WNXP2nY",
+		"36ZCrKd6N9iGmArccia15saDyepL5wShHJyGTvea3Akf",
 	},
 	"Raybot": {
 		"4mih95RmBqfHYvEfqq6uGGLp1Fr3gVS3VNSEa3JVRfQK",
@@ -90,6 +100,7 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 		"4vfFG2xGZsjXQgA6ZCTzA1PgUGLppFHY9eGnh3ZVGUuz", // closed; last activity 2025-06-18
 		"A7XTexV13EPnhtH55qhT7qmFkgYCMAMnfXk89VWu9PCJ", // closed; last activity 2025-10-08
 		"GreGavLfh5sK1BeQ2WYvmk352wbyNNzQdCmqWCV8QSib", // closed; last activity 2025-10-08
+		"K1LRSA1DSoKBtC5DkcvnermRQ62YxogWSCZZPWQrdG5",  // added 2026-09 (audit): legacy; credited in RaydiumV4 swaps 2024-04..2025-06 (DefiLlama sol-trading-bot)
 	},
 	"MevX": {
 		"3kxSQybWEeQZsMuNWMRJH4TxrhwoDwfv41TNMLRzFP5A",
@@ -101,6 +112,13 @@ var BOT_FEE_ACCOUNTS = map[string][]string{
 	// sampled transactions invoking the Nova program (NoVA1TmD..., 2025-07-17..2025-09-19).
 	"Nova": {
 		"noVaE91mUL5jTb8e9Vf6dqJdNPzJpEQ3uAdnQ8h4nVz",
+		"noVakKQGTTjpHARvecAUbVnc85AatCLm3ijDFk8JXZB", // added 2026-09 (audit): 0.99% of the trade in BujKR6sa... router txs (DefiLlama fees/nova)
+	},
+
+	// Added 2026-09 (audit). Fomo takes its fee in USDC: this wallet (DefiLlama fees/fomo), or its
+	// USDC token account, is credited in every sampled Fomo swap (checked 2026-09-27).
+	"Fomo": {
+		"R4rNJHaffSUotNmqSKNEfDcJE8A7zJUkaoM5Jkd7cYX",
 	},
 }
 

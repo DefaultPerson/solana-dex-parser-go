@@ -602,6 +602,28 @@ var JUPITER_LABEL_PROGRAMS = []DexProgram{
 	{ID: "StaKE6XNKVVhG8Qu9hDJBqCW3eRe7MDGLz17nJZetLT", Name: "XOrca", Tags: []string{"amm"}},
 }
 
+// BOT_ROUTER_PROGRAMS lists trading bot programs added in the 2026-09 audit
+// (research/bots.json). Each program was confirmed executable, and in sampled
+// transactions invoking it a listed fee account of the same bot is credited.
+// Tagged "bot", so GetDexInfo treats them as routes like the DEX_PROGRAMS bot
+// entries. Legacy entries stay for historical transactions.
+var BOT_ROUTER_PROGRAMS = []DexProgram{
+	{ID: "troyXT7Ty3s2rjJe4bqWaroUrS4Fjd8rbHHNHxcACF4", Name: "Trojan", Tags: []string{"bot"}},
+	{ID: "TroYL71c8P2XNtDxHs98VtVLuiASJ7Ao5FvUoKyp3Bk", Name: "Trojan", Tags: []string{"bot"}}, // Trojan terminal
+	{ID: "troY36YiPGqMyAYCNbEqYCdN2tb91Zf7bHcQt7KUi61", Name: "Trojan", Tags: []string{"bot"}},
+	{ID: "FLASHX8DrLbgeR8FcfNV1F5krxYcYMUdBkrP1EPBtxB9", Name: "Axiom", Tags: []string{"bot"}},
+	{ID: "BLUR9cL8HqZzu5bSaC7VRX25RCG93Hv3T6NPyKxQhWUT", Name: "Axiom", Tags: []string{"bot"}}, // legacy: last invoke 2025-12-11
+	{ID: "GMGNreQcJFufBiCTLDBgKhYEfEe9B454UjpDr5CaSLA1", Name: "GMGN", Tags: []string{"bot"}},
+	{ID: "DGMgNKpqygARV2pHZfW4kNQSHT9F3Ly2BKWqvpYrAg5C", Name: "GMGN", Tags: []string{"bot"}}, // legacy: last invoke 2026-02-22
+	{ID: "term9YPb9mzAsABaqN71A4xdbxHmpBNZavpBiQKZzN3", Name: "Padre", Tags: []string{"bot"}},
+	{ID: "9Fox6i7oT8p4qHn76Qj3dks8RRMGsXQyfMSBScA5yVyX", Name: "Padre", Tags: []string{"bot"}}, // legacy: last invoke 2026-01-13
+	{ID: "CxvksNjwhdHDLr3qbCXNKVdeYACW8cs93vFqLqtgyFE5", Name: "BONKbot", Tags: []string{"bot"}},
+	{ID: "BBRouter1cVunVXvkcqeKkZQcBK7ruan37PPm3xzWaXD", Name: "BONKbot", Tags: []string{"bot"}},
+	{ID: "Stbot61LkCD5HE4p1TDtYRt9bzkjX81pKrshZz4Awny", Name: "STBot", Tags: []string{"bot"}},
+	{ID: "MevxQ9iQNGNQSWqa2CtDQs2BwrJA6MifzocykZAgGBr", Name: "MevX", Tags: []string{"bot"}},
+	{ID: "BujKR6saP3wZa7PEZ2u8ktyumdv8jqGsgHjUU7Ur7kLp", Name: "Nova", Tags: []string{"bot"}},
+}
+
 // DEX_PROGRAM_IDS is a list of all DEX program IDs
 // Wallet entries (JUPITER_DCA_KEEPER1-3, OKX_ROUTER) are not programs and are listed in
 // KNOWN_AUTHORITIES instead.
@@ -679,7 +701,15 @@ var DEX_PROGRAM_IDS = append([]string{
 	DEX_PROGRAMS.OKX_DEX_V2.ID,
 	DEX_PROGRAMS.JUPITER_Z.ID,
 	DEX_PROGRAMS.GMGN.ID,
-}, jupiterLabelProgramIDs()...)
+}, append(jupiterLabelProgramIDs(), botRouterProgramIDs()...)...)
+
+func botRouterProgramIDs() []string {
+	ids := make([]string, 0, len(BOT_ROUTER_PROGRAMS))
+	for _, p := range BOT_ROUTER_PROGRAMS {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
 
 func jupiterLabelProgramIDs() []string {
 	ids := make([]string, 0, len(JUPITER_LABEL_PROGRAMS))
@@ -799,6 +829,9 @@ var dexProgramMap map[string]DexProgram
 func init() {
 	dexProgramMap = make(map[string]DexProgram)
 	for _, p := range JUPITER_LABEL_PROGRAMS {
+		dexProgramMap[p.ID] = p
+	}
+	for _, p := range BOT_ROUTER_PROGRAMS {
 		dexProgramMap[p.ID] = p
 	}
 	for _, id := range DEX_PROGRAM_IDS {
