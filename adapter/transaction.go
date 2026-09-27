@@ -127,6 +127,9 @@ type CompiledInstruction struct {
 	// DataBytes holds the raw data when it was given as bytes (a Buffer or byte
 	// array in JSON); it takes precedence over Data.
 	DataBytes []byte `json:"-"`
+	// StackHeight is the invocation depth (1 = outer instruction, 2 = its
+	// direct CPI, ...); 0 when unknown
+	StackHeight int `json:"stackHeight,omitempty"`
 }
 
 // ParsedInstruction represents a parsed instruction
@@ -1355,6 +1358,69 @@ func (a *TransactionAdapter) GetInnerInstruction(outerIndex, innerIndex int) int
 		}
 	}
 	return nil
+}
+
+// GetInstructionStackHeight returns the invocation depth of an instruction:
+// 1 for an outer instruction (innerIndex < 0), the recorded stackHeight for an
+// inner instruction, or 0 when it is unknown (older transactions, or input
+// without stackHeight)
+func (a *TransactionAdapter) GetInstructionStackHeight(outerIndex, innerIndex int) int {
+	if innerIndex < 0 {
+		if a.InstructionAt(outerIndex) == nil {
+			return 0
+		}
+		return 1
+	}
+	return InstructionStackHeight(a.GetInnerInstruction(outerIndex, innerIndex))
+}
+
+// GetParentInstruction returns the instruction that invoked the inner
+// instruction at (outerIndex, innerIndex), for example the swap instruction
+// that emitted a CPI event: the nearest preceding instruction of the same outer
+// group whose stack height is one less. parentInner is -1 when the parent is
+// the outer instruction. ok is false for outer instructions, unknown indexes
+// and inner instructions without stack height.
+func (a *TransactionAdapter) GetParentInstruction(outerIndex, innerIndex int) (parent interface{}, parentInner int, ok bool) {
+	height := a.GetInstructionStackHeight(outerIndex, innerIndex)
+	if innerIndex < 0 || height < 2 {
+		return nil, 0, false
+	}
+	if height == 2 {
+		if ix := a.InstructionAt(outerIndex); ix != nil {
+			return ix, -1, true
+		}
+		return nil, 0, false
+	}
+	for j := innerIndex - 1; j >= 0; j-- {
+		ix := a.GetInnerInstruction(outerIndex, j)
+		h := InstructionStackHeight(ix)
+		if h == height-1 {
+			return ix, j, true
+		}
+		if h == 0 || h < height-1 {
+			// unknown height, or the parent's level was left: no parent
+			return nil, 0, false
+		}
+	}
+	return nil, 0, false
+}
+
+// InstructionStackHeight reads the stackHeight of an instruction (compiled,
+// Go-typed or JSON map form), or 0 when it is absent
+func InstructionStackHeight(ix interface{}) int {
+	switch v := ix.(type) {
+	case CompiledInstruction:
+		return v.StackHeight
+	case *CompiledInstruction:
+		if v != nil {
+			return v.StackHeight
+		}
+	case map[string]interface{}:
+		if h, ok := intFromValue(v["stackHeight"]); ok {
+			return h
+		}
+	}
+	return 0
 }
 
 // GetTokenAccountBalance returns token balances for given accounts

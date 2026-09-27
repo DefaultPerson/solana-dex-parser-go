@@ -37,6 +37,7 @@ func (ic *InstructionClassifier) classifyInstructions() {
 			ProgramId:   programId,
 			OuterIndex:  outerIndex,
 			InnerIndex:  -1,
+			StackHeight: 1,
 		})
 	}
 
@@ -49,6 +50,7 @@ func (ic *InstructionClassifier) classifyInstructions() {
 				ProgramId:   programId,
 				OuterIndex:  set.Index,
 				InnerIndex:  innerIndex,
+				StackHeight: adapter.InstructionStackHeight(instruction),
 			})
 		}
 	}

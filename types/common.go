@@ -15,6 +15,11 @@ type ClassifiedInstruction struct {
 
 	// InnerIndex is the inner instruction index (for CPI calls), -1 if not inner
 	InnerIndex int `json:"innerIndex"`
+
+	// StackHeight is the invocation depth: 1 for outer instructions, 2 for
+	// their direct CPIs, and so on; 0 when the transaction does not record it.
+	// TransactionAdapter.GetParentInstruction finds the invoking instruction.
+	StackHeight int `json:"stackHeight,omitempty"`
 }
 
 // GetIdx returns the instruction index as string in format "outer-inner" or just "outer"

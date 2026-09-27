@@ -123,6 +123,7 @@ func (c *CompiledInstruction) UnmarshalJSON(data []byte) error {
 		Accounts          json.RawMessage `json:"accounts"`
 		AccountKeyIndexes json.RawMessage `json:"accountKeyIndexes"`
 		Data              json.RawMessage `json:"data"`
+		StackHeight       int             `json:"stackHeight"`
 	}{}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -139,6 +140,7 @@ func (c *CompiledInstruction) UnmarshalJSON(data []byte) error {
 		ProgramIdIndex:    aux.ProgramIdIndex,
 		Accounts:          accounts,
 		AccountKeyIndexes: accountKeyIndexes,
+		StackHeight:       aux.StackHeight,
 	}
 	var s string
 	if err := json.Unmarshal(aux.Data, &s); err == nil {
