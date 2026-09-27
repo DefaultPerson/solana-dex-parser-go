@@ -142,6 +142,11 @@ type ParseResult struct {
 	// table accounts. State is not affected.
 	Warnings []string `json:"warnings,omitempty"`
 
+	// Tip is the total SOL (lamports) paid by System transfers to known
+	// transaction-landing tip accounts (constants.TIP_ACCOUNTS, e.g. Jito).
+	// Tips are not trade fees. Nil when no tip was paid.
+	Tip *TokenAmount `json:"tip,omitempty"`
+
 	// Extras contains additional parser-specific data
 	Extras interface{} `json:"extras,omitempty"`
 }

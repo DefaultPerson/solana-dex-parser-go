@@ -218,3 +218,10 @@ func IsTipAccount(account string) bool {
 func GetTipProvider(account string) string {
 	return tipAccountMap[account]
 }
+
+// IsTradeFeeAccount checks if an account is a known fee account that takes a
+// trade fee: FEE_ACCOUNTS without the tip accounts (FEE_ACCOUNTS lists the Jito
+// tip accounts, but a tip is not a trade fee)
+func IsTradeFeeAccount(account string) bool {
+	return IsFeeAccount(account) && !IsTipAccount(account)
+}

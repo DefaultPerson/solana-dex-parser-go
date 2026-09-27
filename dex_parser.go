@@ -569,6 +569,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 
 	// Get transfer actions
 	transferActions := txUtils.GetTransferActions([]string{"mintTo", "burn", "mintToChecked", "burnChecked"})
+	result.Tip = utils.GetTipTotal(transferActions)
 
 	// Determine what to parse based on parseType and config.ParseType
 	effectiveParseType := config.GetEffectiveParseType()

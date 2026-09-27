@@ -105,8 +105,8 @@ func (tu *TransactionUtils) GetTransferActions(extraTypes []string) map[string][
 			idx := FormatIdx(outerIndex, innerIndex)
 			transferData := tu.ParseInstructionAction(ix, idx, extraTypes)
 			if transferData != nil {
-				if constants.IsFeeAccount(transferData.Info.Destination) ||
-					constants.IsFeeAccount(transferData.Info.DestinationOwner) {
+				if constants.IsTradeFeeAccount(transferData.Info.Destination) ||
+					constants.IsTradeFeeAccount(transferData.Info.DestinationOwner) {
 					transferData.IsFee = true
 				}
 				actions[groupKey] = append(actions[groupKey], *transferData)
@@ -260,7 +260,7 @@ func (tu *TransactionUtils) extractUniqueTokens(transfers []types.TransferData, 
 	for _, transfer := range transfers {
 		// Native SOL transfers (System program: fees, tips, account funding)
 		// are not swap legs; SOL moved by the pool travels as WSOL.
-		if skipNative && transfer.ProgramId == constants.SYSTEM_PROGRAM_ID {
+		if (skipNative && transfer.ProgramId == constants.SYSTEM_PROGRAM_ID) || isTipTransfer(&transfer) {
 			continue
 		}
 		tokenInfo := tu.GetTransferTokenInfo(&transfer)
@@ -298,8 +298,9 @@ func (tu *TransactionUtils) calculateTokenAmounts(signer string, transfers []typ
 // mints. A transfer that forwards the same mint and amount from (or to) an
 // account an already counted transfer ended at (or started from) is a
 // pass-through leg and is counted once; independent transfers of equal size
-// (split legs, equal fee splits) are all counted. With skipNative, System
-// program transfers (fees, tips, rent) are ignored.
+// (split legs, equal fee splits) are all counted. Tips (isTipTransfer) are
+// always ignored; with skipNative, all System program transfers (fees, tips,
+// rent) are ignored.
 func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inputMint, outputMint, signer string, skipNative bool) (*big.Int, *big.Int, *types.TransferData) {
 	var counted []*types.TransferData
 	inputAmountRaw := big.NewInt(0)
@@ -319,7 +320,7 @@ func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inpu
 
 	for i := range transfers {
 		transfer := &transfers[i]
-		if skipNative && transfer.ProgramId == constants.SYSTEM_PROGRAM_ID {
+		if (skipNative && transfer.ProgramId == constants.SYSTEM_PROGRAM_ID) || isTipTransfer(transfer) {
 			continue
 		}
 
@@ -327,7 +328,7 @@ func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inpu
 		if destination == "" {
 			destination = transfer.Info.Destination
 		}
-		if constants.IsFeeAccount(destination) {
+		if constants.IsTradeFeeAccount(destination) {
 			feeTransfer = transfer
 			continue
 		}
@@ -350,6 +351,12 @@ func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inpu
 	}
 
 	return inputAmountRaw, outputAmountRaw, feeTransfer
+}
+
+// isTipTransfer reports whether a transfer is a SOL tip to a transaction-landing
+// provider (constants.TIP_ACCOUNTS). A tip is neither a swap leg nor a trade fee.
+func isTipTransfer(transfer *types.TransferData) bool {
+	return transfer.ProgramId == constants.SYSTEM_PROGRAM_ID && constants.IsTipAccount(transfer.Info.Destination)
 }
 
 // GetTransferTokenInfo gets token info from transfer data
@@ -653,6 +660,28 @@ func (tu *TransactionUtils) DetectBot(trade *types.TradeInfo) {
 			return
 		}
 	}
+}
+
+// GetTipTotal returns the SOL (lamports) paid by System transfers to known tip
+// accounts (constants.TIP_ACCOUNTS) in transferActions, or nil when there is
+// none. Tips pay for landing the transaction and are never trade fees.
+func GetTipTotal(transferActions map[string][]types.TransferData) *types.TokenAmount {
+	total := new(big.Int)
+	for _, transfers := range transferActions {
+		for _, t := range transfers {
+			if t.ProgramId != constants.SYSTEM_PROGRAM_ID || !constants.IsTipAccount(t.Info.Destination) {
+				continue
+			}
+			if amount, ok := new(big.Int).SetString(t.Info.TokenAmount.Amount, 10); ok && amount.Sign() > 0 {
+				total.Add(total, amount)
+			}
+		}
+	}
+	if total.Sign() == 0 {
+		return nil
+	}
+	ui := types.ConvertToUIAmount(total, 9)
+	return &types.TokenAmount{Amount: total.String(), UIAmount: &ui, Decimals: 9}
 }
 
 // ApplyToken2022TransferFee makes the output of a trade what the user
