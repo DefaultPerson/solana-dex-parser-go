@@ -3,7 +3,6 @@ package meme
 import (
 	"encoding/base64"
 	"math/big"
-	"sort"
 	"strings"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
@@ -14,17 +13,6 @@ import (
 
 func formatIdx(outerIndex int, innerIndex int) string {
 	return utils.FormatIdx(outerIndex, innerIndex)
-}
-
-// sortExecutionOrder sorts instructions in execution order in place: an
-// outer instruction first, then its inner instructions by inner index
-func sortExecutionOrder(instructions []types.ClassifiedInstruction) {
-	sort.SliceStable(instructions, func(i, j int) bool {
-		if instructions[i].OuterIndex != instructions[j].OuterIndex {
-			return instructions[i].OuterIndex < instructions[j].OuterIndex
-		}
-		return instructions[i].InnerIndex < instructions[j].InnerIndex
-	})
 }
 
 // instructionTransfers returns the transfer and transferChecked actions

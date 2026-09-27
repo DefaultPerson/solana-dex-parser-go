@@ -3,7 +3,6 @@ package meteora
 import (
 	"bytes"
 	"math/big"
-	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -65,12 +64,7 @@ func (p *MeteoraDBCEventParser) ParseInstructions(instructions []types.Classifie
 			ordered = append(ordered, ci)
 		}
 	}
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].OuterIndex != ordered[j].OuterIndex {
-			return ordered[i].OuterIndex < ordered[j].OuterIndex
-		}
-		return ordered[i].InnerIndex < ordered[j].InnerIndex
-	})
+	types.SortInstructionsByExecution(ordered)
 
 	for pos, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)

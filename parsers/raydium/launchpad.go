@@ -3,7 +3,6 @@ package raydium
 import (
 	"bytes"
 	"math/big"
-	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -84,20 +83,7 @@ func (p *RaydiumLaunchpadParser) createTradeInfo(event *types.MemeEvent) *types.
 	// the quote mint; Fee is their exact sum
 	if len(event.Fees) > 0 {
 		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-		total := new(big.Int)
-		for _, f := range event.Fees {
-			if v, ok := new(big.Int).SetString(f.AmountRaw, 10); ok {
-				total.Add(total, v)
-			}
-		}
-		first := event.Fees[0]
-		trade.Fee = &types.FeeInfo{
-			Mint:      first.Mint,
-			Amount:    types.ConvertToUIAmount(total, first.Decimals),
-			AmountRaw: total.String(),
-			Decimals:  first.Decimals,
-			Dex:       first.Dex,
-		}
+		trade.Fee = types.TotalFee(event.Fees)
 	}
 
 	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
@@ -156,12 +142,7 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 			ordered = append(ordered, ci)
 		}
 	}
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].OuterIndex != ordered[j].OuterIndex {
-			return ordered[i].OuterIndex < ordered[j].OuterIndex
-		}
-		return ordered[i].InnerIndex < ordered[j].InnerIndex
-	})
+	types.SortInstructionsByExecution(ordered)
 
 	for pos, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)

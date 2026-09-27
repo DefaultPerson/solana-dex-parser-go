@@ -105,7 +105,7 @@ func (p *BoopfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 	var events []*types.MemeEvent
 
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
-	sortExecutionOrder(ordered)
+	types.SortInstructionsByExecution(ordered)
 
 	// deploy_bonding_curve accounts by mint (0 mint, 2 bonding curve, 5
 	// config): the bonding curve of a created token

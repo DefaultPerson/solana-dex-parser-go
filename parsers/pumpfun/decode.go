@@ -3,7 +3,6 @@ package pumpfun
 import (
 	"bytes"
 	"math/big"
-	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -118,12 +117,7 @@ func isEventData(data []byte) bool {
 func executionOrder(instructions []types.ClassifiedInstruction) []types.ClassifiedInstruction {
 	ordered := make([]types.ClassifiedInstruction, len(instructions))
 	copy(ordered, instructions)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].OuterIndex != ordered[j].OuterIndex {
-			return ordered[i].OuterIndex < ordered[j].OuterIndex
-		}
-		return ordered[i].InnerIndex < ordered[j].InnerIndex
-	})
+	types.SortInstructionsByExecution(ordered)
 	return ordered
 }
 
@@ -189,17 +183,6 @@ func feeInfo(mint string, amount *big.Int, decimals uint8, dex, feeType, recipie
 		Type:      feeType,
 		Recipient: recipient,
 	}
-}
-
-// sumFees returns the total raw amount of fees
-func sumFees(fees []types.FeeInfo) *big.Int {
-	total := new(big.Int)
-	for _, f := range fees {
-		if v, ok := new(big.Int).SetString(f.AmountRaw, 10); ok {
-			total.Add(total, v)
-		}
-	}
-	return total
 }
 
 func u64(v uint64) *big.Int {

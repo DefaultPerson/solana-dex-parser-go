@@ -53,7 +53,7 @@ func (p *MoonitEventParser) ParseInstructions(instructions []types.ClassifiedIns
 	var events []*types.MemeEvent
 
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
-	sortExecutionOrder(ordered)
+	types.SortInstructionsByExecution(ordered)
 
 	for _, ci := range ordered {
 		if ci.ProgramId != constants.DEX_PROGRAMS.MOONIT.ID {
@@ -118,7 +118,7 @@ func (p *MoonitEventParser) tradeEvents() map[[2]int]*moonitTradeEvent {
 	p.logEvents = map[[2]int]*moonitTradeEvent{}
 
 	all := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.MOONIT.ID})
-	sortExecutionOrder(all)
+	types.SortInstructionsByExecution(all)
 	invocations := programDataByInvocation(p.adapter.LogMessages(), constants.DEX_PROGRAMS.MOONIT.ID)
 	if len(invocations) != len(all) {
 		return p.logEvents

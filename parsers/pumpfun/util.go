@@ -47,15 +47,7 @@ func getPumpfunTradeInfo(event *types.MemeEvent, info tradeInfoParams) types.Tra
 	// the quote mint; Fee is their sum
 	if len(event.Fees) > 0 {
 		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-		total := sumFees(event.Fees)
-		first := event.Fees[0]
-		trade.Fee = &types.FeeInfo{
-			Mint:      first.Mint,
-			Amount:    types.ConvertToUIAmount(total, first.Decimals),
-			AmountRaw: total.String(),
-			Decimals:  first.Decimals,
-			Dex:       first.Dex,
-		}
+		trade.Fee = types.TotalFee(event.Fees)
 	}
 
 	return trade
@@ -121,7 +113,7 @@ func pumpswapTradeInfo(
 		programId = constants.DEX_PROGRAMS.PUMP_SWAP.ID
 	}
 
-	total := sumFees(fees)
+	total := types.SumFeeAmounts(fees)
 	return types.TradeInfo{
 		Type: tradeType,
 		Pool: []string{pool},

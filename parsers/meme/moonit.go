@@ -1,8 +1,6 @@
 package meme
 
 import (
-	"math/big"
-
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
@@ -57,20 +55,7 @@ func (p *MoonitParser) ProcessTrades() []types.TradeInfo {
 		}
 		if len(event.Fees) > 0 {
 			trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
-			total := new(big.Int)
-			for _, f := range event.Fees {
-				if v, ok := new(big.Int).SetString(f.AmountRaw, 10); ok {
-					total.Add(total, v)
-				}
-			}
-			first := event.Fees[0]
-			trade.Fee = &types.FeeInfo{
-				Mint:      first.Mint,
-				Amount:    types.ConvertToUIAmount(total, first.Decimals),
-				AmountRaw: total.String(),
-				Decimals:  first.Decimals,
-				Dex:       first.Dex,
-			}
+			trade.Fee = types.TotalFee(event.Fees)
 		}
 		trades = append(trades, *p.Utils.AttachTokenTransferInfo(trade, p.TransferActions))
 	}

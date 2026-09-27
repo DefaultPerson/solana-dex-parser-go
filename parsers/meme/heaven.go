@@ -105,7 +105,7 @@ func (p *HeavenEventParser) ParseInstructions(instructions []types.ClassifiedIns
 	var events []*types.MemeEvent
 
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
-	sortExecutionOrder(ordered)
+	types.SortInstructionsByExecution(ordered)
 
 	// Heaven pool creations by base mint: the Metaplex create of that mint
 	// in the same transaction is the Heaven CREATE event (on mainnet it is
