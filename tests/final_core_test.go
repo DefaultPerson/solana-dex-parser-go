@@ -1,10 +1,12 @@
 package tests
 
 import (
+	"runtime"
 	"testing"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
 // Regression tests for the core findings of the final review (core-1,
@@ -42,6 +44,68 @@ func TestFinalParsedMultisigAuthority(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s: no trade at 4-11", encoding)
+		}
+	}
+}
+
+// TestFinalBatchBoundedWorkers: the concurrent batch started one goroutine
+// per transaction, each waiting on a semaphore, so a large batch held
+// thousands of goroutine stacks whatever maxWorkers was. Truth:
+// runtime.NumGoroutine sampled in the callback stays within maxWorkers of the
+// baseline. robust-2.
+func TestFinalBatchBoundedWorkers(t *testing.T) {
+	tx := loadFixture(t, "Z4CChBawHPHwuUd9JmpvtyaddghjoeyxioFXB2HK4NSioKV5tipgajmznRbzx9LhiEdvYL5hedXWnEqEzmYVsGA")
+	txs := make([]*adapterTx, 3000)
+	for i := range txs {
+		txs[i] = tx
+	}
+	const workers = 4
+	baseline := runtime.NumGoroutine()
+	peak := 0
+	results := dexparser.NewDexParser().ParseBatchWithCallback(txs, nil, workers, func(int, *adapterTx, *types.ParseResult, error) bool {
+		if n := runtime.NumGoroutine(); n > peak {
+			peak = n
+		}
+		return true
+	})
+	if len(results) != len(txs) {
+		t.Fatalf("%d results for %d transactions", len(results), len(txs))
+	}
+	if peak > baseline+workers+1 {
+		t.Errorf("peak goroutines %d, baseline %d: want at most %d workers", peak, baseline, workers)
+	}
+}
+
+// TestFinalBatchEarlyStopResults: after the callback stopped a batch, the
+// unparsed entries were nil although ParseAll never returns nil and the docs
+// promise one result per transaction; callers iterating the results
+// dereferenced nil. They are now failed results with BatchSkippedMsg.
+// robust-2.
+func TestFinalBatchEarlyStopResults(t *testing.T) {
+	tx := loadFixture(t, "Z4CChBawHPHwuUd9JmpvtyaddghjoeyxioFXB2HK4NSioKV5tipgajmznRbzx9LhiEdvYL5hedXWnEqEzmYVsGA")
+	txs := make([]*adapterTx, 200)
+	for i := range txs {
+		txs[i] = tx
+	}
+	for _, workers := range []int{1, 4} {
+		results := dexparser.NewDexParser().ParseBatchWithCallback(txs, nil, workers, func(int, *adapterTx, *types.ParseResult, error) bool {
+			return false
+		})
+		parsed, skipped := 0, 0
+		for i, r := range results {
+			switch {
+			case r == nil:
+				t.Fatalf("workers=%d: result %d is nil", workers, i)
+			case r.State:
+				parsed++
+			case r.Msg == dexparser.BatchSkippedMsg && r.Signature == tx.Transaction.Signatures[0]:
+				skipped++
+			default:
+				t.Errorf("workers=%d: result %d State=false Msg=%q", workers, i, r.Msg)
+			}
+		}
+		if parsed == 0 || skipped == 0 || parsed+skipped != len(txs) {
+			t.Errorf("workers=%d: %d parsed, %d skipped of %d", workers, parsed, skipped, len(txs))
 		}
 	}
 }

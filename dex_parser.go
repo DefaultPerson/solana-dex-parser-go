@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
@@ -378,8 +379,11 @@ func (dp *DexParser) ParseBatch(txs []*adapter.SolanaTransaction, config *types.
 }
 
 // ParseBatchWithCallback parses multiple transactions with callback support
-// maxWorkers: maximum number of concurrent workers, if <= 1, will use sequential processing
-// callback: optional callback function called for each completed transaction
+// maxWorkers: maximum number of concurrent workers (goroutines), if <= 1, will use sequential processing
+// callback: optional callback function called for each completed transaction;
+// returning false stops the batch. The result has one entry per transaction,
+// in input order, never nil: a transaction left unparsed because the batch
+// stopped has State=false and Msg=BatchSkippedMsg.
 func (dp *DexParser) ParseBatchWithCallback(
 	txs []*adapter.SolanaTransaction,
 	config *types.ParseConfig,
@@ -390,15 +394,44 @@ func (dp *DexParser) ParseBatchWithCallback(
 		return []*types.ParseResult{}
 	}
 
+	var results []*types.ParseResult
 	// Optimize for single worker case
 	if maxWorkers <= 1 {
-		return dp.parseSequentiallyWithCallback(txs, config, callback)
+		results = dp.parseSequentiallyWithCallback(txs, config, callback)
+	} else {
+		results = dp.parseConcurrentlyWithCallback(txs, config, maxWorkers, callback)
 	}
-
-	return dp.parseConcurrentlyWithCallback(txs, config, maxWorkers, callback)
+	for i, result := range results {
+		if result == nil {
+			results[i] = types.NewParseResult()
+			results[i].State = false
+			results[i].Msg = BatchSkippedMsg
+			results[i].Signature = txSignature(txs[i])
+		}
+	}
+	return results
 }
 
-// parseSequentiallyWithCallback processes transactions one by one with callback
+// BatchSkippedMsg is the Msg of the results of transactions a batch did not
+// parse because its callback stopped it
+const BatchSkippedMsg = "skipped: the batch was stopped by its callback"
+
+// parseRecovered parses the transaction at index, turning a panic that
+// ParseAll re-raises (config.ThrowError) into a failed result and an error
+func (dp *DexParser) parseRecovered(index int, tx *adapter.SolanaTransaction, config *types.ParseConfig) (result *types.ParseResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in transaction %d: %v", index, r)
+			result = types.NewParseResult()
+			result.State = false
+			result.Msg = fmt.Sprintf("panic: %v", r)
+		}
+	}()
+	return dp.ParseAll(tx, config), nil
+}
+
+// parseSequentiallyWithCallback processes transactions one by one with
+// callback; the entries after an early stop are nil
 func (dp *DexParser) parseSequentiallyWithCallback(
 	txs []*adapter.SolanaTransaction,
 	config *types.ParseConfig,
@@ -407,107 +440,69 @@ func (dp *DexParser) parseSequentiallyWithCallback(
 	results := make([]*types.ParseResult, len(txs))
 
 	for i, tx := range txs {
-		var result *types.ParseResult
-		var err error
-
-		// Handle panic gracefully
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("panic in transaction %d: %v", i, r)
-					result = types.NewParseResult()
-					result.State = false
-					result.Msg = fmt.Sprintf("panic: %v", r)
-				}
-			}()
-
-			result = dp.ParseAll(tx, config)
-		}()
-
+		result, err := dp.parseRecovered(i, tx, config)
 		results[i] = result
 
 		// Call callback function if provided
-		if callback != nil {
-			if !callback(i, tx, result, err) {
-				// Early termination requested
-				break
-			}
+		if callback != nil && !callback(i, tx, result, err) {
+			// Early termination requested
+			break
 		}
 	}
 
 	return results
 }
 
-// parseConcurrentlyWithCallback processes transactions using goroutines with callback
+// parseConcurrentlyWithCallback processes transactions with maxWorkers
+// goroutines that take the indexes of the transactions in input order; the
+// callback calls are serialized. The entries not parsed after an early stop
+// are nil.
 func (dp *DexParser) parseConcurrentlyWithCallback(
 	txs []*adapter.SolanaTransaction,
 	config *types.ParseConfig,
 	maxWorkers int,
 	callback ParseCallback,
 ) []*types.ParseResult {
-	semaphore := make(chan struct{}, maxWorkers)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var callbackMu sync.Mutex
-
-	// Pre-allocate results slice
 	results := make([]*types.ParseResult, len(txs))
-	var shouldStop bool
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	var callbackMu sync.Mutex
+	var stopped atomic.Bool
 
-	for i, tx := range txs {
-		wg.Add(1)
-		go func(index int, transaction *adapter.SolanaTransaction) {
-			defer wg.Done()
-
-			// Check if we should stop early
-			callbackMu.Lock()
-			if shouldStop {
-				callbackMu.Unlock()
-				return
-			}
-			callbackMu.Unlock()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			var result *types.ParseResult
-			var err error
-
-			// Handle panic gracefully
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						err = fmt.Errorf("panic in transaction %d: %v", index, r)
-						result = types.NewParseResult()
-						result.State = false
-						result.Msg = fmt.Sprintf("panic: %v", r)
-					}
-				}()
-
-				result = dp.ParseAll(transaction, config)
-			}()
-
-			// Store result
-			mu.Lock()
-			results[index] = result
-			mu.Unlock()
-
-			// Call callback function if provided
-			if callback != nil {
-				callbackMu.Lock()
-				if !shouldStop {
-					if !callback(index, transaction, result, err) {
-						// Early termination requested
-						shouldStop = true
-					}
-				}
-				callbackMu.Unlock()
-			}
-		}(i, tx)
+	workers := maxWorkers
+	if workers > len(txs) {
+		workers = len(txs)
 	}
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				if stopped.Load() {
+					continue
+				}
+				result, err := dp.parseRecovered(index, txs[index], config)
+				// each index has one writer; wg.Wait orders it before the reads
+				results[index] = result
 
-	// Wait for all goroutines to complete
+				if callback != nil {
+					callbackMu.Lock()
+					if !stopped.Load() && !callback(index, txs[index], result, err) {
+						// Early termination requested
+						stopped.Store(true)
+					}
+					callbackMu.Unlock()
+				}
+			}
+		}()
+	}
+	for i := range txs {
+		if stopped.Load() {
+			break
+		}
+		jobs <- i
+	}
+	close(jobs)
 	wg.Wait()
 
 	return results
