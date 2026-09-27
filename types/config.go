@@ -3,10 +3,13 @@ package types
 // ParseType defines configuration options for parsing output granularity.
 // Each field controls whether to parse and return specific event types.
 type ParseType struct {
-	// AggregateTrade if true, returns the aggregated trade record for Jupiter routes
+	// AggregateTrade if true, returns the aggregated trade record (ParseResult.AggregateTrade)
+	// combining all trades of the transaction. It is computed in addition to the
+	// individual trades; set alone, trades are parsed internally but only the
+	// aggregate is returned.
 	AggregateTrade bool `json:"aggregateTrade,omitempty"`
 
-	// Trade if true, returns individual trade events
+	// Trade if true, returns individual trade events (ParseResult.Trades)
 	Trade bool `json:"trade,omitempty"`
 
 	// Liquidity if true, returns liquidity pool events (add/remove/create)
@@ -72,21 +75,41 @@ type ParseConfig struct {
 	// ThrowError if true, will panic on parse errors instead of returning error state
 	ThrowError bool `json:"throwError,omitempty"`
 
-	// AggregateTrades if true, will return the finalSwap record instead of detail route trades
+	// AggregateTrades if true, also returns the aggregated trade record (ParseResult.AggregateTrade).
+	// With ParseType unset it is the only switch for aggregation; with ParseType set,
+	// aggregation is ParseType.AggregateTrade || AggregateTrades.
 	// Deprecated: Use ParseType.AggregateTrade instead. Kept for backward compatibility.
 	AggregateTrades bool `json:"aggregateTrades,omitempty"`
 
-	// ALTsFetcher if set, will use this callback to fetch Address Lookup Table accounts
+	// IncludeFailedTxs if true, parses failed transactions (meta.err set) like
+	// successful ones. By default their trades, liquidity events, meme events,
+	// ALT events and transfers are not returned because they were reverted; fee,
+	// signer, balance changes and TxStatus=failed are still filled.
+	IncludeFailedTxs bool `json:"includeFailedTxs,omitempty"`
+
+	// AddressLookupTables resolves address lookup table accounts of v0
+	// transactions that carry no meta.loadedAddresses (pre-execution data such
+	// as shreds): table address -> table contents (all addresses, in order).
+	AddressLookupTables map[string][]string `json:"-"`
+
+	// ALTsFetcher if set, resolves address lookup tables that are not in
+	// AddressLookupTables when a v0 transaction carries no meta.loadedAddresses
 	ALTsFetcher *ALTsFetcher `json:"-"`
 
-	// TokenAccountsFetcher if set, will use this callback to fetch token account info
+	// TokenAccountsFetcher if set, resolves mint, owner and decimals of token
+	// accounts used by token transfers that the transaction's token balances do
+	// not describe (for example transactions without meta)
 	TokenAccountsFetcher *TokenAccountsFetcher `json:"-"`
 
-	// PoolInfoFetcher if set, will use this callback to fetch pool information
+	// PoolInfoFetcher is not used by any parser.
+	//
+	// Deprecated: pool data needs protocol-specific decoding that the parsers do
+	// not perform; the field is kept for API compatibility and has no effect.
 	PoolInfoFetcher *PoolInfoFetcher `json:"-"`
 }
 
-// DefaultParseConfig returns default parsing configuration with all events enabled
+// DefaultParseConfig returns default parsing configuration with all events
+// enabled, including the aggregated trade (this is what a nil config means)
 func DefaultParseConfig() ParseConfig {
 	return ParseConfig{
 		ParseType:     ParseAll(),
@@ -115,11 +138,17 @@ func (c *ParseConfig) IsParseTypeSet() bool {
 		c.ParseType.MemeEvent || c.ParseType.AltEvent
 }
 
-// GetEffectiveParseType returns the effective ParseType, defaulting to ParseAll if not set
+// GetEffectiveParseType returns the effective ParseType. When ParseType is
+// unset, everything is parsed and AggregateTrade follows the legacy
+// AggregateTrades field; when it is set, it is used as is with AggregateTrade
+// = ParseType.AggregateTrade || AggregateTrades.
 func (c *ParseConfig) GetEffectiveParseType() ParseType {
 	if c.IsParseTypeSet() {
-		return c.ParseType
+		pt := c.ParseType
+		pt.AggregateTrade = pt.AggregateTrade || c.AggregateTrades
+		return pt
 	}
-	// Default to all parsing enabled for backward compatibility
-	return ParseAll()
+	pt := ParseAll()
+	pt.AggregateTrade = c.AggregateTrades
+	return pt
 }

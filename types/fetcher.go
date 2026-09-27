@@ -27,14 +27,19 @@ type AddressTableLookup struct {
 	ReadonlyIndexes []int  `json:"readonlyIndexes"`
 }
 
-// ALTsFetcher provides pluggable Address Lookup Table resolution
+// ALTsFetcher provides pluggable Address Lookup Table resolution for v0
+// transactions without meta.loadedAddresses. It is called once per
+// transaction, for the lookups not covered by ParseConfig.AddressLookupTables.
 type ALTsFetcher struct {
-	// Filter specifies when to invoke the fetcher
+	// Filter specifies when to invoke the fetcher (FetchFilterProgram and
+	// FetchFilterAccount are checked against the static account keys)
 	Filter FetchFilterType
 
 	// Fetch resolves ALT references to actual addresses
 	// Input: slice of ALT lookup references from transaction
-	// Output: map of ALT account key -> LoadedAddresses
+	// Output: map of ALT account key -> LoadedAddresses, where Writable holds
+	// the addresses at the lookup's WritableIndexes and Readonly those at its
+	// ReadonlyIndexes, in index order. On error the accounts stay unresolved.
 	Fetch func(alts []AddressTableLookup) (map[string]*LoadedAddresses, error)
 }
 
@@ -46,18 +51,24 @@ type TokenAccountInfo struct {
 	Decimals uint8  `json:"decimals"`
 }
 
-// TokenAccountsFetcher provides pluggable token account info resolution
+// TokenAccountsFetcher provides pluggable token account info resolution. It
+// is called once per transaction with the token accounts used by token
+// program instructions whose mint the transaction does not reveal (no token
+// balance entry and no mint in the instruction).
 type TokenAccountsFetcher struct {
-	// Filter specifies when to invoke the fetcher
+	// Filter specifies when to invoke the fetcher (FetchFilterProgram and
+	// FetchFilterAccount are checked against the transaction's account keys)
 	Filter FetchFilterType
 
 	// Fetch retrieves token account information for given account keys
 	// Input: slice of token account public keys
-	// Output: slice of TokenAccountInfo (nil for accounts that couldn't be fetched)
+	// Output: slice of TokenAccountInfo in the same order (nil for accounts that couldn't be fetched)
 	Fetch func(accountKeys []string) ([]*TokenAccountInfo, error)
 }
 
-// PoolInfoFetcher provides pluggable pool information resolution
+// PoolInfoFetcher provides pluggable pool information resolution.
+//
+// Deprecated: no parser uses it (see ParseConfig.PoolInfoFetcher).
 type PoolInfoFetcher struct {
 	// Filter specifies when to invoke the fetcher
 	Filter FetchFilterType
@@ -90,7 +101,9 @@ func NewTokenAccountsFetcher(
 	}
 }
 
-// NewPoolInfoFetcher creates a new pool info fetcher with specified filter and function
+// NewPoolInfoFetcher creates a new pool info fetcher with specified filter and function.
+//
+// Deprecated: see PoolInfoFetcher.
 func NewPoolInfoFetcher(
 	filter FetchFilterType,
 	fetcher func(poolKeys []string) ([]interface{}, error),
