@@ -323,22 +323,26 @@ func (p *RaydiumParser) cpmmTradeFromEvent(ci types.ClassifiedInstruction, accou
 
 // clmmSwapEvent is the CLMM SwapEvent log: pool_state, sender,
 // token_account_0, token_account_1, amount_0, transfer_fee_0, amount_1,
-// transfer_fee_1, zero_for_one, sqrt_price_x64, liquidity, tick
+// transfer_fee_1, zero_for_one, sqrt_price_x64, liquidity, tick (205 bytes),
+// then in current program versions trade_fee_0 and trade_fee_1 (221 bytes:
+// the total trading fee, lp + protocol + fund, in token 0 or token 1)
 type clmmSwapEvent struct {
 	pool                         string
 	tokenAccount0, tokenAccount1 string
 	amount0, transferFee0        uint64
 	amount1, transferFee1        uint64
 	zeroForOne                   bool
+	tradeFee0, tradeFee1         uint64
 }
 
 func decodeCLMMSwapEvent(data []byte) *clmmSwapEvent {
 	const size = 8 + 4*32 + 4*8 + 1
+	const sizeWithFees = 8 + 4*32 + 4*8 + 1 + 16 + 16 + 4 + 2*8
 	if len(data) < size || !bytes.Equal(data[:8], constants.DISCRIMINATORS.RAYDIUM_CL.EVENTS.SWAP) {
 		return nil
 	}
 	u64 := func(offset int) uint64 { return binary.LittleEndian.Uint64(data[offset : offset+8]) }
-	return &clmmSwapEvent{
+	e := &clmmSwapEvent{
 		pool:          base58.Encode(data[8:40]),
 		tokenAccount0: base58.Encode(data[72:104]),
 		tokenAccount1: base58.Encode(data[104:136]),
@@ -348,13 +352,18 @@ func decodeCLMMSwapEvent(data []byte) *clmmSwapEvent {
 		transferFee1:  u64(160),
 		zeroForOne:    data[168] != 0,
 	}
+	if len(data) >= sizeWithFees {
+		e.tradeFee0, e.tradeFee1 = u64(sizeWithFees-16), u64(sizeWithFees-8)
+	}
+	return e
 }
 
 // clmmTradeFromEvents builds a CLMM swap from its SwapEvents, one per hop
 // (swap_router_base_in swaps through several pools). The input is the first
 // hop's input and the output the last hop's output; the mints are those of
-// the user token accounts the events name. The CLMM events report no
-// trading fee.
+// the user token accounts the events name. The trading fee comes from the
+// events of current program versions (older ones report none): Fee for a
+// single hop with one fee, else each hop's fees in Fees.
 func (p *RaydiumParser) clmmTradeFromEvents(ci types.ClassifiedInstruction, dexInfo types.DexInfo, idx string) (*types.TradeInfo, []string) {
 	p.readLogs()
 	var events []*clmmSwapEvent
@@ -400,6 +409,20 @@ func (p *RaydiumParser) clmmTradeFromEvents(ci types.ClassifiedInstruction, dexI
 		InputAmount:  new(big.Int).Add(new(big.Int).SetUint64(in.amount), new(big.Int).SetUint64(in.transfFee)),
 		OutputMint:   out.mint,
 		OutputAmount: new(big.Int).SetUint64(output),
+	}
+	var tradeFees []types.FeeInfo
+	for _, e := range events {
+		if e.tradeFee0 > 0 {
+			tradeFees = append(tradeFees, p.Utils.NewEventFee(p.Adapter.GetSplTokenMint(e.tokenAccount0), e.tradeFee0, "trade", amm))
+		}
+		if e.tradeFee1 > 0 {
+			tradeFees = append(tradeFees, p.Utils.NewEventFee(p.Adapter.GetSplTokenMint(e.tokenAccount1), e.tradeFee1, "trade", amm))
+		}
+	}
+	if len(events) == 1 && len(tradeFees) == 1 {
+		swap.Fee = &tradeFees[0]
+	} else {
+		swap.Fees = append(swap.Fees, tradeFees...)
 	}
 	if in.transfFee > 0 {
 		swap.Fees = append(swap.Fees, p.Utils.NewEventFee(in.mint, in.transfFee, "transferFee", amm))
