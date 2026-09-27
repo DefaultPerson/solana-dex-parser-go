@@ -61,7 +61,10 @@ func getPumpfunTradeInfo(event *types.MemeEvent, info tradeInfoParams) types.Tra
 	return trade
 }
 
-// getPumpswapBuyInfo creates a TradeInfo from a Pumpswap buy event
+// getPumpswapBuyInfo creates a TradeInfo from a Pumpswap buy event. The input
+// is what the user paid: the pool input with the LP fee plus the protocol and
+// coin-creator fees (user_quote_amount_in, or quote_amount_in for
+// buy_exact_quote_in). Fee is the sum of the listed fee components.
 func getPumpswapBuyInfo(
 	event *PumpswapBuyEventData,
 	inputToken tokenInfo,
@@ -69,82 +72,21 @@ func getPumpswapBuyInfo(
 	feeToken tokenInfo,
 	info tradeInfoParams,
 ) types.TradeInfo {
-	feeAmt := new(big.Int).Add(
-		new(big.Int).SetUint64(event.ProtocolFee),
-		new(big.Int).SetUint64(event.CoinCreatorFee),
+	fees := pumpswapFees(pumpswapFeeParams{
+		protocolFee: event.ProtocolFee, buybackFee: event.BuybackFee, coinCreatorFee: event.CoinCreatorFee, cashback: event.Cashback,
+		protocolRecipient: event.ProtocolFeeRecipient, coinCreator: event.CoinCreator, user: event.User,
+	}, feeToken.Mint, feeToken.Decimals)
+
+	return pumpswapTradeInfo(
+		getTradeType(inputToken.Mint, outputToken.Mint), event.Pool, event.User,
+		inputToken, event.UserQuoteIn(),
+		outputToken, event.BaseAmountOut,
+		feeToken, fees, info,
 	)
-
-	tradeType := getTradeType(inputToken.Mint, outputToken.Mint)
-	inputUIAmount := types.ConvertToUIAmountUint64(event.QuoteAmountInWithLpFee, inputToken.Decimals)
-	outputUIAmount := types.ConvertToUIAmountUint64(event.BaseAmountOut, outputToken.Decimals)
-	feeUIAmount := types.ConvertToUIAmountUint64(feeAmt.Uint64(), feeToken.Decimals)
-	protocolFeeUIAmount := types.ConvertToUIAmountUint64(event.ProtocolFee, feeToken.Decimals)
-
-	programId := info.DexInfo.ProgramId
-	if programId == "" {
-		programId = constants.DEX_PROGRAMS.PUMP_SWAP.ID
-	}
-
-	trade := types.TradeInfo{
-		Type: tradeType,
-		Pool: []string{event.Pool},
-		InputToken: types.TokenInfo{
-			Mint:      inputToken.Mint,
-			Amount:    inputUIAmount,
-			AmountRaw: uint64ToString(event.QuoteAmountInWithLpFee),
-			Decimals:  inputToken.Decimals,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      outputToken.Mint,
-			Amount:    outputUIAmount,
-			AmountRaw: uint64ToString(event.BaseAmountOut),
-			Decimals:  outputToken.Decimals,
-		},
-		Fee: &types.FeeInfo{
-			Mint:      feeToken.Mint,
-			Amount:    feeUIAmount,
-			AmountRaw: feeAmt.String(),
-			Decimals:  feeToken.Decimals,
-		},
-		Fees: []types.FeeInfo{
-			{
-				Mint:      feeToken.Mint,
-				Amount:    protocolFeeUIAmount,
-				AmountRaw: uint64ToString(event.ProtocolFee),
-				Decimals:  feeToken.Decimals,
-				Dex:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
-				Type:      "protocol",
-				Recipient: event.ProtocolFeeRecipient,
-			},
-		},
-		User:      event.User,
-		ProgramId: programId,
-		AMM:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
-		Route:     info.DexInfo.Route,
-		Slot:      info.Slot,
-		Timestamp: info.Timestamp,
-		Signature: info.Signature,
-		Idx:       info.Idx,
-	}
-
-	// Add creator fee if present
-	if event.CoinCreatorFee > 0 {
-		creatorFeeUIAmount := types.ConvertToUIAmountUint64(event.CoinCreatorFee, feeToken.Decimals)
-		trade.Fees = append(trade.Fees, types.FeeInfo{
-			Mint:      feeToken.Mint,
-			Amount:    creatorFeeUIAmount,
-			AmountRaw: uint64ToString(event.CoinCreatorFee),
-			Decimals:  feeToken.Decimals,
-			Dex:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
-			Type:      "coinCreator",
-			Recipient: event.CoinCreator,
-		})
-	}
-
-	return trade
 }
 
-// getPumpswapSellInfo creates a TradeInfo from a Pumpswap sell event
+// getPumpswapSellInfo creates a TradeInfo from a Pumpswap sell event. The
+// output is what the user received (user_quote_amount_out, after all fees).
 func getPumpswapSellInfo(
 	event *PumpswapSellEventData,
 	inputToken tokenInfo,
@@ -152,56 +94,58 @@ func getPumpswapSellInfo(
 	feeToken tokenInfo,
 	info tradeInfoParams,
 ) types.TradeInfo {
-	feeAmt := new(big.Int).Add(
-		new(big.Int).SetUint64(event.ProtocolFee),
-		new(big.Int).SetUint64(event.CoinCreatorFee),
+	fees := pumpswapFees(pumpswapFeeParams{
+		protocolFee: event.ProtocolFee, buybackFee: event.BuybackFee, coinCreatorFee: event.CoinCreatorFee, cashback: event.Cashback,
+		protocolRecipient: event.ProtocolFeeRecipient, coinCreator: event.CoinCreator, user: event.User,
+	}, feeToken.Mint, feeToken.Decimals)
+
+	return pumpswapTradeInfo(
+		getTradeType(inputToken.Mint, outputToken.Mint), event.Pool, event.User,
+		inputToken, event.BaseAmountIn,
+		outputToken, event.UserQuoteAmountOut,
+		feeToken, fees, info,
 	)
+}
 
-	tradeType := getTradeType(inputToken.Mint, outputToken.Mint)
-	inputUIAmount := types.ConvertToUIAmountUint64(event.BaseAmountIn, inputToken.Decimals)
-	outputUIAmount := types.ConvertToUIAmountUint64(event.UserQuoteAmountOut, outputToken.Decimals)
-	feeUIAmount := types.ConvertToUIAmountUint64(feeAmt.Uint64(), feeToken.Decimals)
-	protocolFeeUIAmount := types.ConvertToUIAmountUint64(event.ProtocolFee, feeToken.Decimals)
-
+// pumpswapTradeInfo assembles a PumpSwap TradeInfo; Fee is the exact sum of
+// fees
+func pumpswapTradeInfo(
+	tradeType types.TradeType, pool, user string,
+	inputToken tokenInfo, inputAmount uint64,
+	outputToken tokenInfo, outputAmount uint64,
+	feeToken tokenInfo, fees []types.FeeInfo,
+	info tradeInfoParams,
+) types.TradeInfo {
 	programId := info.DexInfo.ProgramId
 	if programId == "" {
 		programId = constants.DEX_PROGRAMS.PUMP_SWAP.ID
 	}
 
-	trade := types.TradeInfo{
+	total := sumFees(fees)
+	return types.TradeInfo{
 		Type: tradeType,
-		Pool: []string{event.Pool},
+		Pool: []string{pool},
 		InputToken: types.TokenInfo{
 			Mint:      inputToken.Mint,
-			Amount:    inputUIAmount,
-			AmountRaw: uint64ToString(event.BaseAmountIn),
+			Amount:    types.ConvertToUIAmountUint64(inputAmount, inputToken.Decimals),
+			AmountRaw: uint64ToString(inputAmount),
 			Decimals:  inputToken.Decimals,
 		},
 		OutputToken: types.TokenInfo{
 			Mint:      outputToken.Mint,
-			Amount:    outputUIAmount,
-			AmountRaw: uint64ToString(event.UserQuoteAmountOut),
+			Amount:    types.ConvertToUIAmountUint64(outputAmount, outputToken.Decimals),
+			AmountRaw: uint64ToString(outputAmount),
 			Decimals:  outputToken.Decimals,
 		},
 		Fee: &types.FeeInfo{
 			Mint:      feeToken.Mint,
-			Amount:    feeUIAmount,
-			AmountRaw: uint64ToString(event.ProtocolFee),
+			Amount:    types.ConvertToUIAmount(total, feeToken.Decimals),
+			AmountRaw: total.String(),
 			Decimals:  feeToken.Decimals,
 			Dex:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
 		},
-		Fees: []types.FeeInfo{
-			{
-				Mint:      feeToken.Mint,
-				Amount:    protocolFeeUIAmount,
-				AmountRaw: uint64ToString(event.ProtocolFee),
-				Decimals:  feeToken.Decimals,
-				Dex:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
-				Type:      "protocol",
-				Recipient: event.ProtocolFeeRecipient,
-			},
-		},
-		User:      event.User,
+		Fees:      fees,
+		User:      user,
 		ProgramId: programId,
 		AMM:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
 		Route:     info.DexInfo.Route,
@@ -210,22 +154,6 @@ func getPumpswapSellInfo(
 		Signature: info.Signature,
 		Idx:       info.Idx,
 	}
-
-	// Add creator fee if present
-	if event.CoinCreatorFee > 0 {
-		creatorFeeUIAmount := types.ConvertToUIAmountUint64(event.CoinCreatorFee, feeToken.Decimals)
-		trade.Fees = append(trade.Fees, types.FeeInfo{
-			Mint:      feeToken.Mint,
-			Amount:    creatorFeeUIAmount,
-			AmountRaw: uint64ToString(event.CoinCreatorFee),
-			Decimals:  feeToken.Decimals,
-			Dex:       constants.DEX_PROGRAMS.PUMP_SWAP.Name,
-			Type:      "coinCreator",
-			Recipient: event.CoinCreator,
-		})
-	}
-
-	return trade
 }
 
 // tokenInfo holds token information
