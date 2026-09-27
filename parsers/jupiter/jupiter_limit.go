@@ -182,6 +182,13 @@ func (p *JupiterLimitOrderParser) ProcessTransfers() []types.TransferData {
 				transfers = append(transfers, p.parseInitializeOrder(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)...)
 			} else if bytes.Equal(discriminator, constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER.CANCEL_ORDER) {
 				transfers = append(transfers, p.parseCancelOrder(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)...)
+			} else if bytes.Equal(discriminator, constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER.CANCEL_EXPIRED_ORDER) {
+				// cancel_expired_order has cancel_order's accounts (v1 IDL)
+				expired := p.parseCancelOrder(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)
+				for i := range expired {
+					expired[i].Type = "cancelExpiredOrder"
+				}
+				transfers = append(transfers, expired...)
 			}
 		}
 	}

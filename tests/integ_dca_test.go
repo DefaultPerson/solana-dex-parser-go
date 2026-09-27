@@ -166,3 +166,34 @@ func TestIntegDCAUserDepositWithdraw(t *testing.T) {
 		t.Errorf("withdraw: WithdrawDca at %v (out %d), want one at 4", withdraws, out)
 	}
 }
+
+// Limit Order v1 cancel_expired_order (v1 IDL: the accounts of cancel_order)
+// is reported like cancel_order, as cancelExpiredOrder transfers; it was
+// ignored. Synthetic: no cancel_expired_order was found in about 200
+// sampled Limit v1 transactions (2026-09), so the real cancel_order
+// 4gjGYCX2... gets the cancel_expired_order discriminator.
+func TestIntegLimitV1CancelExpiredOrder(t *testing.T) {
+	const sig = "4gjGYCX2t4dvjr1C6Nh4kbphhf8SptBfwJ5Jxe7296taktxuKG1USHTEQ8KUiaC2LTWN5Kddf13LNppi8V85moer"
+	want := dexparser.NewDexParser().ParseAll(loadFixture(t, sig), nil).Transfers
+	if len(want) == 0 || want[0].Type != "cancelOrder" {
+		t.Fatalf("cancel_order transfers %+v", want)
+	}
+	tx := cloneTx(t, loadFixture(t, sig))
+	ix := tx.Transaction.Message.Instructions[0].(map[string]interface{})
+	data, _ := base58.Decode(ix["data"].(string))
+	if !constants.MatchDiscriminator(data, constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER.CANCEL_ORDER) {
+		t.Fatal("outer 0 is not cancel_order")
+	}
+	ix["data"] = base58.Encode(append(append([]byte{}, constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER.CANCEL_EXPIRED_ORDER...), data[8:]...))
+	got := dexparser.NewDexParser().ParseAll(tx, nil).Transfers
+	if len(got) != len(want) {
+		t.Fatalf("%d transfers, want %d like cancel_order", len(got), len(want))
+	}
+	for i := range got {
+		g, w := got[i], want[i]
+		if g.Type != "cancelExpiredOrder" || g.Info.Mint != w.Info.Mint || g.Info.TokenAmount.Amount != w.Info.TokenAmount.Amount ||
+			g.Info.Source != w.Info.Source || g.Info.Destination != w.Info.Destination {
+			t.Errorf("transfer %d: %s %s %s, want cancelExpiredOrder %s %s", i, g.Type, g.Info.TokenAmount.Amount, g.Info.Mint, w.Info.TokenAmount.Amount, w.Info.Mint)
+		}
+	}
+}
