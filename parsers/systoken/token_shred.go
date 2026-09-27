@@ -57,70 +57,77 @@ func (p *SystemTokenShredParser) ProcessTypedNativeInstructions() []types.Parsed
 }
 
 func (p *SystemTokenShredParser) processTokenShred(programID string) []interface{} {
-	var events []interface{}
-	extraTypes := []string{"mintTo", "burn", "mintToChecked", "burnChecked"}
-
-	instructions := p.classifier.GetInstructions(programID)
-
-	for _, ci := range instructions {
-		idx := formatInstructionIdx(ci.OuterIndex, ci.InnerIndex)
-		transfer := p.txUtils.ParseInstructionAction(ci.Instruction, idx, extraTypes)
-
-		if transfer != nil {
-			// Check if it's a fee transfer
-			if constants.IsFeeAccount(transfer.Info.Destination) ||
-				constants.IsFeeAccount(transfer.Info.DestinationOwner) {
-				transfer.IsFee = true
-			}
-
-			event := &TokenInstruction{
-				Type:        transfer.Type,
-				Data:        transfer,
-				ProgramID:   transfer.ProgramId,
-				ProgramName: getSysProgramName(transfer.ProgramId),
-				Slot:        p.adapter.Slot(),
-				Timestamp:   p.adapter.BlockTime(),
-				Signature:   p.adapter.Signature(),
-				Idx:         idx,
-				Signer:      p.adapter.Signers(),
-			}
-			events = append(events, event)
-		}
-	}
-
+	events, _ := p.ForProgram(programID).ProcessAll()
 	return events
 }
 
 func (p *SystemTokenShredParser) processTypedTokenShred(programID string) []types.ParsedShredInstruction {
-	var events []types.ParsedShredInstruction
+	_, typed := p.ForProgram(programID).ProcessAll()
+	return typed
+}
+
+// ProgramShredParser decodes the transfers of one of the System, Token and
+// Token-2022 programs
+type ProgramShredParser struct {
+	parent    *SystemTokenShredParser
+	programID string
+}
+
+// ForProgram returns a decoder of the transfers (and mints/burns for the token
+// programs) of programID
+func (p *SystemTokenShredParser) ForProgram(programID string) *ProgramShredParser {
+	return &ProgramShredParser{parent: p, programID: programID}
+}
+
+// ProcessAll decodes the program's transfers into legacy events and typed
+// instructions in a single pass
+func (x *ProgramShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
+	p := x.parent
+	var events []interface{}
+	var typed []types.ParsedShredInstruction
 	extraTypes := []string{"mintTo", "burn", "mintToChecked", "burnChecked"}
 
-	instructions := p.classifier.GetInstructions(programID)
-
-	for _, ci := range instructions {
+	for _, ci := range p.classifier.GetInstructions(x.programID) {
 		idx := formatInstructionIdx(ci.OuterIndex, ci.InnerIndex)
 		transfer := p.txUtils.ParseInstructionAction(ci.Instruction, idx, extraTypes)
-
-		if transfer != nil {
-			// Check if it's a fee transfer
-			if constants.IsFeeAccount(transfer.Info.Destination) ||
-				constants.IsFeeAccount(transfer.Info.DestinationOwner) {
-				transfer.IsFee = true
-			}
-
-			event := types.ParsedShredInstruction{
-				ProgramID:   transfer.ProgramId,
-				ProgramName: getSysProgramName(transfer.ProgramId),
-				Action:      transfer.Type,
-				Transfer:    transfer,
-				Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
-				Idx:         idx,
-			}
-			events = append(events, event)
+		if transfer == nil {
+			continue
 		}
+
+		// Check if it's a fee transfer
+		if constants.IsFeeAccount(transfer.Info.Destination) ||
+			constants.IsFeeAccount(transfer.Info.DestinationOwner) {
+			transfer.IsFee = true
+		}
+		if transfer.Signature == "" {
+			transfer.Signature = p.adapter.Signature()
+		}
+		if transfer.Timestamp == 0 {
+			transfer.Timestamp = p.adapter.BlockTime()
+		}
+
+		events = append(events, &TokenInstruction{
+			Type:        transfer.Type,
+			Data:        transfer,
+			ProgramID:   transfer.ProgramId,
+			ProgramName: getSysProgramName(transfer.ProgramId),
+			Slot:        p.adapter.Slot(),
+			Timestamp:   p.adapter.BlockTime(),
+			Signature:   p.adapter.Signature(),
+			Idx:         idx,
+			Signer:      p.adapter.Signers(),
+		})
+		typed = append(typed, types.ParsedShredInstruction{
+			ProgramID:   transfer.ProgramId,
+			ProgramName: getSysProgramName(transfer.ProgramId),
+			Action:      transfer.Type,
+			Transfer:    transfer,
+			Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
+			Idx:         idx,
+		})
 	}
 
-	return events
+	return events, typed
 }
 
 // TokenInstruction represents a parsed token instruction
