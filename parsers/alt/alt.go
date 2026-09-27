@@ -18,6 +18,9 @@ const (
 	CloseLookupTable      AltInstructionType = 4
 )
 
+// maxLookupTableAddresses is the capacity of an address lookup table
+const maxLookupTableAddresses = 256
+
 // AltEventParser parses Address Lookup Table events
 type AltEventParser struct {
 	adapter                *adapter.TransactionAdapter
@@ -111,8 +114,17 @@ func (p *AltEventParser) decodeAltInstruction(cInst types.ClassifiedInstruction,
 			return nil
 		}
 
-		newAddresses := make([]string, 0, count)
-		for i := uint64(0); i < count; i++ {
+		// The count is untrusted: read at most what the data holds, and never
+		// more than a lookup table can store
+		n := uint64(reader.Remaining() / 32)
+		if n > maxLookupTableAddresses {
+			n = maxLookupTableAddresses
+		}
+		if count < n {
+			n = count
+		}
+		newAddresses := make([]string, 0, n)
+		for i := uint64(0); i < n; i++ {
 			pubkey, err := reader.ReadPubkey()
 			if err != nil {
 				break
