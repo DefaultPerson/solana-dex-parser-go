@@ -408,6 +408,59 @@ func TestLiquidityInnerInstructionIdx(t *testing.T) {
 	}
 }
 
+// TestMeteoraDLMMPairCreate: DLMM pair creation is a CREATE event with the
+// pair and its mints (amm-18). Truth: the LbPairCreate self-CPI event of the
+// instruction (lb_clmm IDL: lb_pair, bin_step u16, token_x, token_y), which
+// also confirms the account indices (lb_pair 0, token_mint_x 2,
+// token_mint_y 3). Both are real initialize_customizable_permissionless_lb_pair
+// transactions; token_y is the quote mint (USDC, SOL), so it is token1.
+func TestMeteoraDLMMPairCreate(t *testing.T) {
+	dlmm := constants.DEX_PROGRAMS.METEORA.ID
+	for _, sig := range []string{
+		"2PhZd3U1WfMkWgxJXaF4tdNF545URHaYVAE5kxEk2oYYt7ayyNeguKvA5WVnMvC2eUfA1b1TNwunxBvQ7F224KuJ",
+		"5cLB35QonWzPgQT8bdi77sQKPD3tYs5EoyDG6K5VnwmoUJFHfft7VCdJsEV7YjoLHpK2pjkJM4dCjLw3zojvHSeM",
+	} {
+		sig := sig
+		t.Run(sig[:12], func(t *testing.T) {
+			tx := loadFixture(t, sig)
+			ctx := newParseContext(tx, nil)
+			create := instructionAt(t, ctx, dlmm, 0, -1)
+			if !constants.MatchDiscriminator(ctx.Adapter.GetInstructionData(create.Instruction),
+				constants.DISCRIMINATORS.METEORA_DLMM.CREATE["initializeCustomizablePermissionlessLbPair"]) {
+				t.Fatal("outer 0 is not initialize_customizable_permissionless_lb_pair")
+			}
+			var lbPair, tokenX, tokenY string
+			for _, ci := range ctx.Classifier.GetInstructions(dlmm) {
+				data := ctx.Adapter.GetInstructionData(ci.Instruction)
+				if ci.OuterIndex == 0 && len(data) >= 114 &&
+					constants.MatchDiscriminator(data, constants.DISCRIMINATORS.METEORA_DLMM.EVENTS["lbPairCreate"]) {
+					lbPair, tokenX, tokenY = base58.Encode(data[16:48]), base58.Encode(data[50:82]), base58.Encode(data[82:114])
+				}
+			}
+			if lbPair == "" {
+				t.Fatal("no LbPairCreate event")
+			}
+			accounts := ctx.Adapter.GetInstructionAccounts(create.Instruction)
+			if accounts[0] != lbPair || accounts[2] != tokenX || accounts[3] != tokenY {
+				t.Fatalf("accounts 0/2/3 %s %s %s, LbPairCreate %s %s %s", accounts[0], accounts[2], accounts[3], lbPair, tokenX, tokenY)
+			}
+
+			result := dexparser.NewDexParser().ParseAll(tx, nil)
+			if len(result.Liquidities) != 1 {
+				t.Fatalf("want one liquidity event, got %+v", result.Liquidities)
+			}
+			e := result.Liquidities[0]
+			if e.Type != types.PoolEventTypeCreate || e.Idx != "0" || e.PoolId != lbPair || e.Token0Mint != tokenX || e.Token1Mint != tokenY {
+				t.Errorf("got %s idx %s pool %s mints %s/%s, want CREATE idx 0 pool %s mints %s/%s",
+					e.Type, e.Idx, e.PoolId, e.Token0Mint, e.Token1Mint, lbPair, tokenX, tokenY)
+			}
+			if len(result.Trades) != 0 {
+				t.Errorf("pair creation made trades: %+v", result.Trades)
+			}
+		})
+	}
+}
+
 // TestMeteoraDammV1DataOffsets: without transfers, DAMM v1 amounts come from
 // the instruction args per the amm IDL (amm-12). Truth: with transfers, the
 // same instructions deposit exactly token_a_amount / token_b_amount (create)
