@@ -164,7 +164,7 @@ func NewTitanParser(
 // that logged its swap event
 func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 	var trades []types.TradeInfo
-	var logs []programDataLog
+	var logs []utils.ProgramLog
 	logsRead := false
 
 	for _, ci := range p.classifiedInstructions {
@@ -177,14 +177,13 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 			continue
 		}
 		if !logsRead {
-			logs, logsRead = programDataLogs(p.adapter), true
+			logs, logsRead = p.txUtils.GetProgramDataLogs(), true
 		}
 
 		var event []byte
-		for _, l := range logs {
-			if l.outer == ci.OuterIndex && l.inner == ci.InnerIndex && l.programId == ci.ProgramId &&
-				bytes.HasPrefix(l.data, disc.TITAN.SWAP_EVENT) && len(l.data) >= 56 {
-				event = l.data[8:]
+		for _, l := range utils.FindProgramLogs(logs, ci.ProgramId, ci.OuterIndex, ci.InnerIndex) {
+			if bytes.HasPrefix(l.Data, disc.TITAN.SWAP_EVENT) && len(l.Data) >= 56 {
+				event = l.Data[8:]
 				break
 			}
 		}

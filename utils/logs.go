@@ -43,16 +43,30 @@ func ParseRayLogs(logs []string, outerProgramIds []string) []ProgramLog {
 // ParseProgramLogs decodes the log lines that start with prefix and carry a
 // base64 payload, and attributes each one to the instruction that wrote it.
 //
-// Instruction positions are rebuilt from the "Program <id> invoke [<depth>]"
-// lines: depth 1 starts the next outer instruction, deeper invokes are the
-// next inner instruction of the current outer instruction (the order of
-// meta.innerInstructions). "Program <id> success" and "Program <id> failed"
-// return to the caller, so a payload written after a CPI returned belongs to
-// the caller. outerProgramIds, when given, are the program ids of the outer
-// instructions; they keep the outer index aligned when an outer instruction
-// writes no invoke line. Lines that cannot be decoded are skipped, and
-// decoding stops at "Log truncated": the payloads after it are lost.
+// Instruction positions are rebuilt from the runtime's own lines only:
+// "Program <id> invoke [<depth>]" opens a frame (depth 1 starts the next
+// outer instruction, deeper invokes are the next inner instruction of the
+// current outer instruction, in the order of meta.innerInstructions), and
+// "Program <id> success" / "Program <id> failed: ..." return to the caller,
+// so a payload written after a CPI returned belongs to the caller. <id> must
+// be a base58 token: what programs write themselves ("Program log: ...",
+// "Program data: ...", "Program return: ...", "Program consumption: ...")
+// never opens or closes a frame, whatever its text, and neither do
+// "consumed ... compute units" lines. outerProgramIds, when given, are the
+// program ids of the outer instructions; they keep the outer index aligned
+// when an outer instruction writes no invoke line. Lines that cannot be
+// decoded are skipped, and decoding stops at "Log truncated": the payloads
+// after it are lost.
 func ParseProgramLogs(logs []string, outerProgramIds []string, prefix string) []ProgramLog {
+	return parseProgramLogs(logs, outerProgramIds, nil, prefix)
+}
+
+// parseProgramLogs is ParseProgramLogs. When innerProgramIds (the program ids
+// of each outer instruction's inner instructions, by outer index) is given,
+// every CPI invoke line must name the program of the inner instruction it
+// stands for; decoding stops at the first one that does not (logs that do
+// not belong to these instructions), keeping what was attributed before.
+func parseProgramLogs(logs []string, outerProgramIds []string, innerProgramIds map[int][]string, prefix string) []ProgramLog {
 	type frame struct {
 		programId  string
 		innerIndex int
@@ -94,6 +108,11 @@ func ParseProgramLogs(logs []string, outerProgramIds []string, prefix string) []
 				continue // no enclosing outer instruction
 			}
 			inner++
+			if innerProgramIds != nil {
+				if ids := innerProgramIds[outer]; inner >= len(ids) || ids[inner] != programId {
+					return result
+				}
+			}
 			if depth-1 < len(stack) {
 				stack = stack[:depth-1]
 			}
@@ -135,7 +154,7 @@ func parseInvokeLine(line string) (string, int, bool) {
 		return "", 0, false
 	}
 	programId, tail, ok := strings.Cut(rest, " invoke [")
-	if !ok || strings.Contains(programId, " ") {
+	if !ok || !isBase58Token(programId) {
 		return "", 0, false
 	}
 	depthStr, ok := strings.CutSuffix(tail, "]")
@@ -156,13 +175,32 @@ func parseReturnLine(line string) (string, bool) {
 		return "", false
 	}
 	programId, tail, ok := strings.Cut(rest, " ")
-	if !ok {
+	if !ok || !isBase58Token(programId) {
 		return "", false
 	}
 	if tail == "success" || strings.HasPrefix(tail, "failed") {
 		return programId, true
 	}
 	return "", false
+}
+
+// isBase58Token reports whether s is a non-empty string of base58 characters,
+// the form of a program id. The "log:", "data:", "return:" and
+// "consumption:" words of program-written lines are not.
+func isBase58Token(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '1' && c <= '9', c >= 'A' && c <= 'H', c >= 'J' && c <= 'N', c >= 'P' && c <= 'Z',
+			c >= 'a' && c <= 'k', c >= 'm' && c <= 'z':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // FindProgramLogs returns the logs written by programId while it executed the
@@ -187,25 +225,46 @@ func outerProgramIds(adapt *adapter.TransactionAdapter) []string {
 	return ids
 }
 
-// GetProgramDataLogs returns the "Program data:" payloads of the transaction
-// logs with the instruction that wrote each one (see ParseProgramLogs). It
-// returns nil when the transaction carries no logs.
-func (tu *TransactionUtils) GetProgramDataLogs() []ProgramLog {
-	logs := tu.adapter.LogMessages()
-	if len(logs) == 0 {
+// innerProgramIds returns the program ids of the inner instructions of each
+// outer instruction, or nil when the transaction records none (no CPI, or
+// old transactions without meta.innerInstructions)
+func innerProgramIds(adapt *adapter.TransactionAdapter) map[int][]string {
+	sets := adapt.InnerInstructions()
+	if len(sets) == 0 {
 		return nil
 	}
-	return ParseProgramDataLogs(logs, outerProgramIds(tu.adapter))
+	ids := make(map[int][]string, len(sets))
+	for _, set := range sets {
+		list := make([]string, len(set.Instructions))
+		for i, ix := range set.Instructions {
+			list[i] = adapt.GetInstructionProgramId(ix)
+		}
+		ids[set.Index] = list
+	}
+	return ids
+}
+
+// GetProgramDataLogs returns the "Program data:" payloads of the transaction
+// logs with the instruction that wrote each one (see ParseProgramLogs). Each
+// CPI invoke line is checked against the recorded inner instructions. It
+// returns nil when the transaction carries no logs.
+func (tu *TransactionUtils) GetProgramDataLogs() []ProgramLog {
+	return tu.programLogs(programDataPrefix)
 }
 
 // GetRayLogs returns the Raydium AMM v4 "ray_log:" payloads of the
 // transaction logs with the instruction that wrote each one.
 func (tu *TransactionUtils) GetRayLogs() []ProgramLog {
+	return tu.programLogs(rayLogPrefix)
+}
+
+// programLogs decodes the transaction's log lines that start with prefix
+func (tu *TransactionUtils) programLogs(prefix string) []ProgramLog {
 	logs := tu.adapter.LogMessages()
 	if len(logs) == 0 {
 		return nil
 	}
-	return ParseRayLogs(logs, outerProgramIds(tu.adapter))
+	return parseProgramLogs(logs, outerProgramIds(tu.adapter), innerProgramIds(tu.adapter), prefix)
 }
 
 // EventSwap is a swap as a program reports it in its own event: the amounts

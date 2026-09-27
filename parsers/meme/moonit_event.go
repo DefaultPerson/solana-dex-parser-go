@@ -108,43 +108,36 @@ type moonitTradeEvent struct {
 var moonitTradeEventDisc = []byte{189, 219, 127, 211, 78, 230, 97, 238}
 
 // tradeEvents returns the TradeEvent logged by each Moonit instruction, keyed
-// by its (outer, inner) index. Invocations in the logs follow the execution
-// order of all Moonit instructions of the transaction; when the counts
-// disagree (truncated or missing logs) nothing is returned.
+// by its (outer, inner) index (utils.GetProgramDataLogs attributes each
+// "Program data:" line to the instruction that wrote it; truncated or
+// misaligned logs lose the events after the break).
 func (p *MoonitEventParser) tradeEvents() map[[2]int]*moonitTradeEvent {
 	if p.logEvents != nil {
 		return p.logEvents
 	}
 	p.logEvents = map[[2]int]*moonitTradeEvent{}
 
-	all := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.MOONIT.ID})
-	types.SortInstructionsByExecution(all)
-	invocations := programDataByInvocation(p.adapter.LogMessages(), constants.DEX_PROGRAMS.MOONIT.ID)
-	if len(invocations) != len(all) {
-		return p.logEvents
-	}
-	for k, payloads := range invocations {
-		for _, data := range payloads {
-			if len(data) < 8 || !bytes.Equal(data[:8], moonitTradeEventDisc) {
-				continue
-			}
-			reader := utils.GetBinaryReader(data[8:])
-			evt := &moonitTradeEvent{}
-			evt.Amount, _ = reader.ReadU64()
-			evt.CollateralAmount, _ = reader.ReadU64()
-			evt.DexFee, _ = reader.ReadU64()
-			evt.HelioFee, _ = reader.ReadU64()
-			reader.Skip(8) // allocation
-			evt.Curve, _ = reader.ReadPubkey()
-			evt.CostToken, _ = reader.ReadPubkey()
-			evt.Sender, _ = reader.ReadPubkey()
-			tradeType, _ := reader.ReadU8()
-			evt.IsSell = tradeType == 1
-			ok := !reader.HasError()
-			reader.Release()
-			if ok {
-				p.logEvents[[2]int{all[k].OuterIndex, all[k].InnerIndex}] = evt
-			}
+	for _, l := range p.utils.GetProgramDataLogs() {
+		data := l.Data
+		if l.ProgramId != constants.DEX_PROGRAMS.MOONIT.ID || len(data) < 8 || !bytes.Equal(data[:8], moonitTradeEventDisc) {
+			continue
+		}
+		reader := utils.GetBinaryReader(data[8:])
+		evt := &moonitTradeEvent{}
+		evt.Amount, _ = reader.ReadU64()
+		evt.CollateralAmount, _ = reader.ReadU64()
+		evt.DexFee, _ = reader.ReadU64()
+		evt.HelioFee, _ = reader.ReadU64()
+		reader.Skip(8) // allocation
+		evt.Curve, _ = reader.ReadPubkey()
+		evt.CostToken, _ = reader.ReadPubkey()
+		evt.Sender, _ = reader.ReadPubkey()
+		tradeType, _ := reader.ReadU8()
+		evt.IsSell = tradeType == 1
+		ok := !reader.HasError()
+		reader.Release()
+		if ok {
+			p.logEvents[[2]int{l.OuterIndex, l.InnerIndex}] = evt
 		}
 	}
 	return p.logEvents
