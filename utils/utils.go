@@ -312,13 +312,10 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 	}
 }
 
-// unknownProgramName is the name GetProgramName gives programs that are not
-// in DEX_PROGRAMS (upstream parity)
-const unknownProgramName = constants.UnknownProgramName
-
-// isProgramName reports whether name identifies a known program
+// isProgramName reports whether name identifies a known program (not the
+// name GetProgramName gives programs outside DEX_PROGRAMS)
 func isProgramName(name string) bool {
-	return name != "" && name != unknownProgramName
+	return name != "" && name != constants.UnknownProgramName
 }
 
 // isZeroAmount reports whether a raw amount is empty or zero

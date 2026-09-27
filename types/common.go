@@ -22,20 +22,13 @@ type ClassifiedInstruction struct {
 	StackHeight int `json:"stackHeight,omitempty"`
 }
 
-// GetIdx returns the instruction index as string in format "outer-inner" or just "outer"
+// GetIdx returns the instruction index as string in format "outer-inner" or
+// just "outer", like utils.FormatIdx (types cannot import utils)
 func (c *ClassifiedInstruction) GetIdx() string {
 	if c.InnerIndex >= 0 {
-		return formatIdx(c.OuterIndex, c.InnerIndex)
+		return strconv.Itoa(c.OuterIndex) + "-" + strconv.Itoa(c.InnerIndex)
 	}
-	return formatIdxSingle(c.OuterIndex)
-}
-
-func formatIdx(outer, inner int) string {
-	return strconv.Itoa(outer) + "-" + strconv.Itoa(inner)
-}
-
-func formatIdxSingle(outer int) string {
-	return strconv.Itoa(outer)
+	return strconv.Itoa(c.OuterIndex)
 }
 
 // BalanceChange represents token balance changes before and after transaction execution
