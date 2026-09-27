@@ -240,3 +240,60 @@ func TestIntegRouteFeeListedOnce(t *testing.T) {
 		}
 	}
 }
+
+// Titan's fee_a recipient is the owner of the receiving token account (the
+// integrator's wallet), like the other parsers' fee recipients, not the
+// token account. In 24FsRUqw... the 2495 USDC went to 9sz8Xggo..., owned by
+// FdTEHJ9f... (token balances). And the user-kept check uses that resolved
+// owner: a caller's transfer without DestinationOwner that pays fee_a to an
+// account of the user leaves the fee in what the user received. Synthetic
+// for the second part: the fee account's owner set to the user, and the
+// transfers passed to the parser without DestinationOwner.
+func TestIntegTitanFeeRecipientIsOwner(t *testing.T) {
+	const (
+		sig        = "24FsRUqwK7CSax3qqwhXwgUzQvZ2MZ7MonsYm1RLx92S9pisUTNT6SUEEuuNoqTriZQCuao1Lhgso1bz4wcSQAWb"
+		feeAccount = "9sz8XggoqbCR68vaojcRPxYxhbHGvaYmdzW7ChGdyap9"
+		user       = "3hEp7vMMZugfynHhPBqNyLmApaspwbE8JJLpT94FcKhY"
+	)
+	tx := loadFixture(t, sig)
+	keys := rawAccountKeys(tx)
+	owner := ""
+	for _, b := range tx.Meta.PostTokenBalances {
+		if b.AccountIndex < len(keys) && keys[b.AccountIndex] == feeAccount {
+			owner = b.Owner
+		}
+	}
+	if owner == "" || owner == user {
+		t.Fatalf("fixture: fee account owner %q", owner)
+	}
+	agg := dexparser.NewDexParser().ParseAll(tx, nil).AggregateTrade
+	if agg == nil {
+		t.Fatal("no aggregate trade")
+	}
+	if agg.Fee == nil || agg.Fee.AmountRaw != "2495" || agg.Fee.Recipient != owner {
+		t.Errorf("aggregate fee %+v, want 2495 to %s", agg.Fee, owner)
+	}
+
+	tx = cloneTx(t, tx)
+	for _, balances := range [][]adapter.TokenBalance{tx.Meta.PreTokenBalances, tx.Meta.PostTokenBalances} {
+		for i := range balances {
+			if balances[i].AccountIndex < len(keys) && keys[balances[i].AccountIndex] == feeAccount {
+				balances[i].Owner = user
+			}
+		}
+	}
+	ctx := newParseContext(tx, nil)
+	for _, transfers := range ctx.TransferActions {
+		for i := range transfers {
+			transfers[i].Info.DestinationOwner = ""
+		}
+	}
+	trades := propamm.NewTitanParser(ctx.Adapter, ctx.DexInfo, ctx.TransferActions,
+		ctx.Classifier.GetInstructions(constants.DEX_PROGRAMS.TITAN.ID)).ProcessTrades()
+	if len(trades) != 1 {
+		t.Fatalf("want 1 route trade, got %d", len(trades))
+	}
+	if tr := trades[0]; tr.Fee != nil || tr.OutputToken.AmountRaw != "24958533" {
+		t.Errorf("fee %+v, output %s; want no fee and 24956038 + 2495", tr.Fee, tr.OutputToken.AmountRaw)
+	}
+}

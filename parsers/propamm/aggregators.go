@@ -144,9 +144,9 @@ func (p *aggregatorParser) routeTrade(ci types.ClassifiedInstruction, program co
 // temporary account funded with SOL), gross of fee_a when fee_a is taken on
 // the input side; output is out_amount of the mint of the destination
 // account (accounts[4]), what the user received. User is accounts[1]. fee_a
-// (the integrator's fee) is reported as Fee, Type "platform", when Titan
-// itself (not a hop venue) made a transfer of that amount in the input or
-// output mint to another owner; fee_c (kept in Titan's intermediate account,
+// (the integrator's fee) is reported as Fee, Type "platform", Recipient the
+// receiving owner, when Titan itself (not a hop venue) made a transfer of
+// that amount in the input or output mint to another owner; fee_c (kept in Titan's intermediate account,
 // not a transfer) is not.
 type TitanParser struct {
 	aggregatorParser
@@ -217,7 +217,8 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 		// (owned by accounts[2]; the user's input goes there). When that
 		// transfer goes to the user's own account (an integrator whose fee
 		// account is the user's), the user kept it: it is part of what the
-		// user received
+		// user received. Else the fee's recipient is the owner of the
+		// receiving token account (the token account when it is unknown)
 		var fee *types.FeeInfo
 		if feeA > 0 {
 			amount := strconv.FormatUint(feeA, 10)
@@ -237,7 +238,7 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 					continue // into Titan's intermediate account: the route's input
 				}
 				feeAmount := new(big.Int).SetUint64(feeA)
-				if t.Info.Destination == accounts[4] || t.Info.DestinationOwner == accounts[1] {
+				if t.Info.Destination == accounts[4] || destinationOwner == accounts[1] {
 					switch t.Info.Mint {
 					case outMint:
 						outAmount.Add(outAmount, feeAmount)
@@ -245,7 +246,11 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 						inAmount.Sub(inAmount, feeAmount)
 					}
 				} else {
-					f := p.feeInfo(constants.DEX_PROGRAMS.TITAN, t.Info.Mint, feeAmount, "platform", t.Info.Destination)
+					recipient := destinationOwner
+					if recipient == "" {
+						recipient = t.Info.Destination
+					}
+					f := p.feeInfo(constants.DEX_PROGRAMS.TITAN, t.Info.Mint, feeAmount, "platform", recipient)
 					fee = &f
 				}
 				break
