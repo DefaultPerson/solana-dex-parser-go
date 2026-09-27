@@ -3,6 +3,7 @@ package tests
 import (
 	"encoding/binary"
 	"math/big"
+	"strconv"
 	"testing"
 
 	"github.com/mr-tron/base58"
@@ -402,5 +403,83 @@ func TestMeteoraDammV2LiquidityChangeEvent(t *testing.T) {
 	if b.Token0Mint != a.Token0Mint || b.Token1Mint != a.Token1Mint || b.Token0AmountRaw != a.Token0AmountRaw || b.Token1AmountRaw != a.Token1AmountRaw {
 		t.Errorf("from EvtLiquidityChange: %s %s / %s %s, transfers %s %s / %s %s",
 			b.Token0Mint, b.Token0AmountRaw, b.Token1Mint, b.Token1AmountRaw, a.Token0Mint, a.Token0AmountRaw, a.Token1Mint, a.Token1AmountRaw)
+	}
+}
+
+// TestMeteoraDammV1NewLiquidityInstructions: the DAMM v1 create variants and
+// bootstrap_liquidity are liquidity events (amm-18). There is no real
+// transaction for them in the fixture pool; each case is synthetic, built
+// here from a real transaction whose instruction has the same account layout
+// and leading args: initialize_permissionless_constant_product_pool_with_config2
+// (token_a_amount, token_b_amount, activation_point) from ..._with_config,
+// bootstrap_liquidity (pool 0, lp_mint 1, same accounts) from
+// add_balance_liquidity.
+func TestMeteoraDammV1NewLiquidityInstructions(t *testing.T) {
+	d := constants.DISCRIMINATORS.METEORA_DAMM
+	cases := []struct {
+		name, sig string
+		outer     int
+		disc      []byte
+		typ       types.PoolEventType
+	}{
+		{"create_with_config2", "2GWLwbEjyR7moFYK5JfapbsDBrBz3298BVWsAebhUECPaXjLbTZ6DkbEN34BF57jdGot7GkwDnrzszFB3H9AJxmS", 6, d.CREATE_WITH_CONFIG2, types.PoolEventTypeCreate},
+		{"bootstrap_liquidity", "LaocVd6PpfdH1KTdQuRTf5WwnUzmyf3gdAy16xro747nzrhpgXg1oxFrpgBk31tPh24ksVAyiSkNW7vncoKTGyH", 2, d.BOOTSTRAP_LIQUIDITY, types.PoolEventTypeAdd},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			tx := loadFixture(t, c.sig)
+			original := dexparser.NewDexParser().ParseLiquidity(tx, liquidityConfig())
+			ctx := newParseContext(tx, nil)
+			data := append([]byte(nil), ctx.Adapter.GetInstructionData(ctx.Adapter.InstructionAt(c.outer))...)
+			copy(data, c.disc)
+			patchInstructionData(t, tx, c.outer, data)
+			events := dexparser.NewDexParser().ParseLiquidity(tx, liquidityConfig())
+			if len(original) != 1 || len(events) != 1 {
+				t.Fatalf("want one event, got %+v / %+v", original, events)
+			}
+			o, e := original[0], events[0]
+			if e.Type != c.typ || e.PoolId != o.PoolId || e.Token0Mint != o.Token0Mint || e.Token0AmountRaw != o.Token0AmountRaw ||
+				e.Token1Mint != o.Token1Mint || e.Token1AmountRaw != o.Token1AmountRaw {
+				t.Errorf("got %s pool=%s %s %s / %s %s, want %s like %+v", e.Type, e.PoolId, e.Token0Mint, e.Token0AmountRaw, e.Token1Mint, e.Token1AmountRaw, c.typ, o)
+			}
+		})
+	}
+}
+
+// TestAmmNewLiquidityInstructions: Orca increase_liquidity_by_token_amounts_v2
+// and Raydium CLMM create_customizable_pool are liquidity events (amm-6,
+// amm-18, constants-2). No real transaction for them is in the fixture pool;
+// each case is synthetic, built here from a real transaction of the
+// instruction with the same account layout (increase_liquidity_v2,
+// create_pool).
+func TestAmmNewLiquidityInstructions(t *testing.T) {
+	cases := []struct {
+		name, sig string
+		outer     int
+		disc      []byte
+	}{
+		{"orca increase_liquidity_by_token_amounts_v2", "4Kv6gQgdSsCPSxRApiCNMHFE1dKKGVugrJTzdzSYX5a2aXho4o7jaQDSHLH3RTsr5aVwpkzWL1o5mSCyDtHeZKZr", 6, constants.DISCRIMINATORS.ORCA.ADD_LIQUIDITY_BY_TOKEN_AMOUNTS_V2},
+		{"clmm create_customizable_pool", "4Vv9ZWLizvRE7um22gF8bUWvD5UfK1TMXsP4hF8TVF4gc2BNmmPG8kFu7Dyod9Zw5x16xAsGeDJnUznCwaKXim5n", 2, constants.DISCRIMINATORS.RAYDIUM_CL.CREATE.CREATE_CUSTOMIZABLE_POOL},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			tx := loadFixture(t, c.sig)
+			idx := strconv.Itoa(c.outer)
+			original := findLiquidityIdx(dexparser.NewDexParser().ParseLiquidity(tx, liquidityConfig()), idx)
+			ctx := newParseContext(tx, nil)
+			data := append([]byte(nil), ctx.Adapter.GetInstructionData(ctx.Adapter.InstructionAt(c.outer))...)
+			copy(data, c.disc)
+			patchInstructionData(t, tx, c.outer, data)
+			e := findLiquidityIdx(dexparser.NewDexParser().ParseLiquidity(tx, liquidityConfig()), idx)
+			if original == nil || e == nil {
+				t.Fatalf("no event at %s: %+v / %+v", idx, original, e)
+			}
+			if e.Type != original.Type || e.PoolId != original.PoolId || e.Token0Mint != original.Token0Mint || e.Token0AmountRaw != original.Token0AmountRaw ||
+				e.Token1Mint != original.Token1Mint || e.Token1AmountRaw != original.Token1AmountRaw {
+				t.Errorf("got %+v, want the event of the original instruction %+v", *e, *original)
+			}
+		})
 	}
 }
