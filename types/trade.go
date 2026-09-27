@@ -122,8 +122,12 @@ type TradeInfo struct {
 	Extras      interface{} `json:"extras,omitempty"`      // Additional parser-specific data
 }
 
-// ConvertToUIAmount converts raw token amount to human-readable format
+// ConvertToUIAmount converts raw token amount to human-readable format.
+// A nil amount converts to 0.
 func ConvertToUIAmount(amount *big.Int, decimals uint8) float64 {
+	if amount == nil {
+		return 0
+	}
 	if decimals == 0 {
 		f, _ := new(big.Float).SetInt(amount).Float64()
 		return f

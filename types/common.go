@@ -1,5 +1,7 @@
 package types
 
+import "strconv"
+
 // ClassifiedInstruction represents a classified instruction with its context information
 type ClassifiedInstruction struct {
 	// Instruction is the raw instruction data
@@ -24,11 +26,11 @@ func (c *ClassifiedInstruction) GetIdx() string {
 }
 
 func formatIdx(outer, inner int) string {
-	return string(rune('0'+outer)) + "-" + string(rune('0'+inner))
+	return strconv.Itoa(outer) + "-" + strconv.Itoa(inner)
 }
 
 func formatIdxSingle(outer int) string {
-	return string(rune('0' + outer))
+	return strconv.Itoa(outer)
 }
 
 // BalanceChange represents token balance changes before and after transaction execution
