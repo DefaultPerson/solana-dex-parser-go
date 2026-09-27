@@ -2,7 +2,7 @@ package meteora
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
@@ -27,140 +27,106 @@ func NewDBCShredParser(adapter *adapter.TransactionAdapter, classifier *classifi
 
 // ProcessInstructions processes Meteora DBC instructions and returns parsed results
 func (p *DBCShredParser) ProcessInstructions() []interface{} {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.METEORA_DBC.ID)
-	return p.parseInstructions(instructions)
+	events, _ := p.ProcessAll()
+	return events
 }
 
 // ProcessTypedInstructions returns typed ParsedShredInstruction results
 func (p *DBCShredParser) ProcessTypedInstructions() []types.ParsedShredInstruction {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.METEORA_DBC.ID)
-	return p.parseTypedInstructions(instructions)
+	_, typed := p.ProcessAll()
+	return typed
 }
 
-func (p *DBCShredParser) parseInstructions(instructions []types.ClassifiedInstruction) []interface{} {
-	var events []interface{}
+// DBC swap2 swap modes (SwapParameters2.swap_mode)
+const (
+	dbcSwapModeExactIn     = 0
+	dbcSwapModePartialFill = 1
+	dbcSwapModeExactOut    = 2
+)
 
-	for _, ci := range instructions {
+// ProcessAll decodes the DBC instructions into legacy events and typed meme
+// events in a single pass
+func (p *DBCShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
+	var events []interface{}
+	var typed []types.ParsedShredInstruction
+	d := constants.DISCRIMINATORS.METEORA_DBC
+
+	for _, ci := range p.classifier.GetInstructions(constants.DEX_PROGRAMS.METEORA_DBC.ID) {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 8 {
 			continue
 		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
+		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+		disc, payload := data[:8], data[8:]
 
 		var eventType string
 		var eventData interface{}
-
-		payload := data[8:]
-
-		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.SWAP):
-			eventType = "swap"
-			eventData = p.decodeSwapInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.SWAP_V2):
-			eventType = "swap_v2"
-			eventData = p.decodeSwapInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.INITIALIZE_VIRTUAL_POOL_WITH_SPL):
-			eventType = "init_pool_spl"
-			eventData = p.decodeInitPoolSplInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.INITIALIZE_VIRTUAL_POOL_WITH_TOKEN2022):
-			eventType = "init_pool_2022"
-			eventData = p.decodeInitPool2022Instruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.METEORA_DBC_MIGRATE_DAMM):
-			eventType = "migrate_damm"
-			eventData = p.decodeMigrateDammInstruction(ci.Instruction)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.METEORA_DBC_MIGRATE_DAMM_V2):
-			eventType = "migrate_damm_v2"
-			eventData = p.decodeMigrateDammV2Instruction(ci.Instruction)
-		default:
-			continue
-		}
-
-		if eventData != nil {
-			event := &DBCShredInstruction{
-				Type:      eventType,
-				Data:      eventData,
-				Slot:      p.adapter.Slot(),
-				Timestamp: p.adapter.BlockTime(),
-				Signature: p.adapter.Signature(),
-				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
-				Signer:    p.adapter.Signers(),
-			}
-			events = append(events, event)
-		}
-	}
-
-	return events
-}
-
-func (p *DBCShredParser) parseTypedInstructions(instructions []types.ClassifiedInstruction) []types.ParsedShredInstruction {
-	var events []types.ParsedShredInstruction
-
-	for _, ci := range instructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 8 {
-			continue
-		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
-		var eventType string
 		var memeEvent *types.MemeEvent
-
-		payload := data[8:]
-		idx := utils.FormatIdx(ci.OuterIndex, innerIdx)
+		var inKind, outKind types.ShredAmountKind
 
 		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.SWAP):
-			eventType = "swap"
-			memeEvent = p.decodeSwapMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.SWAP_V2):
-			eventType = "swap_v2"
-			memeEvent = p.decodeSwapMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.INITIALIZE_VIRTUAL_POOL_WITH_SPL):
-			eventType = "init_pool_spl"
-			memeEvent = p.decodeInitPoolSplMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.INITIALIZE_VIRTUAL_POOL_WITH_TOKEN2022):
-			eventType = "init_pool_2022"
-			memeEvent = p.decodeInitPool2022MemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.METEORA_DBC_MIGRATE_DAMM):
-			eventType = "migrate_damm"
-			memeEvent = p.decodeMigrateDammMemeEvent(ci.Instruction)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DBC.METEORA_DBC_MIGRATE_DAMM_V2):
-			eventType = "migrate_damm_v2"
-			memeEvent = p.decodeMigrateDammV2MemeEvent(ci.Instruction)
+		case bytes.Equal(disc, d.SWAP):
+			if swap := p.decodeSwapInstruction(accounts, payload, false); swap != nil {
+				eventType, eventData, memeEvent = "swap", swap, p.swapMemeEvent(swap)
+				inKind, outKind = dbcSwapAmountKinds(swap)
+			}
+		case bytes.Equal(disc, d.SWAP_V2), bytes.Equal(disc, d.SWAP2_WITH_TRANSFER_HOOK):
+			if swap := p.decodeSwapInstruction(accounts, payload, true); swap != nil {
+				eventType, eventData, memeEvent = "swap_v2", swap, p.swapMemeEvent(swap)
+				inKind, outKind = dbcSwapAmountKinds(swap)
+			}
+		case bytes.Equal(disc, d.INITIALIZE_VIRTUAL_POOL_WITH_SPL):
+			if init := p.decodeInitPool(accounts, payload); init != nil {
+				eventType, eventData, memeEvent = "init_pool_spl", init, dbcShredInitMemeEvent(init)
+			}
+		case bytes.Equal(disc, d.INITIALIZE_VIRTUAL_POOL_WITH_TOKEN2022), bytes.Equal(disc, d.INITIALIZE_VIRTUAL_POOL_WITH_TOKEN2022_TRANSFER_HOOK):
+			if init := p.decodeInitPool(accounts, payload); init != nil {
+				eventType, eventData, memeEvent = "init_pool_2022", init, dbcShredInitMemeEvent(init)
+			}
+		case bytes.Equal(disc, d.METEORA_DBC_MIGRATE_DAMM):
+			if migrate := p.decodeMigrateDammInstruction(accounts); migrate != nil {
+				eventType, eventData, memeEvent = "migrate_damm", migrate, dbcShredMigrateMemeEvent(migrate)
+			}
+		case bytes.Equal(disc, d.METEORA_DBC_MIGRATE_DAMM_V2):
+			if migrate := p.decodeMigrateDammV2Instruction(accounts); migrate != nil {
+				eventType, eventData, memeEvent = "migrate_damm_v2", migrate, dbcShredMigrateMemeEvent(migrate)
+			}
 		default:
 			continue
 		}
 
-		if memeEvent != nil {
-			memeEvent.Protocol = constants.DEX_PROGRAMS.METEORA_DBC.Name
-			memeEvent.Signature = p.adapter.Signature()
-			memeEvent.Slot = p.adapter.Slot()
-			memeEvent.Timestamp = p.adapter.BlockTime()
-			memeEvent.Idx = idx
-
-			event := types.ParsedShredInstruction{
-				ProgramID:   constants.DEX_PROGRAMS.METEORA_DBC.ID,
-				ProgramName: constants.DEX_PROGRAMS.METEORA_DBC.Name,
-				Action:      eventType,
-				MemeEvent:   memeEvent,
-				Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
-				Idx:         idx,
-			}
-			events = append(events, event)
+		if eventData == nil {
+			continue
 		}
+		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+		events = append(events, &DBCShredInstruction{
+			Type:      eventType,
+			Data:      eventData,
+			Slot:      p.adapter.Slot(),
+			Timestamp: p.adapter.BlockTime(),
+			Signature: p.adapter.Signature(),
+			Idx:       idx,
+			Signer:    p.adapter.Signers(),
+		})
+
+		memeEvent.Protocol = constants.DEX_PROGRAMS.METEORA_DBC.Name
+		memeEvent.Signature = p.adapter.Signature()
+		memeEvent.Slot = p.adapter.Slot()
+		memeEvent.Timestamp = p.adapter.BlockTime()
+		memeEvent.Idx = idx
+		typed = append(typed, types.ParsedShredInstruction{
+			ProgramID:        constants.DEX_PROGRAMS.METEORA_DBC.ID,
+			ProgramName:      constants.DEX_PROGRAMS.METEORA_DBC.Name,
+			Action:           eventType,
+			MemeEvent:        memeEvent,
+			Accounts:         accounts,
+			Idx:              idx,
+			InputAmountKind:  inKind,
+			OutputAmountKind: outKind,
+		})
 	}
 
-	return events
+	return events, typed
 }
 
 // DBCShredInstruction represents a parsed Meteora DBC instruction
@@ -174,7 +140,17 @@ type DBCShredInstruction struct {
 	Signer    []string    `json:"signer"`
 }
 
-// DBCSwapData contains Meteora DBC swap instruction data
+// DBCSwapData contains Meteora DBC swap instruction data. The amounts are
+// instruction arguments: in exact-in and partial-fill mode (swap, and swap2
+// with SwapMode 0 or 1) InputAmount is the input and OutputAmount the minimum
+// output; in exact-out mode (swap2 with SwapMode 2, ExactOut) OutputAmount is
+// the exact output and InputAmount the maximum input.
+//
+// TradeType is BUY (quote -> base), SELL (base -> quote) or SWAP when the
+// direction cannot be determined; the input and output mints are then empty.
+// The direction comes from the mints of the input/output token accounts when
+// the transaction reveals them, otherwise from the payer's associated token
+// accounts.
 type DBCSwapData struct {
 	User               string `json:"user"`
 	Pool               string `json:"pool"`
@@ -185,6 +161,12 @@ type DBCSwapData struct {
 	InputAmount        uint64 `json:"inputAmount"`
 	OutputAmount       uint64 `json:"outputAmount"`
 	TradeType          string `json:"tradeType"`
+	InputMint          string `json:"inputMint,omitempty"`
+	OutputMint         string `json:"outputMint,omitempty"`
+	// SwapMode is the swap2 swap_mode (0 exact in, 1 partial fill, 2 exact out); 0 for swap
+	SwapMode uint8 `json:"swapMode"`
+	// ExactOut is true in exact-out mode
+	ExactOut bool `json:"exactOut,omitempty"`
 }
 
 // DBCInitPoolData contains Meteora DBC init pool instruction data
@@ -208,89 +190,152 @@ type DBCMigrateData struct {
 	PoolDex      string `json:"poolDex"`
 }
 
-func (p *DBCShredParser) decodeSwapInstruction(instruction interface{}, data []byte) *DBCSwapData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeSwapInstruction decodes swap (amount_in, minimum_amount_out) and
+// swap2 (amount_0, amount_1, swap_mode). Accounts: 2 pool,
+// 3 input_token_account, 4 output_token_account, 7 base_mint, 8 quote_mint,
+// 9 payer.
+func (p *DBCShredParser) decodeSwapInstruction(accounts []string, data []byte, swap2 bool) *DBCSwapData {
 	if len(accounts) < 10 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-
+	amount0, _ := reader.ReadU64()
+	amount1, _ := reader.ReadU64()
+	var swapMode uint8
+	if swap2 {
+		swapMode, _ = reader.ReadU8()
+	}
 	if reader.HasError() {
 		return nil
 	}
-
-	userAccount := accounts[9]
-	baseMint := accounts[7]
-	quoteMint := accounts[8]
-	inputTokenAccount := accounts[3]
-	outputTokenAccount := accounts[4]
-
-	tradeType := utils.GetAccountTradeType(p.adapter.Signer(), baseMint, inputTokenAccount, outputTokenAccount)
-
-	return &DBCSwapData{
-		User:               userAccount,
-		Pool:               accounts[2],
-		BaseMint:           baseMint,
-		QuoteMint:          quoteMint,
-		InputTokenAccount:  inputTokenAccount,
-		OutputTokenAccount: outputTokenAccount,
-		InputAmount:        inputAmount,
-		OutputAmount:       outputAmount,
-		TradeType:          string(tradeType),
-	}
-}
-
-func (p *DBCShredParser) decodeSwapMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	swapData := p.decodeSwapInstruction(instruction, data)
-	if swapData == nil {
+	if swapMode > dbcSwapModeExactOut {
 		return nil
 	}
 
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-
-	var inputMint, outputMint string
-	var tradeType types.TradeType
-
-	if swapData.TradeType == "sell" {
-		inputMint = swapData.BaseMint
-		outputMint = swapData.QuoteMint
-		tradeType = types.TradeTypeSell
+	swap := &DBCSwapData{
+		User:               accounts[9],
+		Pool:               accounts[2],
+		BaseMint:           accounts[7],
+		QuoteMint:          accounts[8],
+		InputTokenAccount:  accounts[3],
+		OutputTokenAccount: accounts[4],
+		SwapMode:           swapMode,
+		ExactOut:           swapMode == dbcSwapModeExactOut,
+	}
+	if swap.ExactOut {
+		swap.OutputAmount, swap.InputAmount = amount0, amount1
 	} else {
-		inputMint = swapData.QuoteMint
-		outputMint = swapData.BaseMint
-		tradeType = types.TradeTypeBuy
+		swap.InputAmount, swap.OutputAmount = amount0, amount1
 	}
 
+	tradeType := p.swapDirection(swap)
+	swap.TradeType = string(tradeType)
+	switch tradeType {
+	case types.TradeTypeBuy:
+		swap.InputMint, swap.OutputMint = swap.QuoteMint, swap.BaseMint
+	case types.TradeTypeSell:
+		swap.InputMint, swap.OutputMint = swap.BaseMint, swap.QuoteMint
+	}
+	return swap
+}
+
+// swapDirection determines BUY (quote in) or SELL (base in) from the mints
+// of the swap's token accounts, then from the payer's associated token
+// accounts; SWAP when neither decides
+func (p *DBCShredParser) swapDirection(swap *DBCSwapData) types.TradeType {
+	if swap.BaseMint == "" || swap.QuoteMint == "" {
+		return types.TradeTypeSwap
+	}
+	switch p.tokenAccountMint(swap.InputTokenAccount) {
+	case swap.BaseMint:
+		return types.TradeTypeSell
+	case swap.QuoteMint:
+		return types.TradeTypeBuy
+	}
+	switch p.tokenAccountMint(swap.OutputTokenAccount) {
+	case swap.BaseMint:
+		return types.TradeTypeBuy
+	case swap.QuoteMint:
+		return types.TradeTypeSell
+	}
+	if swap.User == "" {
+		return types.TradeTypeSwap
+	}
+	if tradeType := utils.GetAccountTradeType(swap.User, swap.BaseMint, swap.InputTokenAccount, swap.OutputTokenAccount); tradeType != types.TradeTypeSwap {
+		return tradeType
+	}
+	// The payer's quote ATA pays for a buy and receives a sell
+	switch utils.GetAccountTradeType(swap.User, swap.QuoteMint, swap.InputTokenAccount, swap.OutputTokenAccount) {
+	case types.TradeTypeSell:
+		return types.TradeTypeBuy
+	case types.TradeTypeBuy:
+		return types.TradeTypeSell
+	}
+	return types.TradeTypeSwap
+}
+
+// tokenAccountMint returns the mint of a token account when the transaction
+// reveals it, "" otherwise (never a guess)
+func (p *DBCShredParser) tokenAccountMint(account string) string {
+	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
+		return ""
+	}
+	return p.adapter.GetSplTokenMint(account)
+}
+
+// decimals returns the decimals of mint when the transaction reveals them or
+// TOKEN_DECIMALS lists them, 0 (unknown) otherwise; DBC base mints choose
+// their decimals
+func (p *DBCShredParser) decimals(mint string) uint8 {
+	if mint == "" {
+		return 0
+	}
+	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
+		return d
+	}
+	return constants.TOKEN_DECIMALS[mint]
+}
+
+func dbcSwapAmountKinds(swap *DBCSwapData) (types.ShredAmountKind, types.ShredAmountKind) {
+	if swap.ExactOut {
+		return types.ShredAmountMax, types.ShredAmountExact
+	}
+	return types.ShredAmountExact, types.ShredAmountMin
+}
+
+func (p *DBCShredParser) swapMemeEvent(swap *DBCSwapData) *types.MemeEvent {
+	inDecimals, outDecimals := p.decimals(swap.InputMint), p.decimals(swap.OutputMint)
 	return &types.MemeEvent{
-		Type:         tradeType,
-		User:         swapData.User,
-		BaseMint:     swapData.BaseMint,
-		QuoteMint:    swapData.QuoteMint,
-		BondingCurve: accounts[2],
-		Pool:         accounts[2],
+		Type:         types.TradeType(swap.TradeType),
+		User:         swap.User,
+		BaseMint:     swap.BaseMint,
+		QuoteMint:    swap.QuoteMint,
+		BondingCurve: swap.Pool,
+		Pool:         swap.Pool,
 		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			Amount:    types.ConvertToUIAmountUint64(swapData.InputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", swapData.InputAmount),
-			Decimals:  9,
+			Mint:      swap.InputMint,
+			Amount:    types.ConvertToUIAmountUint64(swap.InputAmount, inDecimals),
+			AmountRaw: strconv.FormatUint(swap.InputAmount, 10),
+			Decimals:  inDecimals,
+			Source:    swap.InputTokenAccount,
 		},
 		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			Amount:    types.ConvertToUIAmountUint64(swapData.OutputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", swapData.OutputAmount),
-			Decimals:  9,
+			Mint:        swap.OutputMint,
+			Amount:      types.ConvertToUIAmountUint64(swap.OutputAmount, outDecimals),
+			AmountRaw:   strconv.FormatUint(swap.OutputAmount, 10),
+			Decimals:    outDecimals,
+			Destination: swap.OutputTokenAccount,
 		},
 	}
 }
 
-func (p *DBCShredParser) decodeInitPoolSplInstruction(instruction interface{}, data []byte) *DBCInitPoolData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 10 {
+// decodeInitPool decodes InitializePoolParameters (name, symbol, uri) of the
+// initialize_virtual_pool_* instructions: accounts 0 config, 2 creator,
+// 3 base_mint, 4 quote_mint, 5 pool
+func (p *DBCShredParser) decodeInitPool(accounts []string, data []byte) *DBCInitPoolData {
+	if len(accounts) < 6 {
 		return nil
 	}
 
@@ -322,12 +367,7 @@ func (p *DBCShredParser) decodeInitPoolSplInstruction(instruction interface{}, d
 	}
 }
 
-func (p *DBCShredParser) decodeInitPoolSplMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	initData := p.decodeInitPoolSplInstruction(instruction, data)
-	if initData == nil {
-		return nil
-	}
-
+func dbcShredInitMemeEvent(initData *DBCInitPoolData) *types.MemeEvent {
 	return &types.MemeEvent{
 		Type:           types.TradeTypeCreate,
 		User:           initData.User,
@@ -342,62 +382,9 @@ func (p *DBCShredParser) decodeInitPoolSplMemeEvent(instruction interface{}, dat
 	}
 }
 
-func (p *DBCShredParser) decodeInitPool2022Instruction(instruction interface{}, data []byte) *DBCInitPoolData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 8 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	name, err := reader.ReadString()
-	if err != nil {
-		return nil
-	}
-	symbol, err := reader.ReadString()
-	if err != nil {
-		return nil
-	}
-	uri, err := reader.ReadString()
-	if err != nil {
-		return nil
-	}
-
-	return &DBCInitPoolData{
-		User:           accounts[2],
-		Pool:           accounts[5],
-		BaseMint:       accounts[3],
-		QuoteMint:      accounts[4],
-		PlatformConfig: accounts[0],
-		Name:           name,
-		Symbol:         symbol,
-		URI:            uri,
-	}
-}
-
-func (p *DBCShredParser) decodeInitPool2022MemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	initData := p.decodeInitPool2022Instruction(instruction, data)
-	if initData == nil {
-		return nil
-	}
-
-	return &types.MemeEvent{
-		Type:           types.TradeTypeCreate,
-		User:           initData.User,
-		BaseMint:       initData.BaseMint,
-		QuoteMint:      initData.QuoteMint,
-		Pool:           initData.Pool,
-		BondingCurve:   initData.Pool,
-		PlatformConfig: initData.PlatformConfig,
-		Name:           initData.Name,
-		Symbol:         initData.Symbol,
-		URI:            initData.URI,
-	}
-}
-
-func (p *DBCShredParser) decodeMigrateDammInstruction(instruction interface{}) *DBCMigrateData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeMigrateDammInstruction decodes migrate_meteora_damm: accounts
+// 0 virtual_pool, 4 pool, 7 token_a_mint, 8 token_b_mint
+func (p *DBCShredParser) decodeMigrateDammInstruction(accounts []string) *DBCMigrateData {
 	if len(accounts) < 10 {
 		return nil
 	}
@@ -411,24 +398,9 @@ func (p *DBCShredParser) decodeMigrateDammInstruction(instruction interface{}) *
 	}
 }
 
-func (p *DBCShredParser) decodeMigrateDammMemeEvent(instruction interface{}) *types.MemeEvent {
-	migrateData := p.decodeMigrateDammInstruction(instruction)
-	if migrateData == nil {
-		return nil
-	}
-
-	return &types.MemeEvent{
-		Type:         types.TradeTypeMigrate,
-		BaseMint:     migrateData.BaseMint,
-		QuoteMint:    migrateData.QuoteMint,
-		BondingCurve: migrateData.BondingCurve,
-		Pool:         migrateData.Pool,
-		PoolDex:      migrateData.PoolDex,
-	}
-}
-
-func (p *DBCShredParser) decodeMigrateDammV2Instruction(instruction interface{}) *DBCMigrateData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeMigrateDammV2Instruction decodes migration_damm_v2: accounts
+// 0 virtual_pool, 4 pool, 13 base_mint, 14 quote_mint
+func (p *DBCShredParser) decodeMigrateDammV2Instruction(accounts []string) *DBCMigrateData {
 	if len(accounts) < 15 {
 		return nil
 	}
@@ -442,12 +414,7 @@ func (p *DBCShredParser) decodeMigrateDammV2Instruction(instruction interface{})
 	}
 }
 
-func (p *DBCShredParser) decodeMigrateDammV2MemeEvent(instruction interface{}) *types.MemeEvent {
-	migrateData := p.decodeMigrateDammV2Instruction(instruction)
-	if migrateData == nil {
-		return nil
-	}
-
+func dbcShredMigrateMemeEvent(migrateData *DBCMigrateData) *types.MemeEvent {
 	return &types.MemeEvent{
 		Type:         types.TradeTypeMigrate,
 		BaseMint:     migrateData.BaseMint,
