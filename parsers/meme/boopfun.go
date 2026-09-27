@@ -107,6 +107,18 @@ func (p *BoopfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
 	sortExecutionOrder(ordered)
 
+	// deploy_bonding_curve accounts by mint (0 mint, 2 bonding curve, 5
+	// config): the bonding curve of a created token
+	deploys := map[string][]string{}
+	for _, ci := range ordered {
+		data := p.adapter.GetInstructionData(ci.Instruction)
+		if ci.ProgramId == constants.DEX_PROGRAMS.BOOP_FUN.ID && len(data) >= 8 && bytes.Equal(data[:8], constants.DISCRIMINATORS.BOOPFUN.DEPLOY) {
+			if accounts := p.adapter.GetInstructionAccounts(ci.Instruction); len(accounts) >= 6 {
+				deploys[accounts[0]] = accounts
+			}
+		}
+	}
+
 	for _, ci := range ordered {
 		if ci.ProgramId != constants.DEX_PROGRAMS.BOOP_FUN.ID {
 			continue
@@ -126,6 +138,13 @@ func (p *BoopfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeSell)
 		} else if bytes.Equal(disc, constants.DISCRIMINATORS.BOOPFUN.CREATE) {
 			event = p.decodeCreateEvent(data[8:], ci.Instruction)
+			if event != nil {
+				if deploy, ok := deploys[event.BaseMint]; ok {
+					event.BondingCurve = deploy[2]
+					event.Pool = deploy[2]
+					event.PlatformConfig = deploy[5]
+				}
+			}
 		} else if bytes.Equal(disc, constants.DISCRIMINATORS.BOOPFUN.COMPLETE) {
 			event = p.decodeCompleteEvent(ci.Instruction)
 		}

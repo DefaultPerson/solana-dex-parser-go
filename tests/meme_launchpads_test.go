@@ -210,3 +210,17 @@ func reverse(b []byte) []byte {
 	}
 	return out
 }
+
+// meme-17: the Boop.fun CREATE event had no bonding curve; it is account 2
+// of the deploy_bonding_curve instruction for the same mint, which the buy
+// of the same transaction trades against.
+func TestMemeBoopfunCreateBondingCurve(t *testing.T) {
+	r := memeParse(t, sigBoopCreateBuy)
+	create := memeEventAt(t, r, "2")
+	raw := loadMemeRaw(t, sigBoopCreateBuy)
+	deploy := raw.accounts(3, -1)
+	if create.Type != types.TradeTypeCreate || create.BaseMint != deploy[0] || create.BondingCurve != deploy[2] || create.PlatformConfig != deploy[5] ||
+		create.BondingCurve != memeTradeAt(t, r, "5").Pool[0] {
+		t.Errorf("create %+v, deploy accounts %v", create, deploy[:6])
+	}
+}
