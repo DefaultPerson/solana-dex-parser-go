@@ -113,3 +113,64 @@ func TestFinalCLMMTradeFee(t *testing.T) {
 		}
 	}
 }
+
+// TestFinalJupiterHopSkipsEventCPI: a Jupiter route_v2 hop was matched to the
+// first inner instruction of the hop's AMM program, so two consecutive hops
+// through one event_cpi AMM (Meteora DLMM) gave the second hop the first
+// hop's Anchor event self-CPI: no pool, no fees. Truth: the inner
+// instruction listing (the DLMM swap2 at stack height 2 on the named pool).
+// amm-1.
+func TestFinalJupiterHopSkipsEventCPI(t *testing.T) {
+	eventPrefix := []byte{0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d}
+	for _, c := range []struct {
+		sig, idx, pool string
+	}{
+		{"33VPMZm2hGteXKCiwvsri7tZ2UzeXZpB3tiA2nzA1gn7oZTDyN7HogjF3SzoSzsVWEKUfSxtto1XkMzKNqvGToNi", "3-8", "4gMVHBCa1GNuofv67zvQCxZ5kyhh2kJa7EiFk4z57hwi"},
+		{"xuVHmb58LEQsEQwSGzHqr2otgvyTDmijdjnQntirfg1MqLNe66EdiyoF2SaK5eHeRGnM5QAks1Qs5mdQpH4Myok", "2-8", "GgoFghiA6Ca7YNmG6dRxwKQWkZhRK8ND47EREz46arot"},
+	} {
+		tx, res := parseFixture(t, c.sig, nil)
+		ixs := map[string]rawIx{}
+		for _, ix := range fixtureIxs(t, tx) {
+			if ix.inner >= 0 {
+				ixs[fmtIdx(ix.outer, ix.inner)] = ix
+			}
+		}
+		// the expected hop: a DLMM instruction on the pool, not an event
+		want := ixs[c.idx]
+		if want.programId != constants.DEX_PROGRAMS.METEORA.ID || string(want.data[:8]) == string(eventPrefix) || !containsStr(want.accounts, c.pool) {
+			t.Fatalf("%s: %s is not a DLMM swap on %s", c.sig[:8], c.idx, c.pool)
+		}
+		found := false
+		for _, tr := range res.Trades {
+			if tr.Route != constants.DEX_PROGRAMS.JUPITER.Name {
+				continue
+			}
+			ix, ok := ixs[tr.Idx]
+			if !ok {
+				continue
+			}
+			if string(ix.data[:8]) == string(eventPrefix) {
+				t.Errorf("%s: hop %s (%s) names an Anchor event self-CPI", c.sig[:8], tr.Idx, tr.AMM)
+			}
+			if h := jsonInt(ix.m["stackHeight"]); h != 2 {
+				t.Errorf("%s: hop %s (%s) at stack height %d, want 2 (invoked by the route)", c.sig[:8], tr.Idx, tr.AMM, h)
+			}
+			if tr.Idx == c.idx {
+				found = true
+				if len(tr.Pool) != 1 || tr.Pool[0] != c.pool || (tr.Fee == nil && len(tr.Fees) == 0) {
+					t.Errorf("%s: hop %s pool %v fee %v fees %d, want pool %s with the DLMM fees", c.sig[:8], tr.Idx, tr.Pool, tr.Fee, len(tr.Fees), c.pool)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: no Jupiter hop at %s", c.sig[:8], c.idx)
+		}
+	}
+}
+
+func fmtIdx(outer, inner int) string {
+	if inner < 0 {
+		return u64str(uint64(outer))
+	}
+	return u64str(uint64(outer)) + "-" + u64str(uint64(inner))
+}

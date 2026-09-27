@@ -229,12 +229,27 @@ func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*Jup
 		}
 	}
 
+	// The route invokes each hop's AMM directly: a hop instruction is one
+	// stack level below the route (when heights are known) and is not an
+	// Anchor event the AMM emits by self-CPI
+	routeHeight := 1
+	if cursor > 0 {
+		routeHeight = adapter.InstructionStackHeight(inner[cursor-1])
+	}
+	isHop := func(j int, amm string) bool {
+		if p.Adapter.GetInstructionProgramId(inner[j]) != amm || constants.IsAnchorEvent(p.Adapter.GetInstructionData(inner[j])) {
+			return false
+		}
+		h := adapter.InstructionStackHeight(inner[j])
+		return routeHeight <= 0 || h <= 0 || h == routeHeight+1
+	}
+
 	start := cursor
 	used := make(map[int]bool)
 	for i, event := range events {
 		matched[i] = -1
 		for j := cursor; j < end; j++ {
-			if p.Adapter.GetInstructionProgramId(inner[j]) == event.AMM {
+			if isHop(j, event.AMM) {
 				matched[i] = j
 				used[j] = true
 				cursor = j + 1
