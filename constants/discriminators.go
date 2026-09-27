@@ -81,6 +81,10 @@ var DISCRIMINATORS = struct {
 		CLOSED_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 50, 31, 87, 155, 135, 220, 195, 239},
 		WITHDRAW_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 192, 241, 201, 217, 70, 150, 90, 247},
 		DEPOSIT_EVENT:  []byte{228, 69, 165, 46, 81, 203, 154, 29, 62, 205, 242, 175, 244, 169, 136, 52},
+		// Instructions that pay out or top up a DCA (global:<name>)
+		WITHDRAW: []byte{183, 18, 70, 156, 148, 109, 161, 34},
+		DEPOSIT:  []byte{242, 35, 198, 137, 82, 225, 242, 182},
+		TRANSFER: []byte{163, 52, 200, 231, 140, 3, 69, 186},
 	},
 	JUPITER_LIMIT_ORDER: JupiterLimitOrderDiscriminators{
 		CANCEL_ORDER:     []byte{95, 129, 237, 240, 8, 49, 223, 132},
@@ -658,6 +662,9 @@ type JupiterDCADiscriminators struct {
 	CLOSED_EVENT   []byte
 	WITHDRAW_EVENT []byte
 	DEPOSIT_EVENT  []byte
+	WITHDRAW       []byte
+	DEPOSIT        []byte
+	TRANSFER       []byte
 }
 
 type JupiterLimitOrderDiscriminators struct {

@@ -124,12 +124,15 @@ func (p *JupiterDCAParser) getTransferActionKeys() []string {
 	return utils.SortedTransferKeys(p.TransferActions)
 }
 
-// ProcessTransfers reports DCA (Recurring) deposits and refunds from the DCA
-// program's events. Opened (open_dca, open_dca_v2) is the user's deposit of
-// in_deposited input tokens. Closed (close_dca by the user, end_and_close by a
-// keeper) returns what was left in the DCA account: the close instruction's
-// token transfers of the input or output mint, or, when none is found, the
-// event's unfilled input amount.
+// ProcessTransfers reports DCA (Recurring) deposits, withdrawals and refunds
+// from the DCA program's events. Opened (open_dca, open_dca_v2) is the user's
+// deposit of in_deposited input tokens, Deposit (deposit) a later top-up.
+// Withdraw pays tokens out of the DCA to its user: the output of a fill
+// (transfer, by the keeper) or what the user's withdraw instruction takes.
+// Closed (close_dca by the user, end_and_close by a keeper) returns what was
+// left in the DCA account: the close instruction's token transfers of the
+// input or output mint, or, when none is found, the event's unfilled input
+// amount.
 func (p *JupiterDCAParser) ProcessTransfers() []types.TransferData {
 	var transfers []types.TransferData
 
@@ -149,6 +152,14 @@ func (p *JupiterDCAParser) ProcessTransfers() []types.TransferData {
 		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_DCA.CLOSED_EVENT):
 			if event, err := ParseJupiterDCAClosedEvent(data[16:]); err == nil {
 				transfers = append(transfers, p.parseClosed(event, ci)...)
+			}
+		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_DCA.WITHDRAW_EVENT):
+			if event, err := ParseJupiterDCAWithdrawEvent(data[16:]); err == nil {
+				transfers = append(transfers, p.parseWithdraw(event, ci)...)
+			}
+		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER_DCA.DEPOSIT_EVENT):
+			if event, err := ParseJupiterDCADepositEvent(data[16:]); err == nil {
+				transfers = append(transfers, p.parseDeposit(event, ci)...)
 			}
 		}
 	}
@@ -220,6 +231,96 @@ func (p *JupiterDCAParser) parseClosed(event *JupiterDCAOrderEvent, ci types.Cla
 		transfers = append(transfers, transfer)
 	}
 	return transfers
+}
+
+// parseWithdraw reports a Withdraw event: in_amount of the input mint and
+// out_amount of the output mint paid from the DCA to its user. Each side is
+// the emitting instruction's token transfer of that amount (its accounts,
+// authority and balances); without one (e.g. SOL unwrapped to the user) it
+// is built from the event, with the mint from the instruction's accounts
+// (withdraw: user 0, input_mint 2, output_mint 3; transfer: user 2,
+// output_mint 3).
+func (p *JupiterDCAParser) parseWithdraw(event *JupiterDCAWithdrawEvent, ci types.ClassifiedInstruction) []types.TransferData {
+	order, instTransfers := p.orderTransfers(ci)
+	idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+	var user, inputMint, outputMint string
+	if order != nil {
+		idx = utils.FormatIdx(order.OuterIndex, order.InnerIndex)
+		accounts := p.Adapter.GetInstructionAccounts(order.Instruction)
+		data := p.Adapter.GetInstructionData(order.Instruction)
+		switch {
+		case constants.MatchDiscriminator(data, constants.DISCRIMINATORS.JUPITER_DCA.WITHDRAW) && len(accounts) > 3:
+			user, inputMint, outputMint = accounts[0], accounts[2], accounts[3]
+		case constants.MatchDiscriminator(data, constants.DISCRIMINATORS.JUPITER_DCA.TRANSFER) && len(accounts) > 3:
+			user, outputMint = accounts[2], accounts[3]
+		}
+	}
+
+	var transfers []types.TransferData
+	for _, side := range []struct {
+		amount *big.Int
+		mint   string
+	}{{event.InAmount, inputMint}, {event.OutAmount, outputMint}} {
+		if side.amount.Sign() <= 0 {
+			continue
+		}
+		if t := dcaTransferOf(instTransfers, side.mint, side.amount); t != nil {
+			transfer := *t
+			transfer.Type = "WithdrawDca"
+			transfer.ProgramId = constants.DEX_PROGRAMS.JUPITER_DCA.ID
+			transfer.Idx = idx
+			transfers = append(transfers, transfer)
+		} else if side.mint != "" {
+			transfer := p.eventTransfer("WithdrawDca", side.mint, side.amount, event.DCAKey, user, idx)
+			transfer.Info.Authority = event.DCAKey
+			transfers = append(transfers, transfer)
+		}
+	}
+	return transfers
+}
+
+// parseDeposit reports a Deposit event: amount of the input mint the user
+// added to the DCA (deposit accounts: user 0, dca 1, in_ata 2, user_in_ata 3)
+func (p *JupiterDCAParser) parseDeposit(event *JupiterDCADepositEvent, ci types.ClassifiedInstruction) []types.TransferData {
+	if event.Amount.Sign() <= 0 {
+		return nil
+	}
+	order, instTransfers := p.orderTransfers(ci)
+	idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+	var user, inAta string
+	if order != nil {
+		idx = utils.FormatIdx(order.OuterIndex, order.InnerIndex)
+		if accounts := p.Adapter.GetInstructionAccounts(order.Instruction); len(accounts) > 2 {
+			user, inAta = accounts[0], accounts[2]
+		}
+	}
+	if t := dcaTransferOf(instTransfers, "", event.Amount); t != nil {
+		transfer := *t
+		transfer.Type = "DepositDca"
+		transfer.ProgramId = constants.DEX_PROGRAMS.JUPITER_DCA.ID
+		transfer.Idx = idx
+		return []types.TransferData{transfer}
+	}
+	mint := p.Adapter.KnownTokenAccountMint(inAta)
+	if mint == "" {
+		return nil
+	}
+	transfer := p.eventTransfer("DepositDca", mint, event.Amount, user, event.DCAKey, idx)
+	transfer.Info.Authority = user
+	return []types.TransferData{transfer}
+}
+
+// dcaTransferOf returns the first token transfer of amount (and of mint,
+// when given) among transfers, or nil
+func dcaTransferOf(transfers []types.TransferData, mint string, amount *big.Int) *types.TransferData {
+	for i := range transfers {
+		t := &transfers[i]
+		if t.Info.TokenAmount.Amount == amount.String() && (mint == "" || t.Info.Mint == mint) &&
+			t.ProgramId != constants.SYSTEM_PROGRAM_ID {
+			return t
+		}
+	}
+	return nil
 }
 
 // eventTransfer builds a transfer of amount of mint from source to destination

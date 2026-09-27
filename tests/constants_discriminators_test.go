@@ -80,6 +80,9 @@ func constAnchorTable() map[string][]byte {
 		"JUPITER_DCA.CLOSED_EVENT":   cpiEv("Closed"),
 		"JUPITER_DCA.WITHDRAW_EVENT": cpiEv("Withdraw"),
 		"JUPITER_DCA.DEPOSIT_EVENT":  cpiEv("Deposit"),
+		"JUPITER_DCA.WITHDRAW":       ix("withdraw"),
+		"JUPITER_DCA.DEPOSIT":        ix("deposit"),
+		"JUPITER_DCA.TRANSFER":       ix("transfer"),
 		// Jupiter Limit Order v1 / v2
 		"JUPITER_LIMIT_ORDER.CANCEL_ORDER":               ix("cancel_order"),
 		"JUPITER_LIMIT_ORDER.CREATE_ORDER":               ix("initialize_order"),

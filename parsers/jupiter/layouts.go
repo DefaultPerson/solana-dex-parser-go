@@ -225,6 +225,49 @@ func ParseJupiterDCAClosedEvent(data []byte) (*JupiterDCAOrderEvent, error) {
 	return event, nil
 }
 
+// JupiterDCAWithdrawEvent is a DCA Withdraw event: tokens paid out of a DCA
+// to its user, by a keeper after a fill (transfer, userWithdraw false) or by
+// the user's own withdraw instruction
+type JupiterDCAWithdrawEvent struct {
+	DCAKey       string
+	InAmount     *big.Int
+	OutAmount    *big.Int
+	UserWithdraw bool
+}
+
+// ParseJupiterDCAWithdrawEvent parses a DCA Withdraw event
+// Layout: dcaKey(32) + inAmount(8) + outAmount(8) + userWithdraw(1) = 49
+func ParseJupiterDCAWithdrawEvent(data []byte) (*JupiterDCAWithdrawEvent, error) {
+	if len(data) < 49 {
+		return nil, ErrInsufficientData
+	}
+	return &JupiterDCAWithdrawEvent{
+		DCAKey:       base58.Encode(data[0:32]),
+		InAmount:     new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[32:40])),
+		OutAmount:    new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[40:48])),
+		UserWithdraw: data[48] != 0,
+	}, nil
+}
+
+// JupiterDCADepositEvent is a DCA Deposit event: input tokens the user added
+// to a DCA
+type JupiterDCADepositEvent struct {
+	DCAKey string
+	Amount *big.Int
+}
+
+// ParseJupiterDCADepositEvent parses a DCA Deposit event
+// Layout: dcaKey(32) + amount(8) = 40
+func ParseJupiterDCADepositEvent(data []byte) (*JupiterDCADepositEvent, error) {
+	if len(data) < 40 {
+		return nil, ErrInsufficientData
+	}
+	return &JupiterDCADepositEvent{
+		DCAKey: base58.Encode(data[0:32]),
+		Amount: new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[32:40])),
+	}, nil
+}
+
 // JupiterLimitOrderV2TradeLayout represents Jupiter Limit Order V2 trade event
 type JupiterLimitOrderV2TradeLayout struct {
 	OrderKey           [32]byte
