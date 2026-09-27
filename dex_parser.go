@@ -103,6 +103,9 @@ func (dp *DexParser) registerDefaultParsers() {
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.JUPITER_VA.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
 		return jupiter.NewJupiterVAParser(a, d, t, c)
 	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return jupiter.NewJupiterLimitOrderParser(a, d, t, c)
+	}
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
 		return jupiter.NewJupiterLimitOrderV2Parser(a, d, t, c)
 	}
@@ -483,6 +486,7 @@ var jupiterOrderProgramIds = []string{
 	constants.DEX_PROGRAMS.JUPITER_DCA.ID,
 	constants.DEX_PROGRAMS.JUPITER_VA.ID,
 	constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID,
+	constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER.ID, // Limit v1 (legacy), flash fills
 }
 
 // jupiterProgramIds lists the Jupiter programs whose trade parsers are

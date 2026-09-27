@@ -21,6 +21,7 @@ import (
 const (
 	jupV6ID     = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 	jupDCAID    = "DCA265Vj8a9CEuX1eb1LWRnDT7uK6q1xMipnNyatn23M"
+	jupLimit1ID = "jupoNjAxXgZ4rjzxzPMP4oxduvQsQtZzyknqvzYNrNu"
 	jupLimit2ID = "j1o2qRpjcyUwEvwtcfhEQefh773ZgjxcVRry7LDqg5X"
 	jupVAID     = "VALaaymxQh2mNy2trH9jUqHT1mTow76wpTcGmSWSwJe"
 	jupZID      = "61DFfeTKM7trxYcPQCM78bJ794ddZprZpAwAnLiwTpYH"

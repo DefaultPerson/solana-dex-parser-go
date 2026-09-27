@@ -2,6 +2,7 @@ package jupiter
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -29,9 +30,143 @@ func NewJupiterLimitOrderParser(
 	}
 }
 
-// ProcessTrades returns empty trades for limit order V1 (no immediate trades)
+// limitV1PreFlashFillOrder is the discriminator of the Limit Order v1
+// pre_flash_fill_order instruction (global:pre_flash_fill_order, v1 IDL)
+var limitV1PreFlashFillOrder = []byte{240, 47, 153, 68, 13, 190, 225, 42}
+
+// ProcessTrades parses Limit Order v1 fills (flash_fill_order; legacy: the
+// program no longer fills orders, the parser serves historical transactions).
+// The user is the order's maker: the maker sold the making_amount of the input
+// mint that the paired pre_flash_fill_order took from the order's reserve, and
+// received the output the fill paid to the maker's output account, after the
+// program fee (the Fee). The v1 TradeEvent is only logged ("Program data"), so
+// the amounts come from the instructions and their transfers.
 func (p *JupiterLimitOrderParser) ProcessTrades() []types.TradeInfo {
-	return []types.TradeInfo{}
+	var trades []types.TradeInfo
+	for _, ci := range p.ClassifiedInstructions {
+		if ci.ProgramId != constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER.ID {
+			continue
+		}
+		data := p.Adapter.GetInstructionData(ci.Instruction)
+		if len(data) >= 8 && bytes.Equal(data[:8], constants.DISCRIMINATORS.JUPITER_LIMIT_ORDER.FLASH_FILL_ORDER) {
+			if trade := p.parseFlashFill(ci); trade != nil {
+				trades = append(trades, *trade)
+			}
+		}
+	}
+	return trades
+}
+
+// parseFlashFill parses a flash_fill_order. Accounts per the v1 IDL: order,
+// reserve, maker, taker, maker_output_account, taker_input_account,
+// fee_authority, program_fee_account, referral, input_mint,
+// input_mint_token_program, output_mint, ...
+func (p *JupiterLimitOrderParser) parseFlashFill(ci types.ClassifiedInstruction) *types.TradeInfo {
+	accounts := p.Adapter.GetInstructionAccounts(ci.Instruction)
+	if len(accounts) < 12 {
+		return nil
+	}
+	order, maker, makerOutput, feeAccount := accounts[0], accounts[2], accounts[4], accounts[7]
+	inputMint, outputMint := accounts[9], accounts[11]
+
+	making := p.preFlashFillMaking(order, ci)
+	if making == nil {
+		return nil
+	}
+
+	// The fill pays the maker (maker_output_account, or the maker itself for
+	// native SOL) and the program fee account in the output mint
+	var received, fee *big.Int
+	add := func(sum *big.Int, amount string) *big.Int {
+		v, ok := new(big.Int).SetString(amount, 10)
+		if !ok {
+			return sum
+		}
+		if sum == nil {
+			return v
+		}
+		return sum.Add(sum, v)
+	}
+	for _, t := range p.GetTransfersForInstruction(ci.ProgramId, ci.OuterIndex, ci.InnerIndex, nil) {
+		if t.Info.Mint != outputMint {
+			continue
+		}
+		switch t.Info.Destination {
+		case makerOutput, maker:
+			received = add(received, t.Info.TokenAmount.Amount)
+		case feeAccount:
+			fee = add(fee, t.Info.TokenAmount.Amount)
+		}
+	}
+	if received == nil {
+		return nil
+	}
+
+	inputDecimals := p.Adapter.GetTokenDecimals(inputMint)
+	outputDecimals := p.Adapter.GetTokenDecimals(outputMint)
+	trade := &types.TradeInfo{
+		Type: utils.GetTradeType(inputMint, outputMint),
+		InputToken: types.TokenInfo{
+			Mint:      inputMint,
+			Amount:    types.ConvertToUIAmount(making, inputDecimals),
+			AmountRaw: making.String(),
+			Decimals:  inputDecimals,
+		},
+		OutputToken: types.TokenInfo{
+			Mint:      outputMint,
+			Amount:    types.ConvertToUIAmount(received, outputDecimals),
+			AmountRaw: received.String(),
+			Decimals:  outputDecimals,
+		},
+		User:      maker,
+		ProgramId: constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER.ID,
+		AMM:       p.getAMM(),
+		Route:     p.DexInfo.Route,
+		Slot:      p.Adapter.Slot(),
+		Timestamp: p.Adapter.BlockTime(),
+		Signature: p.Adapter.Signature(),
+		Idx:       utils.FormatIdx(ci.OuterIndex, ci.InnerIndex),
+	}
+	if fee != nil && fee.Sign() > 0 {
+		trade.Fee = &types.FeeInfo{
+			Mint:      outputMint,
+			Amount:    types.ConvertToUIAmount(fee, outputDecimals),
+			AmountRaw: fee.String(),
+			Decimals:  outputDecimals,
+			Dex:       constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER.Name,
+			Type:      "protocol",
+			Recipient: feeAccount,
+		}
+	}
+	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
+}
+
+// preFlashFillMaking returns the making_amount argument of the last
+// pre_flash_fill_order of order before the flash fill ci, or nil
+func (p *JupiterLimitOrderParser) preFlashFillMaking(order string, ci types.ClassifiedInstruction) *big.Int {
+	fillIdx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+	var making *big.Int
+	for _, pre := range p.ClassifiedInstructions {
+		if pre.ProgramId != ci.ProgramId || utils.CompareIdx(utils.FormatIdx(pre.OuterIndex, pre.InnerIndex), fillIdx) >= 0 {
+			continue
+		}
+		data := p.Adapter.GetInstructionData(pre.Instruction)
+		accounts := p.Adapter.GetInstructionAccounts(pre.Instruction)
+		if len(data) < 16 || !bytes.Equal(data[:8], limitV1PreFlashFillOrder) || len(accounts) == 0 || accounts[0] != order {
+			continue
+		}
+		making = new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[8:16]))
+	}
+	return making
+}
+
+// getAMM returns the first AMM (in execution order) that moved tokens, i.e.
+// the venue of the keeper's route, else the program name
+func (p *JupiterLimitOrderParser) getAMM() string {
+	if amms := utils.GetAMMs(utils.SortedTransferKeys(p.TransferActions)); len(amms) > 0 {
+		return amms[0]
+	}
+	return constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER.Name
 }
 
 // ProcessTransfers parses limit order transfer operations
