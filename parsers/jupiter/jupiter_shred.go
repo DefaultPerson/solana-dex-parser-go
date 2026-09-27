@@ -2,7 +2,7 @@ package jupiter
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
@@ -27,133 +27,122 @@ func NewJupiterShredParser(adapter *adapter.TransactionAdapter, classifier *clas
 
 // ProcessInstructions processes Jupiter instructions and returns parsed results
 func (p *JupiterShredParser) ProcessInstructions() []interface{} {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.JUPITER.ID)
-	return p.parseInstructions(instructions)
+	events, _ := p.ProcessAll()
+	return events
 }
 
 // ProcessTypedInstructions returns typed ParsedShredInstruction results
 func (p *JupiterShredParser) ProcessTypedInstructions() []types.ParsedShredInstruction {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.JUPITER.ID)
-	return p.parseTypedInstructions(instructions)
+	_, typed := p.ProcessAll()
+	return typed
 }
 
-func (p *JupiterShredParser) parseInstructions(instructions []types.ClassifiedInstruction) []interface{} {
+// jupiterRoute describes the argument and account layout of a route instruction
+type jupiterRoute struct {
+	name string
+	// shared routes start with an id u8
+	shared bool
+	// v2 routes put the amounts at the head of the arguments, v1 routes at the tail
+	v2 bool
+	// exactOut: the first amount is the exact output, the second the quoted input
+	exactOut bool
+	// tokenLedger: the input amount is read from the token ledger at execution
+	tokenLedger bool
+	// account indexes; sourceMint < 0 means the instruction has no source mint
+	// account and the mint is resolved from the source token account
+	user, sourceAccount, destinationAccount, sourceMint, destinationMint int
+}
+
+func (r jupiterRoute) minAccounts() int {
+	n := r.user
+	for _, i := range []int{r.sourceAccount, r.destinationAccount, r.sourceMint, r.destinationMint} {
+		if i > n {
+			n = i
+		}
+	}
+	return n + 1
+}
+
+// jupiterRouteFor returns the layout of a route instruction (on-chain JUP6 IDL)
+func jupiterRouteFor(disc []byte) (jupiterRoute, bool) {
+	d := constants.DISCRIMINATORS.JUPITER
+	switch {
+	case bytes.Equal(disc, d.ROUTE):
+		return jupiterRoute{name: "route", user: 1, sourceAccount: 2, destinationAccount: 3, sourceMint: -1, destinationMint: 5}, true
+	case bytes.Equal(disc, d.ROUTE_WITH_TOKEN_LEDGER):
+		return jupiterRoute{name: "route_with_token_ledger", tokenLedger: true, user: 1, sourceAccount: 2, destinationAccount: 3, sourceMint: -1, destinationMint: 5}, true
+	case bytes.Equal(disc, d.ROUTE_EXACT_OUT):
+		return jupiterRoute{name: "route_exact_out", exactOut: true, user: 1, sourceAccount: 2, destinationAccount: 3, sourceMint: 5, destinationMint: 6}, true
+	case bytes.Equal(disc, d.SHARE_ACCOUNTS_ROUTE):
+		return jupiterRoute{name: "shared_accounts_route", shared: true, user: 2, sourceAccount: 3, destinationAccount: 6, sourceMint: 7, destinationMint: 8}, true
+	case bytes.Equal(disc, d.SHARE_ACCOUNTS_EXACT_OUT_ROUTE):
+		return jupiterRoute{name: "shared_accounts_exact_out_route", shared: true, exactOut: true, user: 2, sourceAccount: 3, destinationAccount: 6, sourceMint: 7, destinationMint: 8}, true
+	case bytes.Equal(disc, d.SHARE_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER):
+		return jupiterRoute{name: "shared_accounts_route_with_token_ledger", shared: true, tokenLedger: true, user: 2, sourceAccount: 3, destinationAccount: 6, sourceMint: 7, destinationMint: 8}, true
+	case bytes.Equal(disc, d.ROUTE_V2):
+		return jupiterRoute{name: "route_v2", v2: true, user: 0, sourceAccount: 1, destinationAccount: 2, sourceMint: 3, destinationMint: 4}, true
+	case bytes.Equal(disc, d.EXACT_OUT_ROUTE_V2):
+		return jupiterRoute{name: "exact_out_route_v2", v2: true, exactOut: true, user: 0, sourceAccount: 1, destinationAccount: 2, sourceMint: 3, destinationMint: 4}, true
+	case bytes.Equal(disc, d.SHARED_ACCOUNTS_ROUTE_V2):
+		return jupiterRoute{name: "shared_accounts_route_v2", v2: true, shared: true, user: 1, sourceAccount: 2, destinationAccount: 5, sourceMint: 6, destinationMint: 7}, true
+	case bytes.Equal(disc, d.SHARED_ACCOUNTS_EXACT_OUT_ROUTE_V2):
+		return jupiterRoute{name: "shared_accounts_exact_out_route_v2", v2: true, shared: true, exactOut: true, user: 1, sourceAccount: 2, destinationAccount: 5, sourceMint: 6, destinationMint: 7}, true
+	}
+	return jupiterRoute{}, false
+}
+
+// ProcessAll decodes the Jupiter route instructions into legacy events and
+// typed trades in a single pass
+func (p *JupiterShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
 	var events []interface{}
+	var typed []types.ParsedShredInstruction
 
-	for _, ci := range instructions {
+	for _, ci := range p.classifier.GetInstructions(constants.DEX_PROGRAMS.JUPITER.ID) {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 8 {
 			continue
 		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
+		route, ok := jupiterRouteFor(data[:8])
+		if !ok {
+			continue
 		}
-
-		var eventType string
-		var eventData interface{}
-
-		payload := data[8:]
-
-		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.SHARE_ACCOUNTS_ROUTE):
-			eventType = "shared_accounts_route"
-			eventData = p.decodeShareAccountsRoute(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.SHARE_ACCOUNTS_EXACT_OUT_ROUTE):
-			eventType = "shared_accounts_exact_out_route"
-			eventData = p.decodeShareAccountsRoute(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.SHARE_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER):
-			eventType = "shared_accounts_route_with_token_ledger"
-			eventData = p.decodeShareAccountsRouteWithTokenLedger(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.ROUTE):
-			eventType = "route"
-			eventData = p.decodeRoute(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.ROUTE_EXACT_OUT):
-			eventType = "route_exact_out"
-			eventData = p.decodeRouteExactOut(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.ROUTE_WITH_TOKEN_LEDGER):
-			eventType = "route_with_token_ledger"
-			eventData = p.decodeRouteWithTokenLedger(ci.Instruction, payload)
-		default:
+		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+		routeData := p.decodeRoute(route, accounts, data[8:])
+		if routeData == nil {
 			continue
 		}
 
-		if eventData != nil {
-			event := &JupiterShredInstruction{
-				Type:      eventType,
-				Data:      eventData,
-				Slot:      p.adapter.Slot(),
-				Timestamp: p.adapter.BlockTime(),
-				Signature: p.adapter.Signature(),
-				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
-				Signer:    p.adapter.Signers(),
-			}
-			events = append(events, event)
+		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+		events = append(events, &JupiterShredInstruction{
+			Type:      route.name,
+			Data:      routeData,
+			Slot:      p.adapter.Slot(),
+			Timestamp: p.adapter.BlockTime(),
+			Signature: p.adapter.Signature(),
+			Idx:       idx,
+			Signer:    p.adapter.Signers(),
+		})
+
+		inKind, outKind := types.ShredAmountExact, types.ShredAmountQuote
+		if route.exactOut {
+			inKind, outKind = types.ShredAmountQuote, types.ShredAmountExact
 		}
+		if route.tokenLedger {
+			inKind = types.ShredAmountUnknown
+		}
+		typed = append(typed, types.ParsedShredInstruction{
+			ProgramID:        constants.DEX_PROGRAMS.JUPITER.ID,
+			ProgramName:      constants.DEX_PROGRAMS.JUPITER.Name,
+			Action:           route.name,
+			Trade:            p.buildTradeInfo(routeData),
+			Accounts:         accounts,
+			Idx:              idx,
+			InputAmountKind:  inKind,
+			OutputAmountKind: outKind,
+		})
 	}
 
-	return events
-}
-
-func (p *JupiterShredParser) parseTypedInstructions(instructions []types.ClassifiedInstruction) []types.ParsedShredInstruction {
-	var events []types.ParsedShredInstruction
-
-	for _, ci := range instructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 8 {
-			continue
-		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
-		var eventType string
-		var trade *types.TradeInfo
-
-		payload := data[8:]
-
-		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.SHARE_ACCOUNTS_ROUTE):
-			eventType = "shared_accounts_route"
-			trade = p.decodeShareAccountsRouteTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.SHARE_ACCOUNTS_EXACT_OUT_ROUTE):
-			eventType = "shared_accounts_exact_out_route"
-			trade = p.decodeShareAccountsRouteTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.SHARE_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER):
-			eventType = "shared_accounts_route_with_token_ledger"
-			trade = p.decodeShareAccountsRouteWithTokenLedgerTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.ROUTE):
-			eventType = "route"
-			trade = p.decodeRouteTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.ROUTE_EXACT_OUT):
-			eventType = "route_exact_out"
-			trade = p.decodeRouteExactOutTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.JUPITER.ROUTE_WITH_TOKEN_LEDGER):
-			eventType = "route_with_token_ledger"
-			trade = p.decodeRouteWithTokenLedgerTrade(ci.Instruction, payload)
-		default:
-			continue
-		}
-
-		if trade != nil {
-			event := types.ParsedShredInstruction{
-				ProgramID:   constants.DEX_PROGRAMS.JUPITER.ID,
-				ProgramName: constants.DEX_PROGRAMS.JUPITER.Name,
-				Action:      eventType,
-				Trade:       trade,
-				Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
-				Idx:         utils.FormatIdx(ci.OuterIndex, innerIdx),
-			}
-			events = append(events, event)
-		}
-	}
-
-	return events
+	return events, typed
 }
 
 // JupiterShredInstruction represents a parsed Jupiter instruction
@@ -167,7 +156,19 @@ type JupiterShredInstruction struct {
 	Signer    []string    `json:"signer"`
 }
 
-// JupiterRouteData contains Jupiter route instruction data
+// JupiterRouteData contains Jupiter route instruction data. The amounts are
+// instruction arguments, not executed amounts: for exact-in routes
+// InputAmount is the exact in_amount and OutputAmount the quoted_out_amount
+// (the router's quote; the minimum output follows from SlippageBps); for
+// exact-out routes (ExactOut) OutputAmount is the exact out_amount and
+// InputAmount the quoted_in_amount (the maximum input follows from
+// SlippageBps). Token-ledger routes read the input amount from the token
+// ledger at execution, so InputAmount is 0.
+//
+// InputMint is empty when it cannot be determined: route and
+// route_with_token_ledger name only the source token account, whose mint is
+// known only when the transaction reveals it (token balances, instructions);
+// mints loaded from an unresolved address lookup table are empty too.
 type JupiterRouteData struct {
 	User         string `json:"user"`
 	InputMint    string `json:"inputMint"`
@@ -175,242 +176,157 @@ type JupiterRouteData struct {
 	InputAmount  uint64 `json:"inputAmount"`
 	OutputAmount uint64 `json:"outputAmount"`
 	SlippageBps  uint16 `json:"slippageBps"`
+	// PlatformFeeBps is the platform fee argument (u8 in v1 routes, u16 in v2)
+	PlatformFeeBps uint16 `json:"platformFeeBps"`
+	// PositiveSlippageBps is the v2 positive_slippage_bps argument
+	PositiveSlippageBps uint16 `json:"positiveSlippageBps,omitempty"`
+	// ExactOut is true for the exact-out routes
+	ExactOut bool `json:"exactOut,omitempty"`
+	// InputTokenAccount and OutputTokenAccount are the user's source and
+	// destination token accounts
+	InputTokenAccount  string `json:"inputTokenAccount,omitempty"`
+	OutputTokenAccount string `json:"outputTokenAccount,omitempty"`
 }
 
-func (p *JupiterShredParser) decodeShareAccountsRoute(instruction interface{}, data []byte) *JupiterRouteData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 9 {
+// decodeRoute decodes the amounts and accounts of a route instruction.
+// v1 routes end with (in u64, out u64, slippage_bps u16, platform_fee_bps u8)
+// after the route plan, token-ledger routes with (quoted_out u64,
+// slippage_bps u16, platform_fee_bps u8); v2 routes start with (in u64,
+// out u64, slippage_bps u16, platform_fee_bps u16, positive_slippage_bps u16)
+// followed by the route plan. Shared routes have an id u8 first.
+func (p *JupiterShredParser) decodeRoute(route jupiterRoute, accounts []string, data []byte) *JupiterRouteData {
+	if len(accounts) < route.minAccounts() {
 		return nil
 	}
 
-	// Skip RoutePlan Vec to read amounts from the end (last 19 bytes: u64 + u64 + u16 + 1 padding)
-	if len(data) < 19 {
-		return nil
+	var first, second uint64
+	var slippageBps, platformFeeBps, positiveSlippageBps uint16
+
+	switch {
+	case route.v2:
+		reader := utils.GetBinaryReader(data)
+		defer reader.Release()
+		if route.shared {
+			reader.Skip(1)
+		}
+		first, _ = reader.ReadU64()
+		second, _ = reader.ReadU64()
+		slippageBps, _ = reader.ReadU16()
+		platformFeeBps, _ = reader.ReadU16()
+		positiveSlippageBps, _ = reader.ReadU16()
+		if _, err := reader.ReadU32(); err != nil { // route plan length
+			return nil
+		}
+	case route.tokenLedger:
+		const tail = 8 + 2 + 1
+		if len(data) < tail+4 {
+			return nil
+		}
+		reader := utils.GetBinaryReader(data[len(data)-tail:])
+		defer reader.Release()
+		second, _ = reader.ReadU64()
+		slippageBps, _ = reader.ReadU16()
+		fee, _ := reader.ReadU8()
+		platformFeeBps = uint16(fee)
+		if reader.HasError() {
+			return nil
+		}
+	default:
+		const tail = 8 + 8 + 2 + 1
+		if len(data) < tail+4 {
+			return nil
+		}
+		reader := utils.GetBinaryReader(data[len(data)-tail:])
+		defer reader.Release()
+		first, _ = reader.ReadU64()
+		second, _ = reader.ReadU64()
+		slippageBps, _ = reader.ReadU16()
+		fee, _ := reader.ReadU8()
+		platformFeeBps = uint16(fee)
+		if reader.HasError() {
+			return nil
+		}
 	}
 
-	reader := utils.GetBinaryReader(data[len(data)-18:])
-	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU16()
-
-	if reader.HasError() {
-		return nil
+	routeData := &JupiterRouteData{
+		User:                accounts[route.user],
+		InputTokenAccount:   accounts[route.sourceAccount],
+		OutputTokenAccount:  accounts[route.destinationAccount],
+		OutputMint:          accounts[route.destinationMint],
+		SlippageBps:         slippageBps,
+		PlatformFeeBps:      platformFeeBps,
+		PositiveSlippageBps: positiveSlippageBps,
+		ExactOut:            route.exactOut,
 	}
-
-	return &JupiterRouteData{
-		User:         accounts[2],
-		InputMint:    accounts[7],
-		OutputMint:   accounts[8],
-		InputAmount:  inputAmount,
-		OutputAmount: outputAmount,
-		SlippageBps:  slippageBps,
+	if route.sourceMint >= 0 {
+		routeData.InputMint = accounts[route.sourceMint]
+	} else {
+		routeData.InputMint = p.tokenAccountMint(routeData.InputTokenAccount)
 	}
+	if route.exactOut {
+		routeData.OutputAmount, routeData.InputAmount = first, second
+	} else {
+		routeData.InputAmount, routeData.OutputAmount = first, second
+	}
+	return routeData
 }
 
-func (p *JupiterShredParser) decodeShareAccountsRouteTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	routeData := p.decodeShareAccountsRoute(instruction, data)
-	if routeData == nil {
-		return nil
+// tokenAccountMint returns the mint of a token account when the transaction
+// reveals it, "" otherwise (never a guess)
+func (p *JupiterShredParser) tokenAccountMint(account string) string {
+	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
+		return ""
 	}
-	return p.buildTradeInfo(routeData)
+	return p.adapter.GetSplTokenMint(account)
 }
 
-func (p *JupiterShredParser) decodeShareAccountsRouteWithTokenLedger(instruction interface{}, data []byte) *JupiterRouteData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 9 {
-		return nil
+// decimals returns the decimals of mint when known, 0 (unknown) otherwise
+func (p *JupiterShredParser) decimals(mint string) uint8 {
+	if mint == "" {
+		return 0
 	}
-
-	// Cannot get input amount for token ledger variants
-	if len(data) < 11 {
-		return nil
+	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
+		return d
 	}
-
-	reader := utils.GetBinaryReader(data[len(data)-10:])
-	defer reader.Release()
-
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU16()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &JupiterRouteData{
-		User:         accounts[2],
-		InputMint:    accounts[7],
-		OutputMint:   accounts[8],
-		InputAmount:  0, // Cannot get input amount for token ledger variants
-		OutputAmount: outputAmount,
-		SlippageBps:  slippageBps,
-	}
+	return constants.TOKEN_DECIMALS[mint]
 }
 
-func (p *JupiterShredParser) decodeShareAccountsRouteWithTokenLedgerTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	routeData := p.decodeShareAccountsRouteWithTokenLedger(instruction, data)
-	if routeData == nil {
-		return nil
+// shredTradeType is utils.GetTradeType for mints that may be unknown (""):
+// the direction is SWAP unless a known side is SOL or a stablecoin
+func shredTradeType(inMint, outMint string) types.TradeType {
+	if inMint != "" && outMint != "" {
+		return utils.GetTradeType(inMint, outMint)
 	}
-	return p.buildTradeInfo(routeData)
-}
-
-func (p *JupiterShredParser) decodeRoute(instruction interface{}, data []byte) *JupiterRouteData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 6 {
-		return nil
+	if constants.IsQuoteToken(inMint) {
+		return types.TradeTypeBuy
 	}
-
-	if len(data) < 19 {
-		return nil
+	if constants.IsQuoteToken(outMint) {
+		return types.TradeTypeSell
 	}
-
-	reader := utils.GetBinaryReader(data[len(data)-18:])
-	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU16()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	inputMint := accounts[2]
-	outputMint := accounts[5]
-
-	// For route instruction, accounts[2] is userTokenAccount, need to resolve to mint
-	// For now, use SOL as default if we can't resolve
-	if inputMint == "" {
-		inputMint = constants.TOKENS.SOL
-	}
-
-	return &JupiterRouteData{
-		User:         accounts[1],
-		InputMint:    inputMint,
-		OutputMint:   outputMint,
-		InputAmount:  inputAmount,
-		OutputAmount: outputAmount,
-		SlippageBps:  slippageBps,
-	}
-}
-
-func (p *JupiterShredParser) decodeRouteTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	routeData := p.decodeRoute(instruction, data)
-	if routeData == nil {
-		return nil
-	}
-	return p.buildTradeInfo(routeData)
-}
-
-func (p *JupiterShredParser) decodeRouteExactOut(instruction interface{}, data []byte) *JupiterRouteData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 7 {
-		return nil
-	}
-
-	if len(data) < 19 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data[len(data)-18:])
-	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU16()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &JupiterRouteData{
-		User:         accounts[1],
-		InputMint:    accounts[5],
-		OutputMint:   accounts[6],
-		InputAmount:  inputAmount,
-		OutputAmount: outputAmount,
-		SlippageBps:  slippageBps,
-	}
-}
-
-func (p *JupiterShredParser) decodeRouteExactOutTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	routeData := p.decodeRouteExactOut(instruction, data)
-	if routeData == nil {
-		return nil
-	}
-	return p.buildTradeInfo(routeData)
-}
-
-func (p *JupiterShredParser) decodeRouteWithTokenLedger(instruction interface{}, data []byte) *JupiterRouteData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 6 {
-		return nil
-	}
-
-	if len(data) < 11 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data[len(data)-10:])
-	defer reader.Release()
-
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU16()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	inputMint := accounts[2]
-	if inputMint == "" {
-		inputMint = constants.TOKENS.SOL
-	}
-
-	return &JupiterRouteData{
-		User:         accounts[1],
-		InputMint:    inputMint,
-		OutputMint:   accounts[5],
-		InputAmount:  0, // Cannot get input amount for token ledger variants
-		OutputAmount: outputAmount,
-		SlippageBps:  slippageBps,
-	}
-}
-
-func (p *JupiterShredParser) decodeRouteWithTokenLedgerTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	routeData := p.decodeRouteWithTokenLedger(instruction, data)
-	if routeData == nil {
-		return nil
-	}
-	return p.buildTradeInfo(routeData)
+	return types.TradeTypeSwap
 }
 
 func (p *JupiterShredParser) buildTradeInfo(data *JupiterRouteData) *types.TradeInfo {
-	tradeType := utils.GetTradeType(data.InputMint, data.OutputMint)
-
-	var inputDecimal, outputDecimal uint8 = 9, 6
-	if tradeType == types.TradeTypeSell {
-		inputDecimal, outputDecimal = 6, 9
-	}
-
 	slippageBps := int(data.SlippageBps)
+	inDecimals, outDecimals := p.decimals(data.InputMint), p.decimals(data.OutputMint)
 
 	return &types.TradeInfo{
-		Type: tradeType,
+		Type: shredTradeType(data.InputMint, data.OutputMint),
 		Pool: []string{},
 		User: data.User,
 		InputToken: types.TokenInfo{
 			Mint:      data.InputMint,
-			Amount:    types.ConvertToUIAmountUint64(data.InputAmount, inputDecimal),
-			AmountRaw: fmt.Sprintf("%d", data.InputAmount),
-			Decimals:  inputDecimal,
+			Amount:    types.ConvertToUIAmountUint64(data.InputAmount, inDecimals),
+			AmountRaw: strconv.FormatUint(data.InputAmount, 10),
+			Decimals:  inDecimals,
+			Source:    data.InputTokenAccount,
 		},
 		OutputToken: types.TokenInfo{
-			Mint:      data.OutputMint,
-			Amount:    types.ConvertToUIAmountUint64(data.OutputAmount, outputDecimal),
-			AmountRaw: fmt.Sprintf("%d", data.OutputAmount),
-			Decimals:  outputDecimal,
+			Mint:        data.OutputMint,
+			Amount:      types.ConvertToUIAmountUint64(data.OutputAmount, outDecimals),
+			AmountRaw:   strconv.FormatUint(data.OutputAmount, 10),
+			Decimals:    outDecimals,
+			Destination: data.OutputTokenAccount,
 		},
 		ProgramId:   constants.DEX_PROGRAMS.JUPITER.ID,
 		AMMs:        []string{},
