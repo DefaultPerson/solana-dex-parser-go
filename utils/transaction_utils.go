@@ -426,6 +426,26 @@ func (tu *TransactionUtils) instructionGroup(idx string) (outer, first, last int
 	return outer, first, last, last >= first
 }
 
+// CPIGroupTransfers returns the SPL Token and Token-2022 transfers made
+// inside the instruction ci (its CPI group, see CPIGroup), in execution order,
+// whatever program the transfer grouping put them under
+func (tu *TransactionUtils) CPIGroupTransfers(transferActions map[string][]types.TransferData, ci types.ClassifiedInstruction) []types.TransferData {
+	first, last := CPIGroup(tu.adapter, ci)
+	if last < first {
+		return nil
+	}
+	var result []types.TransferData
+	for _, t := range SortedTransfers(transferActions) {
+		if t.ProgramId == constants.SYSTEM_PROGRAM_ID || (t.Type != "transfer" && t.Type != "transferChecked") {
+			continue
+		}
+		if outer, inner := SplitIdx(t.Idx); outer == ci.OuterIndex && inner >= first && inner <= last {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 // AttachTokenTransferInfo attaches token transfer info to trade. The input and
 // output transfers are the first transfers, in execution order, whose mint and
 // amount match the trade: first among the transfers made inside the trade's
