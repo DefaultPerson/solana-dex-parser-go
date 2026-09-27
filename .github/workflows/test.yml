@@ -12,7 +12,13 @@ permissions:
 
 jobs:
   test:
+    name: test (go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.22 is the floor declared in go.mod
+        go: ['1.22', 'oldstable', 'stable']
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -20,7 +26,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22'
+          go-version: ${{ matrix.go }}
           cache: false  # Disabled to avoid tar errors on cache restore
 
       - name: Download dependencies
@@ -30,4 +36,35 @@ jobs:
         run: go build ./...
 
       - name: Run tests
-        run: go test ./... -v -race
+        run: go test ./... -race -count=1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Files not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # staticcheck 2026.2.1; bump together with the Go release it supports
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
