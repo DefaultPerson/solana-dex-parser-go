@@ -30,9 +30,9 @@ type DexInfo struct {
 
 // TokenAmount represents a standard token amount format
 type TokenAmount struct {
-	Amount   string   `json:"amount"`           // Raw token amount
-	UIAmount *float64 `json:"uiAmount"`         // Human-readable amount (can be null)
-	Decimals uint8    `json:"decimals"`         // Token decimals
+	Amount   string   `json:"amount"`   // Raw token amount
+	UIAmount *float64 `json:"uiAmount"` // Human-readable amount (can be null)
+	Decimals uint8    `json:"decimals"` // Token decimals
 }
 
 // TokenInfo contains token information including balances and accounts
@@ -79,12 +79,12 @@ type TransferDataInfo struct {
 
 // TransferData contains detailed transfer data including account information
 type TransferData struct {
-	Type      string           `json:"type"`      // Transfer instruction type
-	ProgramId string           `json:"programId"` // Token program ID
-	Info      TransferDataInfo `json:"info"`      // Transfer details
-	Idx       string           `json:"idx"`       // Instruction index
-	Timestamp int64            `json:"timestamp"` // Unix timestamp
-	Signature string           `json:"signature"` // Transaction signature
+	Type      string           `json:"type"`            // Transfer instruction type
+	ProgramId string           `json:"programId"`       // Token program ID
+	Info      TransferDataInfo `json:"info"`            // Transfer details
+	Idx       string           `json:"idx"`             // Instruction index
+	Timestamp int64            `json:"timestamp"`       // Unix timestamp
+	Signature string           `json:"signature"`       // Transaction signature
 	IsFee     bool             `json:"isFee,omitempty"` // Whether it's a fee transfer
 }
 

@@ -10,38 +10,38 @@ type DexProgram struct {
 // DEX_PROGRAMS contains all supported DEX program configurations
 var DEX_PROGRAMS = struct {
 	// DEX Aggregators
-	JUPITER              DexProgram
-	JUPITER_V2           DexProgram
-	JUPITER_V4           DexProgram
-	JUPITER_DCA          DexProgram
-	JUPITER_DCA_KEEPER1  DexProgram
-	JUPITER_DCA_KEEPER2  DexProgram
-	JUPITER_DCA_KEEPER3  DexProgram
-	JUPITER_LIMIT_ORDER  DexProgram
+	JUPITER                DexProgram
+	JUPITER_V2             DexProgram
+	JUPITER_V4             DexProgram
+	JUPITER_DCA            DexProgram
+	JUPITER_DCA_KEEPER1    DexProgram
+	JUPITER_DCA_KEEPER2    DexProgram
+	JUPITER_DCA_KEEPER3    DexProgram
+	JUPITER_LIMIT_ORDER    DexProgram
 	JUPITER_LIMIT_ORDER_V2 DexProgram
-	JUPITER_VA           DexProgram
-	OKX_DEX              DexProgram
-	OKX_ROUTER           DexProgram
-	RAYDIUM_ROUTE        DexProgram
-	SANCTUM              DexProgram
-	PHOTON               DexProgram
+	JUPITER_VA             DexProgram
+	OKX_DEX                DexProgram
+	OKX_ROUTER             DexProgram
+	RAYDIUM_ROUTE          DexProgram
+	SANCTUM                DexProgram
+	PHOTON                 DexProgram
 
 	// Major DEX Protocols
-	RAYDIUM_V4    DexProgram
-	RAYDIUM_AMM   DexProgram
-	RAYDIUM_CPMM  DexProgram
-	RAYDIUM_CL    DexProgram
-	RAYDIUM_LCP   DexProgram
-	ORCA          DexProgram
-	ORCA_V2       DexProgram
-	ORCA_V1       DexProgram
-	PHOENIX       DexProgram
-	OPENBOOK      DexProgram
-	METEORA       DexProgram
-	METEORA_DAMM  DexProgram
+	RAYDIUM_V4      DexProgram
+	RAYDIUM_AMM     DexProgram
+	RAYDIUM_CPMM    DexProgram
+	RAYDIUM_CL      DexProgram
+	RAYDIUM_LCP     DexProgram
+	ORCA            DexProgram
+	ORCA_V2         DexProgram
+	ORCA_V1         DexProgram
+	PHOENIX         DexProgram
+	OPENBOOK        DexProgram
+	METEORA         DexProgram
+	METEORA_DAMM    DexProgram
 	METEORA_DAMM_V2 DexProgram
-	METEORA_DBC   DexProgram
-	SERUM_V3      DexProgram
+	METEORA_DBC     DexProgram
+	SERUM_V3        DexProgram
 
 	// Vault Programs
 	METEORA_VAULT DexProgram
@@ -79,9 +79,9 @@ var DEX_PROGRAMS = struct {
 	HEAVEN_VAULT   DexProgram
 
 	// Prop AMM Protocols (Dark Pools)
-	GOONFI    DexProgram
-	OBRIC_V2  DexProgram
-	HUMIDIFI  DexProgram
+	GOONFI   DexProgram
+	OBRIC_V2 DexProgram
+	HUMIDIFI DexProgram
 
 	// Additional Aggregators
 	DFLOW DexProgram

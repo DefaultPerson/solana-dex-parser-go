@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-json"
-	"github.com/joho/godotenv"
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/goccy/go-json"
+	"github.com/joho/godotenv"
 )
 
 func init() {

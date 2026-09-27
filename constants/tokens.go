@@ -27,7 +27,7 @@ var TOKENS = struct {
 
 // TOKEN_DECIMALS maps token addresses to their decimal precision
 var TOKEN_DECIMALS = map[string]uint8{
-	"So11111111111111111111111111111111111111112":   9, // SOL
+	"So11111111111111111111111111111111111111112":  9, // SOL
 	"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6, // USDC
 	"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": 6, // USDT
 	"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB":  6, // USD1

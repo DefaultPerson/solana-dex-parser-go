@@ -2,33 +2,33 @@ package constants
 
 // Discriminator byte slices for instruction identification
 var DISCRIMINATORS = struct {
-	JUPITER            JupiterDiscriminators
-	JUPITER_DCA        JupiterDCADiscriminators
-	JUPITER_LIMIT_ORDER JupiterLimitOrderDiscriminators
+	JUPITER                JupiterDiscriminators
+	JUPITER_DCA            JupiterDCADiscriminators
+	JUPITER_LIMIT_ORDER    JupiterLimitOrderDiscriminators
 	JUPITER_LIMIT_ORDER_V2 JupiterLimitOrderV2Discriminators
-	JUPITER_VA         JupiterVADiscriminators
-	PUMPFUN            PumpfunDiscriminators
-	PUMPSWAP           PumpswapDiscriminators
-	MOONIT             MoonitDiscriminators
-	RAYDIUM            RaydiumDiscriminators
-	RAYDIUM_CL         RaydiumCLDiscriminators
-	RAYDIUM_CPMM       RaydiumCPMMDiscriminators
-	RAYDIUM_LCP        RaydiumLCPDiscriminators
-	METEORA_DLMM       MeteoraDLMMDiscriminators
-	METEORA_DAMM       MeteoraDAMMDiscriminators
-	METEORA_DAMM_V2    MeteoraDAMMV2Discriminators
-	METEORA_DBC        MeteoraDBCDiscriminators
-	ORCA               OrcaDiscriminators
-	BOOPFUN            BoopfunDiscriminators
-	HEAVEN             HeavenDiscriminators
-	METAPLEX           MetaplexDiscriminators
-	SUGAR              SugarDiscriminators
-	PHOTON             PhotonDiscriminators
-	SOLFI              SolFiDiscriminators
-	GOONFI             GoonFiDiscriminators
-	OBRIC              ObricDiscriminators
-	DFLOW              DFlowDiscriminators
-	HUMIDIFI           HumidiFiDiscriminators
+	JUPITER_VA             JupiterVADiscriminators
+	PUMPFUN                PumpfunDiscriminators
+	PUMPSWAP               PumpswapDiscriminators
+	MOONIT                 MoonitDiscriminators
+	RAYDIUM                RaydiumDiscriminators
+	RAYDIUM_CL             RaydiumCLDiscriminators
+	RAYDIUM_CPMM           RaydiumCPMMDiscriminators
+	RAYDIUM_LCP            RaydiumLCPDiscriminators
+	METEORA_DLMM           MeteoraDLMMDiscriminators
+	METEORA_DAMM           MeteoraDAMMDiscriminators
+	METEORA_DAMM_V2        MeteoraDAMMV2Discriminators
+	METEORA_DBC            MeteoraDBCDiscriminators
+	ORCA                   OrcaDiscriminators
+	BOOPFUN                BoopfunDiscriminators
+	HEAVEN                 HeavenDiscriminators
+	METAPLEX               MetaplexDiscriminators
+	SUGAR                  SugarDiscriminators
+	PHOTON                 PhotonDiscriminators
+	SOLFI                  SolFiDiscriminators
+	GOONFI                 GoonFiDiscriminators
+	OBRIC                  ObricDiscriminators
+	DFLOW                  DFlowDiscriminators
+	HUMIDIFI               HumidiFiDiscriminators
 }{
 	JUPITER: JupiterDiscriminators{
 		ROUTE_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 64, 198, 205, 232, 38, 8, 113, 226},
@@ -78,16 +78,16 @@ var DISCRIMINATORS = struct {
 		MIGRATE_EVENT:  []byte{228, 69, 165, 46, 81, 203, 154, 29, 189, 233, 93, 185, 92, 148, 234, 148},
 	},
 	PUMPSWAP: PumpswapDiscriminators{
-		CREATE_POOL:           []byte{233, 146, 209, 142, 207, 104, 64, 188},
-		ADD_LIQUIDITY:         []byte{242, 35, 198, 137, 82, 225, 242, 182},
-		REMOVE_LIQUIDITY:      []byte{183, 18, 70, 156, 148, 109, 161, 34},
-		BUY:                   []byte{102, 6, 61, 18, 1, 218, 235, 234},
-		SELL:                  []byte{51, 230, 133, 164, 1, 127, 131, 173},
-		CREATE_POOL_EVENT:     []byte{228, 69, 165, 46, 81, 203, 154, 29, 177, 49, 12, 210, 160, 118, 167, 116},
-		ADD_LIQUIDITY_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 120, 248, 61, 83, 31, 142, 107, 144},
+		CREATE_POOL:            []byte{233, 146, 209, 142, 207, 104, 64, 188},
+		ADD_LIQUIDITY:          []byte{242, 35, 198, 137, 82, 225, 242, 182},
+		REMOVE_LIQUIDITY:       []byte{183, 18, 70, 156, 148, 109, 161, 34},
+		BUY:                    []byte{102, 6, 61, 18, 1, 218, 235, 234},
+		SELL:                   []byte{51, 230, 133, 164, 1, 127, 131, 173},
+		CREATE_POOL_EVENT:      []byte{228, 69, 165, 46, 81, 203, 154, 29, 177, 49, 12, 210, 160, 118, 167, 116},
+		ADD_LIQUIDITY_EVENT:    []byte{228, 69, 165, 46, 81, 203, 154, 29, 120, 248, 61, 83, 31, 142, 107, 144},
 		REMOVE_LIQUIDITY_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 22, 9, 133, 26, 160, 44, 71, 192},
-		BUY_EVENT:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 103, 244, 82, 31, 44, 245, 119, 119},
-		SELL_EVENT:            []byte{228, 69, 165, 46, 81, 203, 154, 29, 62, 47, 55, 10, 165, 3, 220, 42},
+		BUY_EVENT:              []byte{228, 69, 165, 46, 81, 203, 154, 29, 103, 244, 82, 31, 44, 245, 119, 119},
+		SELL_EVENT:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 62, 47, 55, 10, 165, 3, 220, 42},
 	},
 	MOONIT: MoonitDiscriminators{
 		BUY:     []byte{102, 6, 61, 18, 1, 218, 235, 234},
@@ -155,21 +155,21 @@ var DISCRIMINATORS = struct {
 	},
 	METEORA_DLMM: MeteoraDLMMDiscriminators{
 		ADD_LIQUIDITY: map[string][]byte{
-			"addLiquidity":                 {181, 157, 89, 67, 143, 182, 52, 72},
-			"addLiquidityByStrategy":       {7, 3, 150, 127, 148, 40, 61, 200},
-			"addLiquidityByStrategy2":      {3, 221, 149, 218, 111, 141, 118, 213},
+			"addLiquidity":                  {181, 157, 89, 67, 143, 182, 52, 72},
+			"addLiquidityByStrategy":        {7, 3, 150, 127, 148, 40, 61, 200},
+			"addLiquidityByStrategy2":       {3, 221, 149, 218, 111, 141, 118, 213},
 			"addLiquidityByStrategyOneSide": {41, 5, 238, 175, 100, 225, 6, 205},
-			"addLiquidityOneSide":          {94, 155, 103, 151, 70, 95, 220, 165},
-			"addLiquidityOneSidePrecise":   {161, 194, 103, 84, 171, 71, 250, 154},
-			"addLiquidityByWeight":         {28, 140, 238, 99, 231, 162, 21, 149},
+			"addLiquidityOneSide":           {94, 155, 103, 151, 70, 95, 220, 165},
+			"addLiquidityOneSidePrecise":    {161, 194, 103, 84, 171, 71, 250, 154},
+			"addLiquidityByWeight":          {28, 140, 238, 99, 231, 162, 21, 149},
 		},
 		REMOVE_LIQUIDITY: map[string][]byte{
-			"removeLiquidity":        {80, 85, 209, 72, 24, 206, 177, 108},
+			"removeLiquidity":         {80, 85, 209, 72, 24, 206, 177, 108},
 			"removeLiquidityByRange":  {26, 82, 102, 152, 240, 74, 105, 26},
 			"removeLiquidityByRange2": {204, 2, 195, 145, 53, 145, 145, 205},
-			"removeAllLiquidity":     {10, 51, 61, 35, 112, 105, 24, 85},
-			"claimFee":               {169, 32, 79, 137, 136, 232, 70, 137},
-			"claimFeeV2":             {112, 191, 101, 171, 28, 144, 127, 187},
+			"removeAllLiquidity":      {10, 51, 61, 35, 112, 105, 24, 85},
+			"claimFee":                {169, 32, 79, 137, 136, 232, 70, 137},
+			"claimFeeV2":              {112, 191, 101, 171, 28, 144, 127, 187},
 		},
 		LIQUIDITY_EVENT: map[string][]byte{
 			"compositionFeeEvent":  {228, 69, 165, 46, 81, 203, 154, 29, 128, 151, 123, 106, 17, 102, 113, 142},
@@ -178,9 +178,9 @@ var DISCRIMINATORS = struct {
 		},
 	},
 	METEORA_DAMM: MeteoraDAMMDiscriminators{
-		CREATE:                 []byte{7, 166, 138, 171, 206, 171, 236, 244},
-		ADD_LIQUIDITY:          []byte{168, 227, 50, 62, 189, 171, 84, 176},
-		REMOVE_LIQUIDITY:       []byte{133, 109, 44, 179, 56, 238, 114, 33},
+		CREATE:                  []byte{7, 166, 138, 171, 206, 171, 236, 244},
+		ADD_LIQUIDITY:           []byte{168, 227, 50, 62, 189, 171, 84, 176},
+		REMOVE_LIQUIDITY:        []byte{133, 109, 44, 179, 56, 238, 114, 33},
 		ADD_IMBALANCE_LIQUIDITY: []byte{79, 35, 122, 84, 173, 15, 93, 191},
 	},
 	METEORA_DAMM_V2: MeteoraDAMMV2Discriminators{
@@ -194,12 +194,12 @@ var DISCRIMINATORS = struct {
 		CREATE_POSITION_EVENT:               []byte{228, 69, 165, 46, 81, 203, 154, 29, 156, 15, 119, 198, 29, 181, 221, 55},
 	},
 	METEORA_DBC: MeteoraDBCDiscriminators{
-		SWAP:                               []byte{248, 198, 158, 145, 225, 117, 135, 200},
-		SWAP_V2:                            []byte{65, 75, 63, 76, 235, 91, 91, 136},
-		INITIALIZE_VIRTUAL_POOL_WITH_SPL:   []byte{140, 85, 215, 176, 102, 54, 104, 79},
+		SWAP:                                   []byte{248, 198, 158, 145, 225, 117, 135, 200},
+		SWAP_V2:                                []byte{65, 75, 63, 76, 235, 91, 91, 136},
+		INITIALIZE_VIRTUAL_POOL_WITH_SPL:       []byte{140, 85, 215, 176, 102, 54, 104, 79},
 		INITIALIZE_VIRTUAL_POOL_WITH_TOKEN2022: []byte{169, 118, 51, 78, 145, 110, 220, 155},
-		METEORA_DBC_MIGRATE_DAMM:           []byte{27, 1, 48, 22, 180, 63, 118, 217},
-		METEORA_DBC_MIGRATE_DAMM_V2:        []byte{156, 169, 230, 103, 53, 228, 80, 64},
+		METEORA_DBC_MIGRATE_DAMM:               []byte{27, 1, 48, 22, 180, 63, 118, 217},
+		METEORA_DBC_MIGRATE_DAMM_V2:            []byte{156, 169, 230, 103, 53, 228, 80, 64},
 	},
 	ORCA: OrcaDiscriminators{
 		CREATE:           []byte{242, 29, 134, 48, 58, 110, 14, 60},
@@ -325,16 +325,16 @@ type PumpfunDiscriminators struct {
 }
 
 type PumpswapDiscriminators struct {
-	CREATE_POOL           []byte
-	ADD_LIQUIDITY         []byte
-	REMOVE_LIQUIDITY      []byte
-	BUY                   []byte
-	SELL                  []byte
-	CREATE_POOL_EVENT     []byte
-	ADD_LIQUIDITY_EVENT   []byte
+	CREATE_POOL            []byte
+	ADD_LIQUIDITY          []byte
+	REMOVE_LIQUIDITY       []byte
+	BUY                    []byte
+	SELL                   []byte
+	CREATE_POOL_EVENT      []byte
+	ADD_LIQUIDITY_EVENT    []byte
 	REMOVE_LIQUIDITY_EVENT []byte
-	BUY_EVENT             []byte
-	SELL_EVENT            []byte
+	BUY_EVENT              []byte
+	SELL_EVENT             []byte
 }
 
 type MoonitDiscriminators struct {
@@ -423,9 +423,9 @@ type MeteoraDLMMDiscriminators struct {
 }
 
 type MeteoraDAMMDiscriminators struct {
-	CREATE                 []byte
-	ADD_LIQUIDITY          []byte
-	REMOVE_LIQUIDITY       []byte
+	CREATE                  []byte
+	ADD_LIQUIDITY           []byte
+	REMOVE_LIQUIDITY        []byte
 	ADD_IMBALANCE_LIQUIDITY []byte
 }
 
@@ -441,12 +441,12 @@ type MeteoraDAMMV2Discriminators struct {
 }
 
 type MeteoraDBCDiscriminators struct {
-	SWAP                               []byte
-	SWAP_V2                            []byte
-	INITIALIZE_VIRTUAL_POOL_WITH_SPL   []byte
+	SWAP                                   []byte
+	SWAP_V2                                []byte
+	INITIALIZE_VIRTUAL_POOL_WITH_SPL       []byte
 	INITIALIZE_VIRTUAL_POOL_WITH_TOKEN2022 []byte
-	METEORA_DBC_MIGRATE_DAMM           []byte
-	METEORA_DBC_MIGRATE_DAMM_V2        []byte
+	METEORA_DBC_MIGRATE_DAMM               []byte
+	METEORA_DBC_MIGRATE_DAMM_V2            []byte
 }
 
 type OrcaDiscriminators struct {

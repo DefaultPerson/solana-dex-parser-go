@@ -116,12 +116,12 @@ type JupiterDCAFilledEvent struct {
 
 // JupiterLimitOrderV2TradeLayout represents Jupiter Limit Order V2 trade event
 type JupiterLimitOrderV2TradeLayout struct {
-	OrderKey             [32]byte
-	Taker                [32]byte
-	RemainingMakingAmt   uint64
-	RemainingTakingAmt   uint64
-	MakingAmount         uint64
-	TakingAmount         uint64
+	OrderKey           [32]byte
+	Taker              [32]byte
+	RemainingMakingAmt uint64
+	RemainingTakingAmt uint64
+	MakingAmount       uint64
+	TakingAmount       uint64
 }
 
 // ParseJupiterLimitOrderV2TradeLayout parses Jupiter Limit Order V2 trade event

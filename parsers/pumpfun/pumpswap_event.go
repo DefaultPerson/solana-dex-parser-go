@@ -77,22 +77,22 @@ type PumpswapSellEventData struct {
 
 // PumpswapDepositEventData contains deposit event data
 type PumpswapDepositEventData struct {
-	Timestamp             int64
-	LpTokenAmountOut      uint64
-	MaxBaseAmountIn       uint64
-	MaxQuoteAmountIn      uint64
-	UserBaseTokenReserves uint64
+	Timestamp              int64
+	LpTokenAmountOut       uint64
+	MaxBaseAmountIn        uint64
+	MaxQuoteAmountIn       uint64
+	UserBaseTokenReserves  uint64
 	UserQuoteTokenReserves uint64
-	PoolBaseTokenReserves uint64
+	PoolBaseTokenReserves  uint64
 	PoolQuoteTokenReserves uint64
-	BaseAmountIn          uint64
-	QuoteAmountIn         uint64
-	LpMintSupply          uint64
-	Pool                  string
-	User                  string
-	UserBaseTokenAccount  string
-	UserQuoteTokenAccount string
-	UserPoolTokenAccount  string
+	BaseAmountIn           uint64
+	QuoteAmountIn          uint64
+	LpMintSupply           uint64
+	Pool                   string
+	User                   string
+	UserBaseTokenAccount   string
+	UserQuoteTokenAccount  string
+	UserPoolTokenAccount   string
 }
 
 // PumpswapWithdrawEventData contains withdraw event data

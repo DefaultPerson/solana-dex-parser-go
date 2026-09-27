@@ -6,10 +6,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/goccy/go-json"
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/goccy/go-json"
 )
 
 // TestCase represents a test case for trade parsing
@@ -105,8 +105,8 @@ func TestBinaryReader(t *testing.T) {
 	data := []byte{
 		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // u64: 1
 		0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // u64: 2
-		0x03, 0x00,                                     // u16: 3
-		0x04,                                           // u8: 4
+		0x03, 0x00, // u16: 3
+		0x04, // u8: 4
 	}
 
 	// Import would be done at package level

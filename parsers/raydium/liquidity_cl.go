@@ -51,9 +51,9 @@ func (p *RaydiumCLPoolParser) GetPoolAction(data []byte) interface{} {
 
 	// ADD_LIQUIDITY discriminators
 	addDiscs := map[string][]byte{
-		"increaseLiquidity":        constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY,
-		"increaseLiquidityV2":      constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2,
-		"openPositionWithToken22":  constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22,
+		"increaseLiquidity":       constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY,
+		"increaseLiquidityV2":     constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2,
+		"openPositionWithToken22": constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22,
 	}
 	for name, disc := range addDiscs {
 		if bytes.Equal(instructionType, disc) {

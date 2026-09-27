@@ -4,40 +4,40 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/goccy/go-json"
-	"github.com/mr-tron/base58"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/goccy/go-json"
+	"github.com/mr-tron/base58"
 )
 
 // SolanaTransaction represents a generic Solana transaction interface
 // This can be either a parsed transaction or a compiled/versioned transaction
 type SolanaTransaction struct {
-	Slot        uint64                 `json:"slot"`
-	BlockTime   *int64                 `json:"blockTime"`
-	Transaction TransactionData        `json:"transaction"`
-	Meta        *TransactionMeta       `json:"meta"`
-	Version     interface{}            `json:"version"` // can be "legacy", 0, or nil
+	Slot        uint64           `json:"slot"`
+	BlockTime   *int64           `json:"blockTime"`
+	Transaction TransactionData  `json:"transaction"`
+	Meta        *TransactionMeta `json:"meta"`
+	Version     interface{}      `json:"version"` // can be "legacy", 0, or nil
 }
 
 // TransactionData contains the transaction message and signatures
 type TransactionData struct {
-	Signatures []string        `json:"signatures"`
+	Signatures []string           `json:"signatures"`
 	Message    TransactionMessage `json:"message"`
 }
 
 // TransactionMessage can be either legacy or v0 format
 type TransactionMessage struct {
 	// Legacy message fields
-	AccountKeys     []AccountKey `json:"accountKeys,omitempty"`
+	AccountKeys []AccountKey `json:"accountKeys,omitempty"`
 
 	// V0 message fields
-	Header              *MessageHeader      `json:"header,omitempty"`
-	StaticAccountKeys   []string            `json:"staticAccountKeys,omitempty"`
+	Header               *MessageHeader        `json:"header,omitempty"`
+	StaticAccountKeys    []string              `json:"staticAccountKeys,omitempty"`
 	CompiledInstructions []CompiledInstruction `json:"compiledInstructions,omitempty"`
 
 	// Shared fields
-	Instructions        []interface{}       `json:"instructions,omitempty"`
+	Instructions        []interface{}        `json:"instructions,omitempty"`
 	AddressTableLookups []AddressTableLookup `json:"addressTableLookups,omitempty"`
 }
 
@@ -82,10 +82,10 @@ func (a *AccountKey) UnmarshalJSON(data []byte) error {
 
 // CompiledInstruction represents a compiled instruction
 type CompiledInstruction struct {
-	ProgramIdIndex  int    `json:"programIdIndex"`
-	Accounts        []int  `json:"accounts,omitempty"`
-	AccountKeyIndexes []int `json:"accountKeyIndexes,omitempty"`
-	Data            string `json:"data"`
+	ProgramIdIndex    int    `json:"programIdIndex"`
+	Accounts          []int  `json:"accounts,omitempty"`
+	AccountKeyIndexes []int  `json:"accountKeyIndexes,omitempty"`
+	Data              string `json:"data"`
 }
 
 // ParsedInstruction represents a parsed instruction
@@ -112,23 +112,23 @@ type AddressTableLookup struct {
 
 // TransactionMeta contains transaction metadata
 type TransactionMeta struct {
-	Err               interface{}           `json:"err"`
-	Fee               uint64                `json:"fee"`
-	PreBalances       []uint64              `json:"preBalances"`
-	PostBalances      []uint64              `json:"postBalances"`
-	PreTokenBalances  []TokenBalance        `json:"preTokenBalances"`
-	PostTokenBalances []TokenBalance        `json:"postTokenBalances"`
-	InnerInstructions []InnerInstructionSet `json:"innerInstructions"`
-	LogMessages       []string              `json:"logMessages"`
-	LoadedAddresses   *LoadedAddresses      `json:"loadedAddresses"`
-	ComputeUnitsConsumed *uint64            `json:"computeUnitsConsumed"`
+	Err                  interface{}           `json:"err"`
+	Fee                  uint64                `json:"fee"`
+	PreBalances          []uint64              `json:"preBalances"`
+	PostBalances         []uint64              `json:"postBalances"`
+	PreTokenBalances     []TokenBalance        `json:"preTokenBalances"`
+	PostTokenBalances    []TokenBalance        `json:"postTokenBalances"`
+	InnerInstructions    []InnerInstructionSet `json:"innerInstructions"`
+	LogMessages          []string              `json:"logMessages"`
+	LoadedAddresses      *LoadedAddresses      `json:"loadedAddresses"`
+	ComputeUnitsConsumed *uint64               `json:"computeUnitsConsumed"`
 }
 
 // TokenBalance represents a token balance entry
 type TokenBalance struct {
-	AccountIndex  int              `json:"accountIndex"`
-	Mint          string           `json:"mint"`
-	Owner         string           `json:"owner"`
+	AccountIndex  int               `json:"accountIndex"`
+	Mint          string            `json:"mint"`
+	Owner         string            `json:"owner"`
 	UiTokenAmount types.TokenAmount `json:"uiTokenAmount"`
 }
 
@@ -1007,4 +1007,3 @@ func createTokenAmount(amount uint64, decimals uint8) types.TokenAmount {
 		Decimals: decimals,
 	}
 }
-

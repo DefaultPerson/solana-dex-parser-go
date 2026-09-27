@@ -3,8 +3,8 @@ package raydium
 import (
 	"math/big"
 
-	"github.com/mr-tron/base58"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
+	"github.com/mr-tron/base58"
 )
 
 // TradeDirection represents the direction of a trade
@@ -232,21 +232,22 @@ type RaydiumLCPTradeLayout struct {
 
 // ParseRaydiumLCPTradeLayout parses trade layout from bytes
 // V1 layout (130 bytes total):
-//   poolState        [32]byte  bytes 0-31
-//   totalBaseSell    u64       bytes 32-39
-//   virtualBase      u64       bytes 40-47
-//   virtualQuote     u64       bytes 48-55
-//   realBaseBefore   u64       bytes 56-63
-//   realQuoteBefore  u64       bytes 64-71
-//   realBaseAfter    u64       bytes 72-79
-//   realQuoteAfter   u64       bytes 80-87
-//   amountIn         u64       bytes 88-95
-//   amountOut        u64       bytes 96-103
-//   protocolFee      u64       bytes 104-111
-//   platformFee      u64       bytes 112-119
-//   shareFee         u64       bytes 120-127
-//   tradeDirection   u8        byte 128
-//   poolStatus       u8        byte 129
+//
+//	poolState        [32]byte  bytes 0-31
+//	totalBaseSell    u64       bytes 32-39
+//	virtualBase      u64       bytes 40-47
+//	virtualQuote     u64       bytes 48-55
+//	realBaseBefore   u64       bytes 56-63
+//	realQuoteBefore  u64       bytes 64-71
+//	realBaseAfter    u64       bytes 72-79
+//	realQuoteAfter   u64       bytes 80-87
+//	amountIn         u64       bytes 88-95
+//	amountOut        u64       bytes 96-103
+//	protocolFee      u64       bytes 104-111
+//	platformFee      u64       bytes 112-119
+//	shareFee         u64       bytes 120-127
+//	tradeDirection   u8        byte 128
+//	poolStatus       u8        byte 129
 func ParseRaydiumLCPTradeLayout(data []byte) (*RaydiumLCPTradeLayout, error) {
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
@@ -524,8 +525,8 @@ const (
 
 // SwapOperation represents parsed swap details
 type SwapOperation struct {
-	Type               string   // "Buy" or "Sell"
-	Mode               string   // "Exact Input" or "Exact Output"
+	Type               string // "Buy" or "Sell"
+	Mode               string // "Exact Input" or "Exact Output"
 	InputAmount        *big.Int
 	OutputAmount       *big.Int
 	SlippageProtection *big.Int
