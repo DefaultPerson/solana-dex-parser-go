@@ -39,6 +39,7 @@ for _, trade := range parser.ParseTrades(tx, nil) {
 
 A multi-hop or routed swap has one trade per hop; `AggregateTrade` goes from the first input to the last output.
 A nil config computes it; with a config, set `ParseType.AggregateTrade`.
+For a Titan or OKX DEX Router V2 route it is the aggregator's route total, with the aggregator fee in `Fee`.
 
 ```go
 result := parser.ParseAll(tx, &types.ParseConfig{ParseType: types.ParseTradesOnly()})
@@ -73,6 +74,7 @@ for _, event := range result.MemeEvents {
 ## Transfers
 
 `Transfers` is filled when the transaction has no trades and no liquidity events.
+Program actions such as Jupiter DCA deposits, limit orders and Pump.fun fee payouts set `Type` (`OpenDca`, `settleLimitOrder`, `claimCashback`, …).
 
 ```go
 for _, transfer := range parser.ParseTransfers(tx, nil) {

@@ -158,6 +158,7 @@ func main() {
 | `ParseBatch(txs, config, maxWorkers)` | one result per transaction, in input order; `maxWorkers > 1` parses concurrently |
 | `ParseBatchWithCallback(txs, config, maxWorkers, callback)` | as `ParseBatch`, calling `callback` per result; returning false stops early |
 | `RegisterTradeParser`, `RegisterLiquidityParser`, `RegisterTransferParser`, `RegisterMemeEventParser` | add or replace the parser of a program ID |
+| `RegisterRouteParser` | add or replace the route parser of an aggregator program whose swaps run by CPI through venues (Titan and OKX DEX Router V2 by default): its trades are not added to `Trades`, which keeps the venue hops, but replace those hops in `AggregateTrade` |
 
 All methods are nil-safe: a nil transaction gives `State=false`, `Msg="nil transaction"`.
 A panic inside a parser is recovered into `State=false` and a `Msg` with the signature, unless `ThrowError` is set.
@@ -229,20 +230,21 @@ aggregate: BUY 2020000000 -> 67062499999999
 | `Fee` | the network fee (lamports, 9 decimals) |
 | `ComputeUnits` | compute units consumed (from meta, for every transaction version) |
 | `Trades` | individual trades, in execution order |
-| `AggregateTrade` | the trade from the first input to the last output of all trades (a copy) |
+| `AggregateTrade` | the trade from the first input to the last output of all trades (a copy); for a Titan or OKX DEX Router V2 route, the aggregator's route total with its fee |
 | `Liquidities` | liquidity events: `CREATE`, `ADD`, `REMOVE` |
 | `MemeEvents` | launchpad events: `CREATE`, `BUY`, `SELL`, `MIGRATE`, `COMPLETE`, `BUY_AND_BURN` |
-| `Transfers` | token transfers; only when there are no trades and no liquidity events |
+| `Transfers` | token transfers; only when there are no trades and no liquidity events. Program actions carry a `Type`, such as `OpenDca`, `cancelOrder`, `settleLimitOrder` or `claimCashback` (full list in the [README](https://github.com/DefaultPerson/solana-dex-parser-go#transfer-types)) |
 | `AltEvents` | Address Lookup Table program events |
 | `SolBalanceChange`, `TokenBalanceChange` | the signer's balance changes (independent copies) |
 | `Tip` | lamports paid by System transfers to known tip accounts (`constants.TIP_ACCOUNTS`); nil when none |
-| `Warnings` | why a result may be incomplete: fetcher errors (URLs cut to scheme and host) and unresolved lookup-table accounts |
+| `Warnings` | why a result may be incomplete or doubtful: fetcher errors (URLs cut to scheme and host), unresolved lookup-table accounts, and Jupiter hops whose venue parser reports other amounts than the route event |
 
 In a `types.TradeInfo`:
 
 - `InputToken` / `OutputToken`: `Mint`, `AmountRaw` (exact integer string), `Amount` (float, for display), `Decimals`, and the token accounts and balances involved. Amounts are what the user sent and received where the program reports it (events, `ray_log`), otherwise the transfers.
 - `Type`: `BUY` or `SELL` relative to SOL or a stablecoin, `SWAP` otherwise.
-- `Fee` and `Fees`: only fees reported by the protocol (events) or paid by transfers flagged as fees; each `FeeInfo` has `Type` (for example `protocol`, `coinCreator`, `platform`, `transferFee`), `Dex` and `Recipient`.
+- `Fee` and `Fees`: only fees reported by the protocol (events) or paid by transfers flagged as fees; each `FeeInfo` has `Type` (for example `protocol`, `coinCreator`, `platform`, `commission`, `transferFee`), `Dex` and `Recipient`. `AggregateTrade.Fees` lists each fee once.
+- Jupiter hops: `AMM` is the hop venue, and `Pool`, `Type` and the venue's fees come from the venue's own parser; the amounts are the route event's.
 - `ProgramId`, `AMM`, `AMMs`, `Route`, `Pool`, `User`, `Bot`, `Idx` (`"N"` or `"N-M"`).
 
 ### Failed transactions
@@ -407,6 +409,23 @@ go get github.com/rpcpool/yellowstone-grpc/examples/golang@latest google.golang.
 ```
 
 For pre-execution data (Jito ShredStream, transactions without meta) use [ShredParser](shred-parser.md).
+
+## Helpers for custom parsers
+
+Exported helpers that the built-in parsers use, for parsers registered with the `Register…Parser` methods:
+
+| Helper | Purpose |
+|--------|---------|
+| `utils.FindEventEmitter`, `utils.EmittedEvents` | match a self-CPI event to the instruction that emitted it (stack-height parent, else the nearest preceding match) |
+| `utils.CPIGroup`, `TransactionUtils.CPIGroupTransfers` | the inner instructions and transfers made inside an instruction |
+| `utils.ProgramInstructions`, `utils.SortInstructionsByExecution` | a program's instructions, in execution order |
+| `utils.FormatIdx`, `utils.SplitIdx`, `utils.CompareIdx` | build, split and compare `Idx` strings |
+| `utils.FeeComponents`, `utils.SumFeeAmounts`, `utils.TotalFee` | fee lists without double counting, and their sums |
+| `utils.GetShredTradeType` | the trade type of a pre-execution trade (`SWAP` when a mint is unknown) |
+| `adapter.TransactionAdapter.KnownDecimals`, `KnownTokenAccountMint` | decimals (from the transaction or `constants.TOKEN_DECIMALS`) and token-account mints the transaction reveals, never guessed |
+| `constants.ANCHOR_EVENT_PREFIX`, `constants.IsAnchorEvent` | recognise Anchor self-CPI event data |
+| `constants.UnknownProgramName` | the name (`"Unknown"`) of programs without an entry |
+| `jupiter.JupiterParser.HopInstruction` | the venue instruction of a Jupiter hop |
 
 ## Next Steps
 

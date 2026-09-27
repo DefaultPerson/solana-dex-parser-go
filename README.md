@@ -90,11 +90,11 @@ Fetch transactions with `"encoding": "json"` and `"maxSupportedTransactionVersio
 ## Features
 
 - **Trades** with exact raw amounts (`AmountRaw` strings), decimals from the transaction, pool addresses, and fees taken only from protocol events or explicit fee transfers.
-- **Aggregated trade** (`AggregateTrade`) of multi-hop and routed swaps, computed in addition to the individual trades.
-- **Jupiter**: v6 routes including the `*_v2` family (SwapsEvent, FeeEvent platform fees), Jupiter Z (RFQ) fills, DCA (Recurring), Limit Order v1 (historical flash fills) and v2 (Trigger), and Value Average (legacy).
-- **Pump.fun and PumpSwap**: v2 instructions, non-SOL quote mints (USDC and custom quotes), protocol, creator, buyback and cashback fees.
+- **Aggregated trade** (`AggregateTrade`) of multi-hop and routed swaps, computed in addition to the individual trades; for Titan and OKX DEX Router V2 routes it is the aggregator's own route total with its fee.
+- **Jupiter**: v6 routes including the `*_v2` family (SwapsEvent, FeeEvent platform fees), with each hop's pool, type and venue fees taken from the venue's own parser; Jupiter Z (RFQ) fills, DCA (Recurring), Limit Order v1 (historical flash fills) and v2 (Trigger), and Value Average (legacy).
+- **Pump.fun and PumpSwap**: v2 instructions, non-SOL quote mints (USDC and custom quotes), protocol, creator, buyback and cashback fees; creator-fee, cashback and incentive payouts as typed transfers.
 - **Prop AMMs**: SolFi (V1, V2), GoonFi (V1, V2), HumidiFi, Obric V2, BisonFi, TesseraV, AlphaQ, ZeroFi, Scorch, Quantum, Manifest, Byreal and Saros DLMM.
-- **Liquidity events** for Raydium V4/CPMM/CLMM, Orca Whirlpool, Meteora DLMM/DAMM v1/DAMM v2 and PumpSwap, amounts from program events or `ray_log` where available.
+- **Liquidity events** for Raydium V4/CPMM/CLMM, Orca Whirlpool, Meteora DLMM/DAMM v1/DAMM v2 and PumpSwap, amounts from program events or `ray_log` where available; Raydium CLMM and Meteora DLMM limit orders as typed transfers.
 - **Meme launchpad events** (create, buy, sell, migrate, complete) for Pump.fun, PumpSwap, Raydium LaunchLab, Meteora DBC, Moonit, Heaven, Sugar and Boop.fun.
 - **Bots and tips**: `TradeInfo.Bot` from fee payments to known bot wallets, bot router programs as `Route`, and `ParseResult.Tip` for Jito and other landing services.
 - **Failed transactions** are recognised: by default only fee, signer, balance changes and `TxStatus` are reported (`ParseConfig.IncludeFailedTxs` parses them fully).
@@ -115,10 +115,13 @@ Fetch transactions with `"encoding": "json"` and `"maxSupportedTransactionVersio
 
 - `Trades` always holds the individual trades when trades are parsed; `ParseTrades` never comes back empty because of aggregation.
 - When any Jupiter program runs in the transaction, its trades are authoritative for the instructions it covers and nested AMM trades are not repeated. Liquidity, meme events and transfers are still parsed for the whole transaction.
-- `Transfers` is filled only when the transaction has no trades and no liquidity events (DCA, VA and limit-order programs report their own deposits and withdrawals).
+- `Transfers` is filled only when the transaction has no trades and no liquidity events (`ParseTransfers` always returns them). Program actions that move tokens without a trade are transfers with a `Type` (see [Transfer types](#transfer-types)).
+- Titan and OKX DEX Router V2 are route parsers (`DexParser.RegisterRouteParser`): `Trades` holds the venue hops, and `AggregateTrade` takes the aggregator's route total, what the user sent and received, with the aggregator fee in `Fee` (Titan: `platform`, OKX: `commission`).
+- Jupiter hops take `Pool`, `Type` and venue fees from the venue's own parser run on the hop's instruction; the amounts stay the route event's, and a venue that reports other amounts adds a line to `Warnings`.
+- Program events (Anchor self-CPI events, `Program data` logs) belong to the instruction that emitted them: its stack-height parent, or the nearest preceding matching instruction when the transaction has no stack heights.
 - `Idx` is `"N"` for an outer instruction and `"N-M"` for inner instruction M of outer instruction N; every list is sorted numerically by it.
 - With `TryUnknownDEX` (on for a nil config), programs without a dedicated parser, known or not, are parsed from their transfers when one leg is SOL or a stablecoin; their AMM is the program name or `"Unknown"`.
-- `ParseResult.Warnings` lists what made a result incomplete (fetcher errors, unresolved lookup-table accounts); `State` is not affected.
+- `ParseResult.Warnings` (and `ParseShredResult.Warnings`) list what made a result incomplete or doubtful (fetcher errors, unresolved lookup-table accounts, Jupiter hop amounts the venue disagrees with); `State` is not affected.
 
 Full reference: [Getting Started](https://defaultperson.github.io/solana-dex-parser-go/getting-started/).
 
@@ -131,16 +134,16 @@ Legacy entries are kept so historical transactions still parse.
 
 | Protocol | Trades | Transfers | Notes |
 |----------|--------|-----------|-------|
-| **Jupiter v6** | ✅ | ➖ | route, shared_accounts, exact_out and `*_v2` routes; one trade per hop, `AMM` = hop venue, `User` = the route's token owner |
+| **Jupiter v6** | ✅ | ➖ | route, shared_accounts, exact_out and `*_v2` routes; one trade per hop, `AMM` = hop venue, `Pool`, `Type` and venue fees from the venue's parser, `User` = the route's token owner |
 | **Jupiter Z** | ✅ | ➖ | RFQ fill as the taker's trade |
-| **Jupiter DCA (Recurring)** | ✅ | ✅ | fills; open and close as transfers |
+| **Jupiter DCA (Recurring)** | ✅ | ✅ | fills; open, close, withdraw and deposit as transfers |
 | **Jupiter Limit Order v2 (Trigger)** | ✅ | ✅ | fills as the maker's trade with the actual fee |
-| **Jupiter Limit Order v1** | ✅ | ✅ | legacy: historical flash fills |
+| **Jupiter Limit Order v1** | ✅ | ✅ | legacy: historical flash fills; cancel_order and cancel_expired_order as transfers |
 | **Jupiter VA** | ✅ | ✅ | legacy (last activity 2026-07) |
 | **DFlow** | ✅ | ➖ | |
 | **Raydium Route** | ✅ | ➖ | |
 | **Photon** | Known | ➖ | trades come from the venue parsers with `Route = Photon`; decoded by ShredParser |
-| **OKX DEX Router V2**, **Titan** | Known | ➖ | hop trades come from the venue parsers; `propamm.OKXV2Parser` and `propamm.TitanParser` decode the routers' swap events but are not registered by default |
+| **OKX DEX Router V2**, **Titan** | ✅ | ➖ | route parsers `propamm.OKXV2Parser` and `propamm.TitanParser`: `AggregateTrade` is the route total with the aggregator fee; `Trades` are the venue hops |
 | **OKX DEX (V1)** | Known | ➖ | legacy |
 | **Sanctum** | Known | ➖ | |
 | **Jupiter V2, V4** | Known | ➖ | V2 legacy |
@@ -151,9 +154,9 @@ Legacy entries are kept so historical transactions still parse.
 |----------|--------|-----------|-------|
 | **Raydium V4** (+ RaydiumAMM `5quB…`) | ✅ | ✅ (V4) | amounts from `ray_log` |
 | **Raydium CPMM** | ✅ | ✅ | |
-| **Raydium CLMM** | ✅ | ✅ | limit-order instructions are not parsed |
+| **Raydium CLMM** | ✅ | ✅ | limit orders as transfers |
 | **Orca Whirlpool** | ✅ | ✅ | including `*_v2` and two-hop swaps |
-| **Meteora DLMM** | ✅ | ✅ | including pair creation and rebalance_liquidity; limit orders are not parsed |
+| **Meteora DLMM** | ✅ | ✅ | including pair creation and rebalance_liquidity; limit orders as transfers |
 | **Meteora DAMM v1 (Pools)** | ✅ | ✅ | |
 | **Meteora DAMM v2** | ✅ | ✅ | |
 | **PumpSwap** | ✅ | ✅ | |
@@ -175,14 +178,28 @@ Legacy entries are kept so historical transactions still parse.
 
 | Protocol | Trades | Create | Migrate | Notes |
 |----------|--------|--------|---------|-------|
-| **Pump.fun** | ✅ | ✅ | ✅ | v2 instructions, non-SOL quotes, curve COMPLETE events |
-| **PumpSwap** | ✅ | ✅ (pool) | ➖ | also BUY/SELL meme events and BUY_AND_BURN (boost_buy_and_burn) |
+| **Pump.fun** | ✅ | ✅ | ✅ | v2 instructions, non-SOL quotes, curve COMPLETE events; fee payouts as transfers |
+| **PumpSwap** | ✅ | ✅ (pool) | ➖ | also BUY/SELL meme events and BUY_AND_BURN (boost_buy_and_burn); fee payouts as transfers |
 | **Raydium LaunchLab** | ✅ | ✅ | ✅ | also used by LetsBonk.fun; USD1 and other quote mints |
 | **Meteora DBC** | ✅ | ✅ | ✅ | curve COMPLETE events |
 | **Moonit** | ✅ | ✅ | ✅ | |
 | **Heaven** | ✅ | ✅ | ➖ | pools launch directly, there is no migration |
 | **Sugar** | ✅ | ✅ | ✅ | migrates to Raydium CPMM with a pSOL quote; nearly idle |
 | **Boop.fun** | ✅ | ✅ | ✅ (COMPLETE) | the curve COMPLETE event marks the graduation |
+
+### Transfer types
+
+These programs report typed transfers (`TransferData.Type`) through `ParseTransfers`, and in `ParseAll` when the transaction has no trades or liquidity events:
+
+| Program | Types |
+|---------|-------|
+| **Jupiter DCA** | `OpenDca`, `CloseDca`, `WithdrawDca`, `DepositDca` |
+| **Jupiter Limit Order v1** | `initializeOrder`, `cancelOrder`, `cancelExpiredOrder` |
+| **Jupiter Limit Order v2** | `initializeOrder`, `cancelOrder`, `cancelDustOrder` |
+| **Jupiter VA** | `open`, `withdraw` |
+| **Raydium CLMM** | `openLimitOrder`, `increaseLimitOrder`, `decreaseLimitOrder`, `settleLimitOrder` |
+| **Meteora DLMM** | `placeLimitOrder`, `cancelLimitOrder` |
+| **Pump.fun**, **PumpSwap** | `collectCreatorFee`, `collectCoinCreatorFee`, `claimCashback`, `claimTokenIncentives`, `distributeCreatorFees`, `distributeFeeToHolders`, `transferCreatorFeesToPump` |
 
 ### Trading bots
 
@@ -248,7 +265,7 @@ See [ShredParser](https://defaultperson.github.io/solana-dex-parser-go/shred-par
 - Jupiter-routed transactions keep their liquidity, meme events and transfers; the TypeScript parser returns after the Jupiter trades.
 - Trade fees come only from protocol events and explicit fee transfers; the "output minus balance change" fee estimate is not used.
 - Outer-instruction `Idx` is `"N"` (not `"N-0"`) and all lists are sorted numerically by `Idx`.
-- Go-only parsers and fields: PumpSwap meme events, Heaven and Sugar trades, the prop AMM and Jupiter Z parsers, `TradeInfo.Bot`, `ParseResult.Tip` and `Warnings`, `ShredParser` typed output and amount kinds.
+- Go-only parsers and fields: PumpSwap meme events, Heaven and Sugar trades, the prop AMM and Jupiter Z parsers, the Titan and OKX V2 route aggregates, limit-order and fee-payout transfers, venue data on Jupiter hops, `TradeInfo.Bot`, `ParseResult.Tip` and `Warnings`, `ShredParser` typed output, amount kinds and `Warnings`.
 - The TypeScript `PUMP_FUN` liquidity parser registration has no counterpart.
 
 ## Documentation

@@ -77,6 +77,7 @@ The buy asks for exactly 67062499999999 tokens and allows at most 2020000000 lam
 | `Instructions` | the older per-program format: program name (`"Pumpfun"`, `"Jupiter"`, `"System"`, `"Token"`, …) -> decoded events. Programs without decoded instructions are left out |
 | `TxStatus` | `unknown` without meta, else `success` or `failed` |
 | `HasUnresolvedAccounts` | some lookup-table accounts could not be resolved |
+| `Warnings` | why the result may be incomplete: `ALTsFetcher` / `TokenAccountsFetcher` errors and unresolved lookup-table accounts |
 | `State`, `Msg`, `Signature`, `Slot`, `Timestamp`, `Signer` | as in `ParseResult` |
 
 `types.ParsedShredInstruction` has `ProgramID`, `ProgramName`, `Action` (the instruction name), `Idx`, `Accounts`, `Data` (the decoded arguments) and one of `Trade`, `Liquidity`, `Transfer` or `MemeEvent`.
