@@ -171,7 +171,7 @@ func (p *JupiterLimitOrderV2Parser) fillPayouts(order *types.ClassifiedInstructi
 		return sum.Add(sum, v)
 	}
 	for _, t := range utils.SortedTransfers(p.TransferActions) {
-		if outerIndexOf(t.Idx) != event.OuterIndex || utils.CompareIdx(t.Idx, from) <= 0 || utils.CompareIdx(t.Idx, to) >= 0 {
+		if outer, _ := utils.SplitIdx(t.Idx); outer != event.OuterIndex || utils.CompareIdx(t.Idx, from) <= 0 || utils.CompareIdx(t.Idx, to) >= 0 {
 			continue
 		}
 		if t.Info.Mint != outputMint {

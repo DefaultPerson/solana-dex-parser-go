@@ -79,3 +79,29 @@ func EmittedEvents(a *adapter.TransactionAdapter, candidates []types.ClassifiedI
 	}
 	return events
 }
+
+// CPIGroup returns the inner indexes [first, last] of the instructions that
+// ran inside ci (its CPI subtree), empty when last < first. With stack
+// heights these are the inner instructions after ci with a greater stack
+// height, up to the next one at ci's height or above. Without them the group
+// ends before the next instruction of ci's program in the same outer
+// instruction.
+func CPIGroup(a *adapter.TransactionAdapter, ci types.ClassifiedInstruction) (first, last int) {
+	first, last = ci.InnerIndex+1, ci.InnerIndex
+	height := a.GetInstructionStackHeight(ci.OuterIndex, ci.InnerIndex)
+	for j := first; ; j++ {
+		ix := a.GetInnerInstruction(ci.OuterIndex, j)
+		if ix == nil {
+			break
+		}
+		if h := adapter.InstructionStackHeight(ix); height > 0 && h > 0 {
+			if h <= height {
+				break
+			}
+		} else if a.GetInstructionProgramId(ix) == ci.ProgramId {
+			break
+		}
+		last = j
+	}
+	return first, last
+}

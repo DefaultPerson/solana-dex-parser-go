@@ -3,8 +3,6 @@ package jupiter
 import (
 	"bytes"
 	"math/big"
-	"strconv"
-	"strings"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -227,7 +225,7 @@ func (p *JupiterParser) attachFeeEvents(trades []types.TradeInfo, feeEvents []ju
 	for _, fe := range feeEvents {
 		first, last := -1, -1
 		for i := range trades {
-			if outerIndexOf(trades[i].Idx) != fe.outer {
+			if outer, _ := utils.SplitIdx(trades[i].Idx); outer != fe.outer {
 				continue
 			}
 			if first < 0 {
@@ -284,19 +282,6 @@ func adjustTokenAmount(token *types.TokenInfo, delta *big.Int) {
 	}
 	token.AmountRaw = amount.String()
 	token.Amount = types.ConvertToUIAmount(amount, token.Decimals)
-}
-
-// outerIndexOf returns the outer instruction index of an idx ("5" or "5-3"),
-// or -1 when it cannot be parsed
-func outerIndexOf(idx string) int {
-	if i := strings.IndexByte(idx, '-'); i >= 0 {
-		idx = idx[:i]
-	}
-	n, err := strconv.Atoi(idx)
-	if err != nil {
-		return -1
-	}
-	return n
 }
 
 // processSwapData processes swap events of the route of user into trade info

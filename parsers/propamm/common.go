@@ -186,35 +186,13 @@ func (p *VenueParser) cpiTransfers(ci types.ClassifiedInstruction) []types.Trans
 	return groupTransfers(p.adapter, p.txUtils, ci, false)
 }
 
-// cpiGroup returns the inner instructions of the CPI group of ci, with their
-// inner indexes: the inner instructions after ci with a higher stack height
-// (adapter.GetInstructionStackHeight), up to the next instruction at its own
-// height or above. When the transaction carries no
-// stack heights, the group ends at the next instruction of the same program.
+// cpiGroup returns the inner instructions of the CPI group of ci
+// (utils.CPIGroup), with their inner indexes
 func cpiGroup(a *adapter.TransactionAdapter, ci types.ClassifiedInstruction) (indexes []int, instructions []interface{}) {
-	var set []interface{}
-	for _, inner := range a.InnerInstructions() {
-		if inner.Index == ci.OuterIndex {
-			set = inner.Instructions
-			break
-		}
-	}
-	if ci.InnerIndex >= len(set) {
-		return nil, nil
-	}
-
-	height := a.GetInstructionStackHeight(ci.OuterIndex, ci.InnerIndex)
-	for j := ci.InnerIndex + 1; j < len(set); j++ {
-		ix := set[j]
-		if h := adapter.InstructionStackHeight(ix); height > 0 && h > 0 {
-			if h <= height {
-				break
-			}
-		} else if a.GetInstructionProgramId(ix) == ci.ProgramId {
-			break
-		}
+	first, last := utils.CPIGroup(a, ci)
+	for j := first; j <= last; j++ {
 		indexes = append(indexes, j)
-		instructions = append(instructions, ix)
+		instructions = append(instructions, a.GetInnerInstruction(ci.OuterIndex, j))
 	}
 	return indexes, instructions
 }

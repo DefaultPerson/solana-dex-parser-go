@@ -26,17 +26,20 @@ import (
 // TitanParser and OKXV2Parser report the route instead: one trade per
 // aggregator swap instruction, with the totals the aggregator itself emits
 // (what the user paid and received, after the aggregator's fees). They are
-// meant for the aggregate trade of a transaction. Registered next to the
-// hop parsers in the same trade list they would count every route twice, so
-// they are not registered by default. Without them, the aggregate of an
-// aggregator route is utils.GetFinalSwap over the hops: the input of the
-// first hop's input mint and the output of the last hop's output mint, before
-// fees the aggregator keeps (Titan fee_c, OKX output-side commission).
+// meant for the aggregate trade of a transaction, and DexParser registers
+// them as route parsers (DexParser.RegisterRouteParser), not as trade
+// parsers: next to the hop parsers in the same trade list they would count
+// every route twice. The aggregate then takes the route trade in place of
+// the hops it covers; without it (no event logged), the aggregate is
+// utils.GetFinalSwap over the hops: the input of the first hop's input mint
+// and the output of the last hop's output mint, before fees the aggregator
+// keeps (Titan fee_c, OKX output-side commission).
 
-// aggregatorParser holds what the route parsers share
+// aggregatorParser holds what the route parsers share. Route trades name
+// the aggregator as Route, so the DexInfo the constructors take (the
+// TradeParserFactory signature) is not used.
 type aggregatorParser struct {
 	adapter                *adapter.TransactionAdapter
-	dexInfo                types.DexInfo
 	transferActions        map[string][]types.TransferData
 	classifiedInstructions []types.ClassifiedInstruction
 	txUtils                *utils.TransactionUtils
@@ -44,13 +47,11 @@ type aggregatorParser struct {
 
 func newAggregatorParser(
 	adapter *adapter.TransactionAdapter,
-	dexInfo types.DexInfo,
 	transferActions map[string][]types.TransferData,
 	classifiedInstructions []types.ClassifiedInstruction,
 ) aggregatorParser {
 	return aggregatorParser{
 		adapter:                adapter,
-		dexInfo:                dexInfo,
 		transferActions:        transferActions,
 		classifiedInstructions: classifiedInstructions,
 		txUtils:                utils.NewTransactionUtils(adapter),
@@ -97,15 +98,18 @@ func (p *aggregatorParser) tokenInfo(mint string, amount *big.Int) types.TokenIn
 	}
 }
 
-// feeInfo returns a fee of amount of mint
-func (p *aggregatorParser) feeInfo(mint string, amount *big.Int, feeType string) types.FeeInfo {
+// feeInfo returns a fee of amount of mint that the aggregator program
+// charged
+func (p *aggregatorParser) feeInfo(program constants.DexProgram, mint string, amount *big.Int, feeType, recipient string) types.FeeInfo {
 	decimals := p.adapter.GetTokenDecimals(mint)
 	return types.FeeInfo{
 		Mint:      mint,
 		Amount:    types.ConvertToUIAmount(amount, decimals),
 		AmountRaw: amount.String(),
 		Decimals:  decimals,
+		Dex:       program.Name,
 		Type:      feeType,
+		Recipient: recipient,
 	}
 }
 
@@ -140,9 +144,10 @@ func (p *aggregatorParser) routeTrade(ci types.ClassifiedInstruction, program co
 // temporary account funded with SOL), gross of fee_a when fee_a is taken on
 // the input side; output is out_amount of the mint of the destination
 // account (accounts[4]), what the user received. User is accounts[1]. fee_a
-// is reported as Fee when a transfer of that amount to another owner is
-// found in the route; fee_c (kept in Titan's intermediate account, not a
-// transfer) is not.
+// (the integrator's fee) is reported as Fee, Type "platform", when Titan
+// itself (not a hop venue) made a transfer of that amount in the input or
+// output mint to another owner; fee_c (kept in Titan's intermediate account,
+// not a transfer) is not.
 type TitanParser struct {
 	aggregatorParser
 }
@@ -154,7 +159,7 @@ func NewTitanParser(
 	transferActions map[string][]types.TransferData,
 	classifiedInstructions []types.ClassifiedInstruction,
 ) *TitanParser {
-	return &TitanParser{newAggregatorParser(adapter, dexInfo, transferActions, classifiedInstructions)}
+	return &TitanParser{newAggregatorParser(adapter, transferActions, classifiedInstructions)}
 }
 
 // ProcessTrades returns one route trade per Titan SwapRouteV3 instruction
@@ -206,15 +211,30 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 			continue
 		}
 
-		// fee_a is paid by a transfer inside the route. When that transfer goes
-		// to the user's own account (an integrator whose fee account is the
-		// user's), the user kept it: it is part of what the user received
+		// fee_a is paid by a transfer Titan makes itself (a direct child of the
+		// route instruction; hop transfers run one level deeper, inside the
+		// venue) to an account outside Titan's own intermediate accounts
+		// (owned by accounts[2]; the user's input goes there). When that
+		// transfer goes to the user's own account (an integrator whose fee
+		// account is the user's), the user kept it: it is part of what the
+		// user received
 		var fee *types.FeeInfo
 		if feeA > 0 {
 			amount := strconv.FormatUint(feeA, 10)
+			height := p.adapter.GetInstructionStackHeight(ci.OuterIndex, ci.InnerIndex)
 			for _, t := range transfers {
-				if t.Info.TokenAmount.Amount != amount {
+				if t.Info.TokenAmount.Amount != amount || (t.Info.Mint != inMint && t.Info.Mint != outMint) {
 					continue
+				}
+				if h := p.adapter.GetInstructionStackHeight(utils.SplitIdx(t.Idx)); height > 0 && h > 0 && h != height+1 {
+					continue // a hop's transfer
+				}
+				destinationOwner := t.Info.DestinationOwner
+				if destinationOwner == "" {
+					destinationOwner = p.adapter.GetTokenAccountOwner(t.Info.Destination)
+				}
+				if len(accounts) > 2 && destinationOwner == accounts[2] {
+					continue // into Titan's intermediate account: the route's input
 				}
 				feeAmount := new(big.Int).SetUint64(feeA)
 				if t.Info.Destination == accounts[4] || t.Info.DestinationOwner == accounts[1] {
@@ -225,7 +245,7 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 						inAmount.Sub(inAmount, feeAmount)
 					}
 				} else {
-					f := p.feeInfo(t.Info.Mint, feeAmount, "")
+					f := p.feeInfo(constants.DEX_PROGRAMS.TITAN, t.Info.Mint, feeAmount, "platform", t.Info.Destination)
 					fee = &f
 				}
 				break
@@ -264,7 +284,7 @@ func NewOKXV2Parser(
 	transferActions map[string][]types.TransferData,
 	classifiedInstructions []types.ClassifiedInstruction,
 ) *OKXV2Parser {
-	return &OKXV2Parser{newAggregatorParser(adapter, dexInfo, transferActions, classifiedInstructions)}
+	return &OKXV2Parser{newAggregatorParser(adapter, transferActions, classifiedInstructions)}
 }
 
 // okxEvent is the common part of the OKX V2 swap events
@@ -357,7 +377,7 @@ func (p *OKXV2Parser) ProcessTrades() []types.TradeInfo {
 			} else if event.commissionOnSource {
 				mint = event.sourceMint
 			}
-			fee := p.feeInfo(mint, new(big.Int).SetUint64(event.commission), "commission")
+			fee := p.feeInfo(constants.DEX_PROGRAMS.OKX_DEX_V2, mint, new(big.Int).SetUint64(event.commission), "commission", "")
 			trade.Fee = &fee
 			trade.Fees = append(trade.Fees, fee)
 		}

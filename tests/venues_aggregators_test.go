@@ -47,11 +47,13 @@ func TestVenuesTitanDoubleCount(t *testing.T) {
 	if agg.InputToken.Mint != venueUSDT || agg.InputToken.AmountRaw != "1000011964" || agg.OutputToken.Mint != venueUSDC {
 		t.Errorf("aggregate %s %s -> %s", agg.InputToken.AmountRaw, agg.InputToken.Mint, agg.OutputToken.Mint)
 	}
-	// Between what the user received (Titan's total) and what the pool paid
-	// out (the hop), never the double count
-	out, _ := new(big.Int).SetString(agg.OutputToken.AmountRaw, 10)
-	if out == nil || out.Cmp(big.NewInt(999797125)) < 0 || out.Cmp(big.NewInt(999897114)) > 0 {
-		t.Errorf("aggregate output %s USDC, want 999797125..999897114", agg.OutputToken.AmountRaw)
+	// What the user received (Titan's total, the user's USDC balance
+	// change), not what the pool paid out (the hop), never the double count
+	if agg.OutputToken.AmountRaw != "999797125" {
+		t.Errorf("aggregate output %s USDC, want 999797125", agg.OutputToken.AmountRaw)
+	}
+	if d := ownerTokenDelta(tx, agg.User, venueUSDC); d.String() != agg.OutputToken.AmountRaw {
+		t.Errorf("user %s USDC change %s, aggregate output %s", agg.User, d, agg.OutputToken.AmountRaw)
 	}
 }
 

@@ -3,7 +3,6 @@ package dexparser
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -45,6 +44,9 @@ type DexParser struct {
 
 	// Meme event parsers by program ID
 	memeEventParserFactories map[string]MemeEventParserFactory
+
+	// Aggregator route parsers by program ID (see RegisterRouteParser)
+	routeParserFactories map[string]TradeParserFactory
 }
 
 // TradeParserFactory creates a trade parser
@@ -83,6 +85,7 @@ func NewDexParser() *DexParser {
 		liquidityParserFactories: make(map[string]LiquidityParserFactory, 10),
 		transferParserFactories:  make(map[string]TransferParserFactory, 5),
 		memeEventParserFactories: make(map[string]MemeEventParserFactory, 10),
+		routeParserFactories:     make(map[string]TradeParserFactory, 2),
 	}
 
 	// Register default parsers
@@ -216,6 +219,14 @@ func (dp *DexParser) registerDefaultParsers() {
 		return dflow.NewDFlowParser(a, d, t, c)
 	}
 
+	// Aggregator route parsers (the hops are trades of their venues)
+	dp.routeParserFactories[constants.DEX_PROGRAMS.TITAN.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewTitanParser(a, d, t, c)
+	}
+	dp.routeParserFactories[constants.DEX_PROGRAMS.OKX_DEX_V2.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewOKXV2Parser(a, d, t, c)
+	}
+
 	// Liquidity parsers
 	dp.liquidityParserFactories[constants.DEX_PROGRAMS.METEORA.ID] = func(a *adapter.TransactionAdapter, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.LiquidityParser {
 		return meteora.NewMeteoraDLMMPoolParser(a, t, c)
@@ -301,6 +312,16 @@ func (dp *DexParser) RegisterTransferParser(programId string, factory TransferPa
 // RegisterMemeEventParser registers a meme event parser for a program ID
 func (dp *DexParser) RegisterMemeEventParser(programId string, factory MemeEventParserFactory) {
 	dp.memeEventParserFactories[programId] = factory
+}
+
+// RegisterRouteParser registers the route parser of an aggregator program
+// whose swaps run by CPI through venue programs (Titan and OKX DEX Router V2
+// by default). Its trades are the aggregator's own totals, one per route
+// instruction: they are not added to Trades (the venues' hop trades are),
+// but the aggregate trade takes them in place of the hops they cover. The
+// program's transfer groups are not read by the unknown-DEX fallback.
+func (dp *DexParser) RegisterRouteParser(programId string, factory TradeParserFactory) {
+	dp.routeParserFactories[programId] = factory
 }
 
 // ParseTrades parses trades from a transaction
@@ -658,7 +679,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 			isOrderProgram := containsString(jupiterOrderProgramIds, programId)
 			parser := factory(adapt, dexInfoFor(programId), transferActions, instrClassifier.GetInstructions(programId))
 			for _, trade := range parser.ProcessTrades() {
-				outer, inner := splitIdx(trade.Idx)
+				outer, inner := utils.SplitIdx(trade.Idx)
 				if owner, ok := coveredBy[outer]; ok && owner != programId {
 					continue
 				}
@@ -697,6 +718,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		classifiedInstructions := instrClassifier.GetInstructions(programId)
 
 		// Process trades
+		_, isRouteProgram := dp.routeParserFactories[programId]
 		if shouldParseTrades && !containsString(jupiterProgramIds, programId) {
 			if factory, ok := dp.tradeParserFactories[programId]; ok {
 				instructions := classifiedInstructions
@@ -711,16 +733,16 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 				if len(instructions) > 0 {
 					parser := factory(adapt, dexInfoFor(programId), transferActions, instructions)
 					for _, trade := range parser.ProcessTrades() {
-						if !isCovered(splitIdx(trade.Idx)) {
+						if !isCovered(utils.SplitIdx(trade.Idx)) {
 							trades = append(trades, trade)
 						}
 					}
 				}
-			} else if config.TryUnknownDEX {
+			} else if config.TryUnknownDEX && !isRouteProgram {
 				// Try to parse unknown DEX programs from their transfer groups
 				prefix := programId + ":"
 				for _, key := range utils.SortedTransferKeys(transferActions) {
-					if !strings.HasPrefix(key, prefix) || isCovered(splitIdx(key[len(prefix):])) {
+					if !strings.HasPrefix(key, prefix) || isCovered(utils.SplitIdx(key[len(prefix):])) {
 						continue
 					}
 					transfers := transferActions[key]
@@ -787,7 +809,21 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 			result.Trades = trades
 		}
 		if shouldAggregate {
-			aggregateTrade := utils.GetFinalSwap(trades, &dexInfo)
+			// Aggregator routes: the route trade replaces the hops it covers
+			var routes []types.TradeInfo
+			for _, programId := range allProgramIds {
+				factory, ok := dp.routeParserFactories[programId]
+				if !ok || !programAllowed(programId) {
+					continue
+				}
+				parser := factory(adapt, dexInfoFor(programId), transferActions, instrClassifier.GetInstructions(programId))
+				for _, route := range parser.ProcessTrades() {
+					if !isCovered(utils.SplitIdx(route.Idx)) {
+						routes = append(routes, route)
+					}
+				}
+			}
+			aggregateTrade := utils.GetFinalSwap(routeAggregateTrades(adapt, trades, routes), &dexInfo)
 			if aggregateTrade != nil {
 				result.AggregateTrade = txUtils.AttachTradeFee(aggregateTrade)
 			}
@@ -833,33 +869,6 @@ func containsString(slice []string, val string) bool {
 	return false
 }
 
-// outerIndexOf returns the outer instruction index of an idx ("5" or "5-3"),
-// or -1 when it cannot be parsed
-func outerIndexOf(idx string) int {
-	if i := strings.IndexByte(idx, '-'); i >= 0 {
-		idx = idx[:i]
-	}
-	n, err := strconv.Atoi(idx)
-	if err != nil {
-		return -1
-	}
-	return n
-}
-
-// splitIdx returns the outer and inner instruction index of an idx ("5" gives
-// 5, -1; "5-3" gives 5, 3), or -1, -1 when it cannot be parsed
-func splitIdx(idx string) (int, int) {
-	i := strings.IndexByte(idx, '-')
-	if i < 0 {
-		return outerIndexOf(idx), -1
-	}
-	inner, err := strconv.Atoi(idx[i+1:])
-	if err != nil {
-		return -1, -1
-	}
-	return outerIndexOf(idx[:i]), inner
-}
-
 // jupiterCPIRange returns the inner range [first, last] of the subtree of the
 // programId instruction that produced a Jupiter trade at (outer, inner), when
 // that instruction runs by CPI inside the outer instruction of a program that
@@ -897,6 +906,56 @@ func jupiterCPIRange(adapt *adapter.TransactionAdapter, programId string, outer,
 		last = j
 	}
 	return root, last, true
+}
+
+// routeAggregateTrades returns the trades the aggregate trade is built from:
+// trades, with the hop trades that ran inside an aggregator route
+// instruction (its CPI group) replaced by that route's trade, which carries
+// what the user sent and received. The route trade keeps the hops' pools,
+// AMMs and explicit fees (after its own). A route without a hop trade is left
+// out: its hops were not parsed, so the transaction has no trades for it.
+func routeAggregateTrades(adapt *adapter.TransactionAdapter, trades, routes []types.TradeInfo) []types.TradeInfo {
+	if len(routes) == 0 {
+		return trades
+	}
+	result := make([]types.TradeInfo, 0, len(trades))
+	covered := make([]bool, len(trades))
+	for _, route := range utils.SortTradesByIdx(routes) {
+		outer, inner := utils.SplitIdx(route.Idx)
+		first, last := utils.CPIGroup(adapt, types.ClassifiedInstruction{ProgramId: route.ProgramId, OuterIndex: outer, InnerIndex: inner})
+		hops := 0
+		for i, trade := range trades {
+			hopOuter, hopInner := utils.SplitIdx(trade.Idx)
+			if covered[i] || hopOuter != outer || hopInner < first || hopInner > last {
+				continue
+			}
+			covered[i] = true
+			hops++
+			for _, pool := range trade.Pool {
+				if !containsString(route.Pool, pool) {
+					route.Pool = append(route.Pool, pool)
+				}
+			}
+			for _, amm := range append([]string{trade.AMM}, trade.AMMs...) {
+				if amm != "" && amm != "Unknown" && !containsString(route.AMMs, amm) {
+					route.AMMs = append(route.AMMs, amm)
+				}
+			}
+			if trade.Fee != nil {
+				route.Fees = append(route.Fees, *trade.Fee)
+			}
+			route.Fees = append(route.Fees, trade.Fees...)
+		}
+		if hops > 0 {
+			result = append(result, route)
+		}
+	}
+	for i, trade := range trades {
+		if !covered[i] {
+			result = append(result, trade)
+		}
+	}
+	return result
 }
 
 // txSignature returns the first signature of tx for error messages
