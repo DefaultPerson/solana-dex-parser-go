@@ -214,7 +214,10 @@ func (p *JupiterDCAParser) parseClosed(event *JupiterDCAOrderEvent, ci types.Cla
 		if t.Info.Mint != event.InputMint && t.Info.Mint != event.OutputMint {
 			continue
 		}
+		// Reported as a DCA transfer like OpenDca: the order program's id,
+		// not the token program's
 		t.Type = "CloseDca"
+		t.ProgramId = constants.DEX_PROGRAMS.JUPITER_DCA.ID
 		t.Idx = idx
 		transfers = append(transfers, t)
 	}

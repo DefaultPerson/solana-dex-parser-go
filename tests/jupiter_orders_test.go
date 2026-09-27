@@ -101,7 +101,7 @@ func TestJupiterDCAOpenClose(t *testing.T) {
 			t.Fatalf("%.8s: transfers %+v", sig, r.Transfers)
 		}
 		tf := r.Transfers[0]
-		if tf.Type != "OpenDca" || tf.Info.Mint != inMint || tf.Info.TokenAmount.Amount != deposited.String() ||
+		if tf.Type != "OpenDca" || tf.ProgramId != jupDCAID || tf.Info.Mint != inMint || tf.Info.TokenAmount.Amount != deposited.String() ||
 			tf.Info.Destination != inAta || tf.Info.Authority != user || tf.Idx != jupRawIdx(open) {
 			t.Errorf("%.8s: transfer %s %s %s -> %s auth %s idx %s", sig, tf.Type, tf.Info.Mint, tf.Info.TokenAmount.Amount, tf.Info.Destination, tf.Info.Authority, tf.Idx)
 		}
@@ -124,8 +124,9 @@ func TestJupiterDCAOpenClose(t *testing.T) {
 		t.Fatalf("%.8s: transfers %+v", sig, r.Transfers)
 	}
 	tf := r.Transfers[0]
-	if tf.Type != "CloseDca" || tf.Info.Mint != inMint || tf.Info.TokenAmount.Amount != unfilled.String() || tf.Info.Source != inAta {
-		t.Errorf("%.8s: transfer %s %s %s from %s", sig, tf.Type, tf.Info.Mint, tf.Info.TokenAmount.Amount, tf.Info.Source)
+	// the transfer is reported under the DCA program like OpenDca (R2-G3)
+	if tf.Type != "CloseDca" || tf.ProgramId != jupDCAID || tf.Info.Mint != inMint || tf.Info.TokenAmount.Amount != unfilled.String() || tf.Info.Source != inAta {
+		t.Errorf("%.8s: transfer %s prog %s %s %s from %s", sig, tf.Type, tf.ProgramId, tf.Info.Mint, tf.Info.TokenAmount.Amount, tf.Info.Source)
 	}
 }
 
