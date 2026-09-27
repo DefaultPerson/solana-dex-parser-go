@@ -117,14 +117,14 @@ Fetch transactions with `"encoding": "json"` and `"maxSupportedTransactionVersio
 - When any Jupiter program runs in the transaction, its trades are authoritative for the instructions it covers and nested AMM trades are not repeated. Liquidity, meme events and transfers are still parsed for the whole transaction.
 - `Transfers` is filled only when the transaction has no trades and no liquidity events (DCA, VA and limit-order programs report their own deposits and withdrawals).
 - `Idx` is `"N"` for an outer instruction and `"N-M"` for inner instruction M of outer instruction N; every list is sorted numerically by it.
-- Programs without a parser but with a known name (see the tables) and, with `TryUnknownDEX`, unknown programs are parsed from their transfers when one leg is SOL or a stablecoin; their AMM is the program name or `"Unknown"`.
+- With `TryUnknownDEX` (on for a nil config), programs without a dedicated parser, known or not, are parsed from their transfers when one leg is SOL or a stablecoin; their AMM is the program name or `"Unknown"`.
 - `ParseResult.Warnings` lists what made a result incomplete (fetcher errors, unresolved lookup-table accounts); `State` is not affected.
 
 Full reference: [Getting Started](https://defaultperson.github.io/solana-dex-parser-go/getting-started/).
 
 ## Supported protocols
 
-✅ parsed by a dedicated parser, ❌ not parsed, ➖ not applicable. "Known" programs have no dedicated parser: they name the route or AMM of a trade and are parsed from their transfers (see above).
+✅ parsed by a dedicated parser, ❌ not parsed, ➖ not applicable. "Known" programs have no dedicated parser: they name the route or AMM of a trade and, with `TryUnknownDEX`, are parsed from their transfers (see above).
 Legacy entries are kept so historical transactions still parse.
 
 ### Aggregators and routers
