@@ -115,7 +115,8 @@ func GetPubkeyString(value interface{}) string {
 	}
 }
 
-// SortByIdx sorts items by their idx field (format: "main-sub")
+// SortByIdx sorts items by their idx field (format: "main-sub") numerically.
+// The sort is stable and returns a new slice.
 func SortByIdx[T interface{ GetIdx() string }](items []T) []T {
 	if len(items) <= 1 {
 		return items
@@ -124,14 +125,15 @@ func SortByIdx[T interface{ GetIdx() string }](items []T) []T {
 	sorted := make([]T, len(items))
 	copy(sorted, items)
 
-	sort.Slice(sorted, func(i, j int) bool {
+	sort.SliceStable(sorted, func(i, j int) bool {
 		return compareIdx(sorted[i].GetIdx(), sorted[j].GetIdx()) < 0
 	})
 
 	return sorted
 }
 
-// SortTradesByIdx sorts TradeInfo slice by idx
+// SortTradesByIdx sorts TradeInfo slice by idx numerically ("5" < "5-0" <
+// "5-10" < "6"). The sort is stable and returns a new slice.
 func SortTradesByIdx(trades []types.TradeInfo) []types.TradeInfo {
 	if len(trades) <= 1 {
 		return trades
@@ -140,7 +142,7 @@ func SortTradesByIdx(trades []types.TradeInfo) []types.TradeInfo {
 	sorted := make([]types.TradeInfo, len(trades))
 	copy(sorted, trades)
 
-	sort.Slice(sorted, func(i, j int) bool {
+	sort.SliceStable(sorted, func(i, j int) bool {
 		return compareIdx(sorted[i].Idx, sorted[j].Idx) < 0
 	})
 
@@ -177,19 +179,22 @@ func compareIdx(a, b string) int {
 	return aSub - bSub
 }
 
-// GetFinalSwap aggregates multiple trades into a single final swap
+// GetFinalSwap aggregates multiple trades into a single final swap.
+// Trades are ordered by idx (execution order) first; the input token is the
+// first trade's input token and the output token the last trade's output
+// token, with the amounts summed over the trades using those mints. Fees lists
+// the explicit fees of all trades (Fee is set when exactly one trade has one)
+// and AMMs the AMMs of all trades.
+// The returned trade is always a new value and never aliases an element of trades.
 func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.TradeInfo {
 	if len(trades) == 0 {
 		return nil
 	}
 	if len(trades) == 1 {
-		return &trades[0]
+		return copyTrade(trades[0])
 	}
 
-	// Sort by idx
-	if len(trades) > 2 {
-		trades = SortTradesByIdx(trades)
-	}
+	trades = SortTradesByIdx(trades)
 
 	inputTrade := trades[0]
 	outputTrade := trades[len(trades)-1]
@@ -217,7 +222,20 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 		}
 	}
 
+	// AMMs of all trades in execution order
+	var amms []string
+	for _, trade := range trades {
+		for _, name := range append([]string{trade.AMM}, trade.AMMs...) {
+			if name != "" && !containsString(amms, name) {
+				amms = append(amms, name)
+			}
+		}
+	}
+
 	amm := inputTrade.AMM
+	if amm == "" && len(amms) > 0 {
+		amm = amms[0]
+	}
 	route := inputTrade.Route
 	if dexInfo != nil {
 		if dexInfo.AMM != "" {
@@ -228,30 +246,86 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 		}
 	}
 
-	return &types.TradeInfo{
-		Type: GetTradeType(inputTrade.InputToken.Mint, outputTrade.OutputToken.Mint),
-		Pool: pools,
-		InputToken: types.TokenInfo{
-			Mint:      inputTrade.InputToken.Mint,
-			AmountRaw: inputAmount.String(),
-			Amount:    types.ConvertToUIAmount(inputAmount, inputTrade.InputToken.Decimals),
-			Decimals:  inputTrade.InputToken.Decimals,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      outputTrade.OutputToken.Mint,
-			AmountRaw: outputAmount.String(),
-			Amount:    types.ConvertToUIAmount(outputAmount, outputTrade.OutputToken.Decimals),
-			Decimals:  outputTrade.OutputToken.Decimals,
-		},
-		User:      inputTrade.User,
-		ProgramId: inputTrade.ProgramId,
-		AMM:       amm,
-		Route:     route,
-		Slot:      inputTrade.Slot,
-		Timestamp: inputTrade.Timestamp,
-		Signature: inputTrade.Signature,
-		Idx:       inputTrade.Idx,
+	// Keep the account and balance details of the first input and last output
+	inputToken := inputTrade.InputToken
+	inputToken.AmountRaw = inputAmount.String()
+	inputToken.Amount = types.ConvertToUIAmount(inputAmount, inputTrade.InputToken.Decimals)
+	outputToken := outputTrade.OutputToken
+	outputToken.AmountRaw = outputAmount.String()
+	outputToken.Amount = types.ConvertToUIAmount(outputAmount, outputTrade.OutputToken.Decimals)
+
+	var signer []string
+	if len(inputTrade.Signer) > 0 {
+		signer = append([]string(nil), inputTrade.Signer...)
 	}
+
+	// Explicit fees reported by the parsers for the individual trades
+	var fee *types.FeeInfo
+	var fees []types.FeeInfo
+	feeCount := 0
+	for _, trade := range trades {
+		if trade.Fee != nil && !isZeroAmount(trade.Fee.AmountRaw) {
+			feeCount++
+			f := *trade.Fee
+			fee = &f
+			fees = append(fees, f)
+		}
+		for _, f := range trade.Fees {
+			if !isZeroAmount(f.AmountRaw) {
+				fees = append(fees, f)
+			}
+		}
+	}
+	if feeCount != 1 {
+		fee = nil
+	}
+
+	return &types.TradeInfo{
+		Type:        GetTradeType(inputTrade.InputToken.Mint, outputTrade.OutputToken.Mint),
+		Pool:        pools,
+		InputToken:  inputToken,
+		OutputToken: outputToken,
+		User:        inputTrade.User,
+		ProgramId:   inputTrade.ProgramId,
+		AMM:         amm,
+		AMMs:        amms,
+		Route:       route,
+		Slot:        inputTrade.Slot,
+		Timestamp:   inputTrade.Timestamp,
+		Signature:   inputTrade.Signature,
+		Idx:         inputTrade.Idx,
+		Signer:      signer,
+		Fee:         fee,
+		Fees:        fees,
+	}
+}
+
+// isZeroAmount reports whether a raw amount is empty or zero
+func isZeroAmount(amount string) bool {
+	v, ok := new(big.Int).SetString(amount, 10)
+	return !ok || v.Sign() == 0
+}
+
+// copyTrade returns a copy of trade whose slices and fee do not alias the original
+func copyTrade(trade types.TradeInfo) *types.TradeInfo {
+	c := trade
+	if trade.Pool != nil {
+		c.Pool = append([]string(nil), trade.Pool...)
+	}
+	if trade.Signer != nil {
+		c.Signer = append([]string(nil), trade.Signer...)
+	}
+	if trade.AMMs != nil {
+		c.AMMs = append([]string(nil), trade.AMMs...)
+	}
+	if trade.Fees != nil {
+		c.Fees = append([]types.FeeInfo(nil), trade.Fees...)
+	}
+	if trade.Fee != nil {
+		fee := *trade.Fee
+		c.Fee = &fee
+	}
+	return &c
 }
 
 // FindAssociatedTokenAddress computes the associated token address for a wallet and mint

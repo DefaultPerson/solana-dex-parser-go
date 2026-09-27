@@ -2,6 +2,7 @@ package utils
 
 import (
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,50 +22,68 @@ func NewTransactionUtils(adapter *adapter.TransactionAdapter) *TransactionUtils 
 	return &TransactionUtils{adapter: adapter}
 }
 
-// GetDexInfo extracts DEX information from transaction
+// GetDexInfo extracts DEX information from transaction.
+// It returns the first program (in first-appearance order, see
+// InstructionClassifier.GetAllProgramIds) that is a known DEX program, is not a
+// vault and is not a wallet/authority entry. Its name becomes the Route unless
+// the program is tagged "amm", in which case it becomes the AMM. Without a
+// known program, ProgramId is the first program of the transaction.
 func (tu *TransactionUtils) GetDexInfo(classifier *classifier.InstructionClassifier) types.DexInfo {
 	programIds := classifier.GetAllProgramIds()
 	if len(programIds) == 0 {
 		return types.DexInfo{}
 	}
 
-	info := types.DexInfo{}
-
 	for _, programId := range programIds {
-		prog := constants.GetDexProgramByID(programId)
-		if prog.Name == "" {
+		if isAuthorityEntry(programId) {
 			continue
 		}
-
-		hasAmmTag := false
-		for _, tag := range prog.Tags {
-			if tag == "amm" {
-				hasAmmTag = true
-				break
-			}
+		prog := constants.GetDexProgramByID(programId)
+		if prog.Name == "" || hasTag(prog, "vault") {
+			continue
 		}
-
-		if hasAmmTag {
-			if info.AMM == "" {
-				info.AMM = prog.Name
-				if info.ProgramId == "" {
-					info.ProgramId = prog.ID
-				}
-			}
-		} else {
-			if info.Route == "" {
-				info.Route = prog.Name
-				info.ProgramId = prog.ID
-			}
+		if hasTag(prog, "amm") {
+			return types.DexInfo{ProgramId: prog.ID, AMM: prog.Name}
 		}
+		return types.DexInfo{ProgramId: prog.ID, Route: prog.Name}
 	}
 
-	if info.ProgramId == "" && len(programIds) > 0 {
-		info.ProgramId = programIds[0]
-	}
-
-	return info
+	return types.DexInfo{ProgramId: programIds[0]}
 }
+
+// hasTag reports whether a DEX program carries the given tag
+func hasTag(prog constants.DexProgram, tag string) bool {
+	for _, t := range prog.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// isAuthorityEntry reports whether id is listed in DEX_PROGRAMS as a wallet or
+// authority (Jupiter DCA keepers, OKX router authority) rather than a program
+func isAuthorityEntry(id string) bool {
+	switch id {
+	case constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER1.ID,
+		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER2.ID,
+		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER3.ID,
+		constants.DEX_PROGRAMS.OKX_ROUTER.ID:
+		return true
+	}
+	return false
+}
+
+// vaultPrograms lists the DEX programs tagged "vault"
+var vaultPrograms = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, id := range constants.DEX_PROGRAM_IDS {
+		if prog := constants.GetDexProgramByID(id); hasTag(prog, "vault") {
+			m[id] = true
+		}
+	}
+	return m
+}()
 
 // GetTransferActions extracts transfer actions from transaction
 func (tu *TransactionUtils) GetTransferActions(extraTypes []string) map[string][]types.TransferData {
@@ -76,7 +95,10 @@ func (tu *TransactionUtils) GetTransferActions(extraTypes []string) map[string][
 	// Process transfers of program instructions
 	for _, set := range innerInstructions {
 		outerIndex := set.Index
-		outerInstruction := tu.adapter.Instructions()[outerIndex]
+		outerInstruction := tu.adapter.InstructionAt(outerIndex)
+		if outerInstruction == nil {
+			continue
+		}
 		outerProgramId := tu.adapter.GetInstructionProgramId(outerInstruction)
 
 		if constants.IsSystemProgram(outerProgramId) {
@@ -145,11 +167,9 @@ func (tu *TransactionUtils) parseParsedInstructionAction(ix *adapter.UnifiedInst
 	if IsTransferCheck(ix) {
 		return ProcessTransferCheck(ix, idx, tu.adapter)
 	}
-	if extraTypes != nil {
-		for _, actionType := range extraTypes {
-			if IsExtraAction(ix, actionType) {
-				return ProcessExtraAction(ix, idx, tu.adapter, actionType)
-			}
+	for _, actionType := range extraTypes {
+		if IsExtraAction(ix, actionType) {
+			return ProcessExtraAction(ix, idx, tu.adapter, actionType)
 		}
 	}
 	return nil
@@ -166,35 +186,23 @@ func (tu *TransactionUtils) parseCompiledInstructionAction(ix *adapter.UnifiedIn
 	if IsCompiledTransferCheck(ix) {
 		return ProcessCompiledTransferCheck(ix, idx, tu.adapter)
 	}
-	if extraTypes != nil {
-		for _, actionType := range extraTypes {
-			if IsCompiledExtraAction(ix, actionType) {
-				return ProcessCompiledExtraAction(ix, idx, tu.adapter, actionType)
-			}
+	for _, actionType := range extraTypes {
+		if IsCompiledExtraAction(ix, actionType) {
+			return ProcessCompiledExtraAction(ix, idx, tu.adapter, actionType)
 		}
 	}
 	return nil
 }
 
-// isIgnoredProgram checks if program should be ignored for grouping
+// isIgnoredProgram checks if program should be ignored for grouping: skipped
+// programs and every program tagged "vault" (their CPIs belong to the caller)
 func (tu *TransactionUtils) isIgnoredProgram(programId string) bool {
 	for _, p := range constants.SKIP_PROGRAM_IDS {
 		if p == programId {
 			return true
 		}
 	}
-	// Check vault programs
-	vaultPrograms := []string{
-		constants.DEX_PROGRAMS.METEORA_VAULT.ID,
-		constants.DEX_PROGRAMS.STABBEL_VAULT.ID,
-		constants.DEX_PROGRAMS.HEAVEN_VAULT.ID,
-	}
-	for _, p := range vaultPrograms {
-		if p == programId {
-			return true
-		}
-	}
-	return false
+	return vaultPrograms[programId]
 }
 
 // ProcessSwapData processes swap data from transfers
@@ -209,7 +217,7 @@ func (tu *TransactionUtils) ProcessSwapData(transfers []types.TransferData, dexI
 	}
 
 	signer := tu.getSwapSigner()
-	inputToken, outputToken, feeTransfer := tu.calculateTokenAmounts(signer, transfers, uniqueTokens)
+	inputToken, outputToken, feeTransfer := tu.calculateTokenAmounts(signer, transfers, uniqueTokens, skipNative)
 
 	trade := &types.TradeInfo{
 		Type:        GetTradeType(inputToken.Mint, outputToken.Mint),
@@ -226,9 +234,13 @@ func (tu *TransactionUtils) ProcessSwapData(transfers []types.TransferData, dexI
 	}
 
 	if feeTransfer != nil {
+		feeUIAmount := float64(0)
+		if feeTransfer.Info.TokenAmount.UIAmount != nil {
+			feeUIAmount = *feeTransfer.Info.TokenAmount.UIAmount
+		}
 		trade.Fee = &types.FeeInfo{
 			Mint:      feeTransfer.Info.Mint,
-			Amount:    *feeTransfer.Info.TokenAmount.UIAmount,
+			Amount:    feeUIAmount,
 			AmountRaw: feeTransfer.Info.TokenAmount.Amount,
 			Decimals:  feeTransfer.Info.TokenAmount.Decimals,
 		}
@@ -259,7 +271,9 @@ func (tu *TransactionUtils) extractUniqueTokens(transfers []types.TransferData, 
 	seenTokens := make(map[string]bool)
 
 	for _, transfer := range transfers {
-		if skipNative && transfer.Info.Mint == constants.TOKENS.NATIVE {
+		// Native SOL transfers (System program: fees, tips, account funding)
+		// are not swap legs; SOL moved by the pool travels as WSOL.
+		if skipNative && transfer.ProgramId == constants.SYSTEM_PROGRAM_ID {
 			continue
 		}
 		tokenInfo := tu.GetTransferTokenInfo(&transfer)
@@ -273,7 +287,7 @@ func (tu *TransactionUtils) extractUniqueTokens(transfers []types.TransferData, 
 }
 
 // calculateTokenAmounts calculates token amounts for swap
-func (tu *TransactionUtils) calculateTokenAmounts(signer string, transfers []types.TransferData, uniqueTokens []types.TokenInfo) (types.TokenInfo, types.TokenInfo, *types.TransferData) {
+func (tu *TransactionUtils) calculateTokenAmounts(signer string, transfers []types.TransferData, uniqueTokens []types.TokenInfo, skipNative bool) (types.TokenInfo, types.TokenInfo, *types.TransferData) {
 	inputToken := uniqueTokens[0]
 	outputToken := uniqueTokens[len(uniqueTokens)-1]
 
@@ -283,62 +297,72 @@ func (tu *TransactionUtils) calculateTokenAmounts(signer string, transfers []typ
 		inputToken, outputToken = outputToken, inputToken
 	}
 
-	inputAmount, inputAmountRaw, outputAmount, outputAmountRaw, feeTransfer := tu.sumTokenAmounts(transfers, inputToken.Mint, outputToken.Mint, signer)
+	inputAmountRaw, outputAmountRaw, feeTransfer := tu.sumTokenAmounts(transfers, inputToken.Mint, outputToken.Mint, signer, skipNative)
 
-	inputToken.Amount = inputAmount
 	inputToken.AmountRaw = inputAmountRaw.String()
-	outputToken.Amount = outputAmount
+	inputToken.Amount = types.ConvertToUIAmount(inputAmountRaw, inputToken.Decimals)
 	outputToken.AmountRaw = outputAmountRaw.String()
+	outputToken.Amount = types.ConvertToUIAmount(outputAmountRaw, outputToken.Decimals)
 
 	return inputToken, outputToken, feeTransfer
 }
 
-// sumTokenAmounts sums token amounts from transfers
-func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inputMint, outputMint, signer string) (float64, *big.Int, float64, *big.Int, *types.TransferData) {
-	seenTransfers := make(map[string]bool)
-	var inputAmount, outputAmount float64
+// sumTokenAmounts sums the raw amounts of the transfers of the input and output
+// mints. A transfer that forwards the same mint and amount from (or to) an
+// account an already counted transfer ended at (or started from) is a
+// pass-through leg and is counted once; independent transfers of equal size
+// (split legs, equal fee splits) are all counted. With skipNative, System
+// program transfers (fees, tips, rent) are ignored.
+func (tu *TransactionUtils) sumTokenAmounts(transfers []types.TransferData, inputMint, outputMint, signer string, skipNative bool) (*big.Int, *big.Int, *types.TransferData) {
+	var counted []*types.TransferData
 	inputAmountRaw := big.NewInt(0)
 	outputAmountRaw := big.NewInt(0)
 	var feeTransfer *types.TransferData
 
+	isPassThrough := func(t *types.TransferData) bool {
+		for _, c := range counted {
+			if c.Info.Mint == t.Info.Mint && c.Info.TokenAmount.Amount == t.Info.TokenAmount.Amount &&
+				((t.Info.Source != "" && t.Info.Source == c.Info.Destination) ||
+					(t.Info.Destination != "" && t.Info.Destination == c.Info.Source)) {
+				return true
+			}
+		}
+		return false
+	}
+
 	for i := range transfers {
 		transfer := &transfers[i]
-		tokenInfo := tu.GetTransferTokenInfo(transfer)
-		if tokenInfo == nil {
+		if skipNative && transfer.ProgramId == constants.SYSTEM_PROGRAM_ID {
 			continue
 		}
 
-		destination := tokenInfo.DestinationOwner
+		destination := transfer.Info.DestinationOwner
 		if destination == "" {
-			destination = tokenInfo.Destination
+			destination = transfer.Info.Destination
 		}
 		if constants.IsFeeAccount(destination) {
 			feeTransfer = transfer
 			continue
 		}
-		if tokenInfo.Authority == constants.DEX_PROGRAMS.OKX_ROUTER.ID && destination == signer {
+		if transfer.Info.Authority == constants.DEX_PROGRAMS.OKX_ROUTER.ID && destination == signer {
 			continue
 		}
 
-		key := tokenInfo.AmountRaw + "-" + tokenInfo.Mint
-		if seenTransfers[key] {
+		if isPassThrough(transfer) {
 			continue
 		}
-		seenTransfers[key] = true
+		counted = append(counted, transfer)
 
-		if tokenInfo.Mint == inputMint {
-			inputAmount += tokenInfo.Amount
-			amt, _ := new(big.Int).SetString(tokenInfo.AmountRaw, 10)
-			inputAmountRaw.Add(inputAmountRaw, amt)
+		amount := parseAmount(transfer.Info.TokenAmount.Amount)
+		if transfer.Info.Mint == inputMint {
+			inputAmountRaw.Add(inputAmountRaw, amount)
 		}
-		if tokenInfo.Mint == outputMint {
-			outputAmount += tokenInfo.Amount
-			amt, _ := new(big.Int).SetString(tokenInfo.AmountRaw, 10)
-			outputAmountRaw.Add(outputAmountRaw, amt)
+		if transfer.Info.Mint == outputMint {
+			outputAmountRaw.Add(outputAmountRaw, amount)
 		}
 	}
 
-	return inputAmount, inputAmountRaw, outputAmount, outputAmountRaw, feeTransfer
+	return inputAmountRaw, outputAmountRaw, feeTransfer
 }
 
 // GetTransferTokenInfo gets token info from transfer data
@@ -383,7 +407,9 @@ func (tu *TransactionUtils) GetLPTransfers(transfers []types.TransferData) []typ
 	return tokens
 }
 
-// AttachTokenTransferInfo attaches token transfer info to trade
+// AttachTokenTransferInfo attaches token transfer info to trade. The input and
+// output transfers are the first transfers, in execution order, whose mint and
+// amount match the trade.
 func (tu *TransactionUtils) AttachTokenTransferInfo(trade *types.TradeInfo, transferActions map[string][]types.TransferData) *types.TradeInfo {
 	if trade == nil {
 		return nil
@@ -391,13 +417,14 @@ func (tu *TransactionUtils) AttachTokenTransferInfo(trade *types.TradeInfo, tran
 
 	// Find input and output transfers
 	var inputTransfer, outputTransfer *types.TransferData
-	for _, transfers := range transferActions {
+	for _, key := range SortedTransferKeys(transferActions) {
+		transfers := transferActions[key]
 		for i := range transfers {
 			t := &transfers[i]
-			if t.Info.Mint == trade.InputToken.Mint && t.Info.TokenAmount.Amount == trade.InputToken.AmountRaw {
+			if inputTransfer == nil && t.Info.Mint == trade.InputToken.Mint && t.Info.TokenAmount.Amount == trade.InputToken.AmountRaw {
 				inputTransfer = t
 			}
-			if t.Info.Mint == trade.OutputToken.Mint && t.Info.TokenAmount.Amount == trade.OutputToken.AmountRaw {
+			if outputTransfer == nil && t.Info.Mint == trade.OutputToken.Mint && t.Info.TokenAmount.Amount == trade.OutputToken.AmountRaw {
 				outputTransfer = t
 			}
 		}
@@ -513,55 +540,31 @@ func (tu *TransactionUtils) AttachUserBalanceToLPs(liquidities []types.PoolEvent
 	return liquidities
 }
 
-// AttachTradeFee attaches fee information to trade
+// AttachTradeFee completes a trade (typically the aggregate trade) after
+// parsing. It does not infer fees: Fee stays what the parsers reported from
+// protocol fee events or fee transfers. For SOL input it sets
+// InputToken.BalanceChange to the user's SOL change (SOL and token account
+// lamports of the user, summed) when that exceeds the input amount, fills
+// Signer when it is empty, and attributes a trading bot (DetectBot). Like
+// AttachTokenTransferInfo, the input BalanceChange is the absolute amount spent.
 func (tu *TransactionUtils) AttachTradeFee(trade *types.TradeInfo) *types.TradeInfo {
 	if trade == nil {
 		return nil
 	}
 
-	if trade.Fee == nil {
-		mint := trade.OutputToken.Mint
-
-		var token *types.BalanceChange
-		if mint == constants.TOKENS.SOL {
-			token = tu.adapter.GetAccountSolBalanceChanges(true)[trade.User]
-		} else {
-			if userTokens, ok := tu.adapter.GetAccountTokenBalanceChanges(true)[trade.User]; ok {
-				token = userTokens[mint]
-			}
-		}
-
-		if token != nil {
-			outputAmount, _ := new(big.Int).SetString(trade.OutputToken.AmountRaw, 10)
-			changeAmount, _ := new(big.Int).SetString(token.Change.Amount, 10)
-			feeAmount := new(big.Int).Sub(outputAmount, changeAmount)
-
-			if feeAmount.Sign() > 0 {
-				feeUIAmount := types.ConvertToUIAmount(feeAmount, trade.OutputToken.Decimals)
-				trade.Fee = &types.FeeInfo{
-					Mint:      mint,
-					Amount:    feeUIAmount,
-					AmountRaw: feeAmount.String(),
-					Decimals:  trade.OutputToken.Decimals,
-				}
-				trade.OutputToken.BalanceChange = token.Change.Amount
+	if trade.InputToken.Mint == constants.TOKENS.SOL {
+		token := tu.adapter.GetAccountSolBalanceChanges(true)[trade.User]
+		if token != nil && token.Change.Amount != "" && trade.InputToken.AmountRaw != "" {
+			change, ok1 := new(big.Int).SetString(token.Change.Amount, 10)
+			input, ok2 := new(big.Int).SetString(trade.InputToken.AmountRaw, 10)
+			if ok1 && ok2 && change.Sign() < 0 && new(big.Int).Abs(change).Cmp(input) > 0 {
+				trade.InputToken.BalanceChange = new(big.Int).Abs(change).String()
 			}
 		}
 	}
 
-	if trade.InputToken.Mint == constants.TOKENS.SOL {
-		token := tu.adapter.GetAccountSolBalanceChanges(true)[trade.User]
-		if token != nil {
-			if token.Change.UIAmount != nil {
-				changeAbs := *token.Change.UIAmount
-				if changeAbs < 0 {
-					changeAbs = -changeAbs
-				}
-				if changeAbs > trade.InputToken.Amount {
-					trade.InputToken.BalanceChange = token.Change.Amount
-				}
-			}
-		}
+	if len(trade.Signer) == 0 {
+		trade.Signer = tu.adapter.Signers()
 	}
 
 	// Detect trading bot from fee transfers
@@ -570,31 +573,153 @@ func (tu *TransactionUtils) AttachTradeFee(trade *types.TradeInfo) *types.TradeI
 	return trade
 }
 
-// DetectBot detects trading bot from SOL transfers to known bot fee accounts
+// BotFeeMinLamports is the smallest SOL/WSOL amount a bot fee account must
+// receive in a transaction for DetectBot to attribute the trade to that bot.
+// Smaller credits are dust (address poisoning) and do not count.
+const BotFeeMinLamports = 10000
+
+// DetectBot attributes a trading bot when one of the bot's fee accounts
+// receives at least BotFeeMinLamports of SOL (lamports) or WSOL in the
+// transaction. The first such account in account-key order wins.
 func (tu *TransactionUtils) DetectBot(trade *types.TradeInfo) {
 	if trade == nil || trade.Bot != "" {
 		return
 	}
 
-	// Check all account keys for bot fee accounts
+	solChanges := tu.adapter.GetAccountSolBalanceChanges(false)
+	tokenChanges := tu.adapter.GetAccountTokenBalanceChanges(true)
+	minFee := big.NewInt(BotFeeMinLamports)
+	received := func(change *types.BalanceChange) bool {
+		if change == nil {
+			return false
+		}
+		v, ok := new(big.Int).SetString(change.Change.Amount, 10)
+		return ok && v.Cmp(minFee) >= 0
+	}
+
 	for _, account := range tu.adapter.AccountKeys {
-		if botName := constants.GetBotName(account); botName != "" {
+		botName := constants.GetBotName(account)
+		if botName == "" {
+			continue
+		}
+		if received(solChanges[account]) {
+			trade.Bot = botName
+			return
+		}
+		if byMint, ok := tokenChanges[account]; ok && received(byMint[constants.TOKENS.SOL]) {
 			trade.Bot = botName
 			return
 		}
 	}
+}
 
-	// Check SOL balance changes for fee transfers to bot accounts
-	solChanges := tu.adapter.GetAccountSolBalanceChanges(false)
-	for account, change := range solChanges {
-		// Bot fee accounts receive SOL (positive change)
-		if change != nil && change.Change.UIAmount != nil && *change.Change.UIAmount > 0 {
-			if botName := constants.GetBotName(account); botName != "" {
-				trade.Bot = botName
-				return
-			}
+// ApplyToken2022TransferFee makes the output of a trade what the user
+// actually received when it was delivered by a Token-2022 transfer that
+// withheld a transfer fee (TransferFee extension): the destination account is
+// credited less than the transferred amount. transfers are all transfers of the
+// transaction (SortedTransfers). The withheld amount is derived from the
+// destination's balances, incoming and outgoing transfers, applied only when
+// the delivering transfer is the account's only credit, and reported in Fees
+// with Type "transferFee".
+func (tu *TransactionUtils) ApplyToken2022TransferFee(trade *types.TradeInfo, transfers []types.TransferData) {
+	if trade == nil || trade.OutputToken.Mint == "" || trade.OutputToken.Mint == constants.TOKENS.SOL {
+		return
+	}
+	mint := trade.OutputToken.Mint
+
+	var delivered *types.TransferData
+	for i := range transfers {
+		t := &transfers[i]
+		if t.ProgramId == constants.TOKEN_2022_PROGRAM_ID && t.Info.Mint == mint &&
+			t.Info.TokenAmount.Amount == trade.OutputToken.AmountRaw &&
+			tu.adapter.GetTokenAccountOwner(t.Info.Destination) == trade.User {
+			delivered = t
+			break
 		}
 	}
+	if delivered == nil {
+		return
+	}
+	dest := delivered.Info.Destination
+	post := tu.adapter.GetTokenAccountBalance([]string{dest})[0]
+	if post == nil {
+		return // closed or unknown: cannot account for it
+	}
+	preAmount := new(big.Int)
+	if pre := tu.adapter.GetTokenAccountPreBalance([]string{dest})[0]; pre != nil {
+		preAmount = parseAmount(pre.Amount)
+	}
+
+	incoming, outgoing := new(big.Int), new(big.Int)
+	for _, t := range transfers {
+		if t.Info.Mint != mint {
+			continue
+		}
+		amount := parseAmount(t.Info.TokenAmount.Amount)
+		if t.Info.Destination == dest {
+			incoming.Add(incoming, amount)
+		}
+		if t.Info.Source == dest {
+			outgoing.Add(outgoing, amount)
+		}
+	}
+	amount := parseAmount(delivered.Info.TokenAmount.Amount)
+	if incoming.Cmp(amount) != 0 {
+		return // other credits: the fee cannot be attributed
+	}
+	// withheld = incoming - outgoing - (post - pre)
+	withheld := new(big.Int).Sub(incoming, outgoing)
+	withheld.Sub(withheld, new(big.Int).Sub(parseAmount(post.Amount), preAmount))
+	if withheld.Sign() <= 0 || withheld.Cmp(amount) >= 0 {
+		return
+	}
+
+	received := new(big.Int).Sub(amount, withheld)
+	decimals := trade.OutputToken.Decimals
+	trade.OutputToken.AmountRaw = received.String()
+	trade.OutputToken.Amount = types.ConvertToUIAmount(received, decimals)
+	trade.Fees = append(trade.Fees, types.FeeInfo{
+		Mint:      mint,
+		Amount:    types.ConvertToUIAmount(withheld, decimals),
+		AmountRaw: withheld.String(),
+		Decimals:  decimals,
+		Type:      "transferFee",
+	})
+}
+
+// SortedTransferKeys returns the keys of transferActions in execution order of
+// their first transfer (numeric idx), so that iteration is deterministic.
+func SortedTransferKeys(transferActions map[string][]types.TransferData) []string {
+	keys := make([]string, 0, len(transferActions))
+	for key := range transferActions {
+		keys = append(keys, key)
+	}
+	firstIdx := func(key string) string {
+		if transfers := transferActions[key]; len(transfers) > 0 {
+			return transfers[0].Idx
+		}
+		return ""
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if c := compareIdx(firstIdx(keys[i]), firstIdx(keys[j])); c != 0 {
+			return c < 0
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+// SortedTransfers returns all transfers of transferActions in execution order
+// (numeric idx).
+func SortedTransfers(transferActions map[string][]types.TransferData) []types.TransferData {
+	var all []types.TransferData
+	for _, key := range SortedTransferKeys(transferActions) {
+		all = append(all, transferActions[key]...)
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		return compareIdx(all[i].Idx, all[j].Idx) < 0
+	})
+	return all
 }
 
 // GetTransfersForInstruction gets transfers for a specific instruction
