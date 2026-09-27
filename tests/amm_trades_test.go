@@ -85,10 +85,6 @@ func feeOfType(trade types.TradeInfo, feeType string) string {
 	return ""
 }
 
-func u64s(data []byte, offset int) string {
-	return strconv.FormatUint(binary.LittleEndian.Uint64(data[offset:offset+8]), 10)
-}
-
 // TestAmmNoTradesFromLiquidityInstructions: pool creation, liquidity and fee
 // instructions move tokens but are not swaps (amm-6, constants-2, parity-7,
 // parity-16, constants-v1). Real transactions; before the fix each produced
@@ -226,11 +222,11 @@ func TestOrcaTradePoolAndTradedEvent(t *testing.T) {
 			tr.OutputToken.AmountRaw != transferAmount(t, ctx, c.transferOutIdx[0], c.transferOutIdx[1]) {
 			t.Errorf("hop %d: amounts %s -> %s differ from the transfers", i, tr.InputToken.AmountRaw, tr.OutputToken.AmountRaw)
 		}
-		if tr.Fee == nil || tr.Fee.AmountRaw != u64s(ev, 105) || tr.Fee.Mint != tr.InputToken.Mint {
-			t.Errorf("hop %d: fee %+v, Traded lp_fee %s", i, tr.Fee, u64s(ev, 105))
+		if tr.Fee == nil || tr.Fee.AmountRaw != u64At(ev, 105) || tr.Fee.Mint != tr.InputToken.Mint {
+			t.Errorf("hop %d: fee %+v, Traded lp_fee %s", i, tr.Fee, u64At(ev, 105))
 		}
-		if feeOfType(tr, "protocol") != u64s(ev, 113) {
-			t.Errorf("hop %d: protocol fee %s, Traded protocol_fee %s", i, feeOfType(tr, "protocol"), u64s(ev, 113))
+		if feeOfType(tr, "protocol") != u64At(ev, 113) {
+			t.Errorf("hop %d: protocol fee %s, Traded protocol_fee %s", i, feeOfType(tr, "protocol"), u64At(ev, 113))
 		}
 	}
 }
@@ -320,11 +316,11 @@ func TestRaydiumCPMMSwapEventToken2022(t *testing.T) {
 		t.Fatal("no SwapEvent with fees")
 	}
 	// SwapEvent: ..., output_transfer_fee @80, ..., trade_fee @153, creator_fee @161
-	if tr.Fee == nil || tr.Fee.AmountRaw != u64s(ev, 153) || tr.Fee.Mint != tr.InputToken.Mint {
-		t.Errorf("fee %+v, SwapEvent trade_fee %s", tr.Fee, u64s(ev, 153))
+	if tr.Fee == nil || tr.Fee.AmountRaw != u64At(ev, 153) || tr.Fee.Mint != tr.InputToken.Mint {
+		t.Errorf("fee %+v, SwapEvent trade_fee %s", tr.Fee, u64At(ev, 153))
 	}
-	if feeOfType(tr, "creator") != u64s(ev, 161) {
-		t.Errorf("creator fee %s, SwapEvent %s", feeOfType(tr, "creator"), u64s(ev, 161))
+	if feeOfType(tr, "creator") != u64At(ev, 161) {
+		t.Errorf("creator fee %s, SwapEvent %s", feeOfType(tr, "creator"), u64At(ev, 161))
 	}
 	var outputTransferFee string
 	for _, f := range tr.Fees {
@@ -332,8 +328,8 @@ func TestRaydiumCPMMSwapEventToken2022(t *testing.T) {
 			outputTransferFee = f.AmountRaw
 		}
 	}
-	if outputTransferFee != u64s(ev, 80) {
-		t.Errorf("output transfer fee %s, SwapEvent %s", outputTransferFee, u64s(ev, 80))
+	if outputTransferFee != u64At(ev, 80) {
+		t.Errorf("output transfer fee %s, SwapEvent %s", outputTransferFee, u64At(ev, 80))
 	}
 }
 
@@ -509,20 +505,20 @@ func TestMeteoraDLMMSwap2Event(t *testing.T) {
 	}
 	// Swap2Evt: prefix 16, lb_pair, from, bins, swap_for_y @88, fee_bps u128,
 	// amount_in @105, amount_left @113, amount_out @121, mm_fee @129, protocol_fee @137
-	if tr.InputToken.AmountRaw != u64s(swap2, 105) || tr.OutputToken.AmountRaw != u64s(swap2, 121) {
-		t.Errorf("amounts %s -> %s, Swap2Evt %s -> %s", tr.InputToken.AmountRaw, tr.OutputToken.AmountRaw, u64s(swap2, 105), u64s(swap2, 121))
+	if tr.InputToken.AmountRaw != u64At(swap2, 105) || tr.OutputToken.AmountRaw != u64At(swap2, 121) {
+		t.Errorf("amounts %s -> %s, Swap2Evt %s -> %s", tr.InputToken.AmountRaw, tr.OutputToken.AmountRaw, u64At(swap2, 105), u64At(swap2, 121))
 	}
 	if tr.InputToken.AmountRaw != transferAmount(t, ctx, 1, 0) || tr.OutputToken.AmountRaw != transferAmount(t, ctx, 1, 1) {
 		t.Errorf("amounts differ from the transfers")
 	}
-	if tr.Fee == nil || tr.Fee.AmountRaw != u64s(swap2, 129) || feeOfType(tr, "protocol") != u64s(swap2, 137) {
-		t.Errorf("fees %+v %+v, Swap2Evt mm_fee %s protocol %s", tr.Fee, tr.Fees, u64s(swap2, 129), u64s(swap2, 137))
+	if tr.Fee == nil || tr.Fee.AmountRaw != u64At(swap2, 129) || feeOfType(tr, "protocol") != u64At(swap2, 137) {
+		t.Errorf("fees %+v %+v, Swap2Evt mm_fee %s protocol %s", tr.Fee, tr.Fees, u64At(swap2, 129), u64At(swap2, 137))
 	}
 	// Swap: fee @105, protocol_fee @113
-	fee, _ := new(big.Int).SetString(u64s(swapEv, 105), 10)
-	protocol, _ := new(big.Int).SetString(u64s(swapEv, 113), 10)
-	if new(big.Int).Sub(fee, protocol).String() != u64s(swap2, 129) {
-		t.Errorf("Swap fee %s - protocol %s != Swap2Evt mm_fee %s", fee, protocol, u64s(swap2, 129))
+	fee, _ := new(big.Int).SetString(u64At(swapEv, 105), 10)
+	protocol, _ := new(big.Int).SetString(u64At(swapEv, 113), 10)
+	if new(big.Int).Sub(fee, protocol).String() != u64At(swap2, 129) {
+		t.Errorf("Swap fee %s - protocol %s != Swap2Evt mm_fee %s", fee, protocol, u64At(swap2, 129))
 	}
 }
 
