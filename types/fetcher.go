@@ -39,7 +39,9 @@ type ALTsFetcher struct {
 	// Input: slice of ALT lookup references from transaction
 	// Output: map of ALT account key -> LoadedAddresses, where Writable holds
 	// the addresses at the lookup's WritableIndexes and Readonly those at its
-	// ReadonlyIndexes, in index order. On error the accounts stay unresolved.
+	// ReadonlyIndexes, in index order. On error the accounts stay unresolved
+	// and the error text goes into ParseResult.Warnings (URLs cut to scheme
+	// and host), so do not put other secrets in it.
 	Fetch func(alts []AddressTableLookup) (map[string]*LoadedAddresses, error)
 }
 
@@ -63,6 +65,8 @@ type TokenAccountsFetcher struct {
 	// Fetch retrieves token account information for given account keys
 	// Input: slice of token account public keys
 	// Output: slice of TokenAccountInfo in the same order (nil for accounts that couldn't be fetched)
+	// On error the error text goes into ParseResult.Warnings (URLs cut to
+	// scheme and host), so do not put other secrets in it.
 	Fetch func(accountKeys []string) ([]*TokenAccountInfo, error)
 }
 

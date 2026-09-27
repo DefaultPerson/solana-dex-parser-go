@@ -2,6 +2,9 @@ package tests
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -96,6 +99,35 @@ func TestCore2FetcherErrorsSurfaced(t *testing.T) {
 	r = p.ParseAll(hidden, &cfg)
 	if !r.State || !hasWarning(r.Warnings, "TokenAccountsFetcher: timeout") {
 		t.Errorf("TokenAccountsFetcher error: State=%v Warnings=%v", r.State, r.Warnings)
+	}
+}
+
+// TestCore2FetcherWarningsRedactURLs: fetcher error text went into
+// ParseResult.Warnings verbatim, and RPC client errors quote the endpoint URL,
+// whose query, path or user info often holds an API key. URLs are now cut to
+// scheme and host.
+func TestCore2FetcherWarningsRedactURLs(t *testing.T) {
+	const secret = "SECRETKEY123"
+	errs := map[error]string{
+		// net/http client error (*url.Error)
+		&url.Error{Op: "Post", URL: "https://mainnet.helius-rpc.com/?api-key=" + secret, Err: errors.New("context deadline exceeded")}: `ALTsFetcher: Post "https://mainnet.helius-rpc.com": context deadline exceeded`,
+		// key in the path, wrapped error
+		fmt.Errorf("getMultipleAccounts: %w", errors.New("429 from https://solana-mainnet.g.alchemy.com/v2/"+secret+" retry later")): "ALTsFetcher: getMultipleAccounts: 429 from https://solana-mainnet.g.alchemy.com retry later",
+		// key in the user info of a websocket URL
+		errors.New("dial wss://user:" + secret + "@rpc.example.com:8900/ws failed"): "ALTsFetcher: dial wss://rpc.example.com:8900 failed",
+	}
+	p := dexparser.NewDexParser()
+	for fetchErr, want := range errs {
+		stripped := cloneTx(t, loadFixture(t, sigTwoLookups))
+		stripped.Meta.LoadedAddresses = nil
+		cfg := types.DefaultParseConfig()
+		cfg.ALTsFetcher = types.NewALTsFetcher(types.FetchFilterAll, func([]types.AddressTableLookup) (map[string]*types.LoadedAddresses, error) {
+			return nil, fetchErr
+		})
+		r := p.ParseAll(stripped, &cfg)
+		if !hasWarning(r.Warnings, want) || strings.Contains(strings.Join(r.Warnings, " "), secret) {
+			t.Errorf("error %q: Warnings = %q, want %q", fetchErr, r.Warnings, want)
+		}
 	}
 }
 

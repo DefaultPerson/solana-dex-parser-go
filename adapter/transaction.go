@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math/big"
 	"reflect"
+	"regexp"
 	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -256,8 +257,19 @@ func (a *TransactionAdapter) HasUnresolvedAccounts() bool {
 // returned by ParseConfig.ALTsFetcher or ParseConfig.TokenAccountsFetcher, and
 // address lookup table accounts that stayed unresolved. The data affected by
 // them is incomplete (empty account keys, token accounts guessed as SOL).
+// Fetcher error text is included with URLs cut to scheme and host.
 func (a *TransactionAdapter) Warnings() []string {
 	return append([]string(nil), a.warnings...)
+}
+
+// urlPattern matches a URL; group 1 is the scheme, group 2 the host
+var urlPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*)://(?:[^\s/?#@"'<>]*@)?([^\s/?#"'<>]+)[^\s"'<>]*`)
+
+// fetcherWarning formats a fetcher error for Warnings. RPC client errors often
+// quote the endpoint URL, whose path, query or user info may hold an API key,
+// so every URL is cut to scheme and host.
+func fetcherWarning(fetcher string, err error) string {
+	return fetcher + ": " + urlPattern.ReplaceAllString(err.Error(), "${1}://${2}")
 }
 
 // buildIndexes builds the account index and token balance lookups
@@ -534,7 +546,7 @@ func (a *TransactionAdapter) resolveLookups(lookups []AddressTableLookup, static
 			if res, err := fetcher.Fetch(missing); err == nil {
 				fetched = res
 			} else {
-				a.warnings = append(a.warnings, "ALTsFetcher: "+err.Error())
+				a.warnings = append(a.warnings, fetcherWarning("ALTsFetcher", err))
 			}
 		}
 	}
@@ -1177,7 +1189,7 @@ func (a *TransactionAdapter) fetchTokenAccounts() {
 	sort.Strings(keys)
 	infos, err := a.Config.TokenAccountsFetcher.Fetch(keys)
 	if err != nil {
-		a.warnings = append(a.warnings, "TokenAccountsFetcher: "+err.Error())
+		a.warnings = append(a.warnings, fetcherWarning("TokenAccountsFetcher", err))
 		return
 	}
 	for i, info := range infos {

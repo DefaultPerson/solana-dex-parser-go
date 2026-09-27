@@ -144,7 +144,8 @@ type ParseResult struct {
 
 	// Warnings lists non-fatal problems that make the result incomplete, such
 	// as ALTsFetcher / TokenAccountsFetcher errors or unresolved address lookup
-	// table accounts. State is not affected.
+	// table accounts. Fetcher error text is copied with every URL cut to
+	// scheme and host. State is not affected.
 	Warnings []string `json:"warnings,omitempty"`
 
 	// Tip is the total SOL (lamports) paid by System transfers to known
