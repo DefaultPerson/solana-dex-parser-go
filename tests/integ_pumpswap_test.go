@@ -1,10 +1,10 @@
 package tests
 
 import (
+	"bytes"
 	"testing"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
-	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
@@ -13,59 +13,72 @@ import (
 // stablecoin takes its type from the event: a buy of the pool's base token
 // is BUY, a sell SELL. Before, PumpSwap typed every trade whose input was
 // not SOL, USDC or USDT as SELL, and Jupiter hops copy the venue's type.
-// Synthetic: no such pool is in the fixtures. Built from the real buy
-// 1bdrt5y1... and sell 2F1tqd2p... of WSOL-quoted pools, with WSOL renamed
-// to the PUMP mint (6 decimals, as in the real 24U4tyX7...) in the account
-// keys and token balances.
+//
+// Real trades in the PumpSwap pool 95XExVtM..., whose base is 3KM7dv... and
+// whose quote is the PUMP mint: direct PumpSwap buys CPI'd by Axiom and
+// DFlow, and a buy and a sell as Jupiter hops. The truth is the side of the
+// pump_amm instruction (buy or sell, IDL accounts pool 0, base_mint 3,
+// quote_mint 4), decoded from the raw fixture.
 func TestIntegPumpSwapTokenQuotedType(t *testing.T) {
-	const pumpMint = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"
-	cases := []struct {
-		sig  string
-		want types.TradeType
-	}{
-		{"1bdrt5y1Nz5tRygDaEBxTv8wCL8nPazSm6LRRpTPG74tX6DzPtmvx55iTqaX7Uc8B3x2q7oxZ5yc9hvPrQgUALv", types.TradeTypeBuy},
-		{"2F1tqd2pi7BRCEsffg3nvtQdfuA3dbwNaT8aSGtyjVd4p2y4YZh8ZfvTbWU4CqPjDAij9Qdg58GkX35paoH79XdE", types.TradeTypeSell},
+	const pool = "95XExVtMNeEW5NFajZwaL22Q1gPSzMoin864akzRCo7"
+	sigs := []string{
+		"2nZogzJEMFtAS8rsKiAohAT4ja15N5aLe6iuuh2bakxMoJx6vq1XLhgZrwRwA1CY25rYjKFQeCCiauSMMmCeycrF", // Axiom: USDC -> PUMP -> base
+		"i8tFZYDUoAXQLtpQjQKXmuo5oi1t2aXnf4AEMEcbrDRXMef3tzcznU8qrn317DygRhfNgm8qKdYpYerZFv6UGyE",  // DFlow
+		"vdEvGDG7gCv6By1jPYqpZQtPo4KaNkjzeXjHtmQQ3sfSm2yPKKadmD4uxxiGjXctk5zyVYEgShrfw4GzHk32zdp",  // Jupiter hop, buy
+		"4GGEEgo8Bw9NcusTT2Hm8utYEcp72iZnmzXNE3h8rcMnLeFyx5ApFu1A4TiEk3NPimGMUrDnJjNd32794BroFvbk", // Jupiter hop, sell
 	}
-	for _, tc := range cases {
-		tx := cloneTx(t, loadFixture(t, tc.sig))
-		for i := range tx.Transaction.Message.AccountKeys {
-			if tx.Transaction.Message.AccountKeys[i].Pubkey == constants.TOKENS.SOL {
-				tx.Transaction.Message.AccountKeys[i].Pubkey = pumpMint
-			}
-		}
-		if tx.Meta.LoadedAddresses != nil {
-			for _, list := range [][]string{tx.Meta.LoadedAddresses.Writable, tx.Meta.LoadedAddresses.Readonly} {
-				for i := range list {
-					if list[i] == constants.TOKENS.SOL {
-						list[i] = pumpMint
-					}
+	d := constants.DISCRIMINATORS.PUMPSWAP
+	sides := map[types.TradeType]int{}
+	for _, sig := range sigs {
+		// the pump_amm swap on the pool, from the raw transaction
+		raw := loadMemeRaw(t, sig)
+		var want types.TradeType
+		var baseMint, quoteMint string
+		for outer := range raw.outer {
+			for inner := -1; inner < len(raw.inner[outer]); inner++ {
+				accounts := raw.accounts(outer, inner)
+				if raw.program(outer, inner) != constants.DEX_PROGRAMS.PUMP_SWAP.ID || len(accounts) < 5 || accounts[0] != pool {
+					continue
 				}
-			}
-		}
-		for _, balances := range [][]adapter.TokenBalance{tx.Meta.PreTokenBalances, tx.Meta.PostTokenBalances} {
-			for i := range balances {
-				if balances[i].Mint == constants.TOKENS.SOL {
-					balances[i].Mint, balances[i].UiTokenAmount.Decimals, balances[i].UiTokenAmount.UIAmount = pumpMint, 6, nil
+				data := raw.data(outer, inner)
+				switch {
+				case bytes.HasPrefix(data, d.BUY) || bytes.HasPrefix(data, d.BUY_EXACT_QUOTE_IN):
+					want = types.TradeTypeBuy
+				case bytes.HasPrefix(data, d.SELL):
+					want = types.TradeTypeSell
+				default:
+					continue
 				}
+				baseMint, quoteMint = accounts[3], accounts[4]
 			}
 		}
+		if want == "" {
+			t.Fatalf("%.8s: no pump_amm buy or sell on %s", sig, pool)
+		}
+		if constants.IsQuoteToken(quoteMint) || constants.IsQuoteToken(baseMint) {
+			t.Fatalf("%.8s: pool %s is quoted in %s, not a token-quoted pool", sig, pool, quoteMint)
+		}
+		sides[want]++
 
 		var trades []types.TradeInfo
-		for _, tr := range dexparser.NewDexParser().ParseAll(tx, nil).Trades {
-			if tr.ProgramId == constants.DEX_PROGRAMS.PUMP_SWAP.ID {
+		for _, tr := range dexparser.NewDexParser().ParseAll(loadFixture(t, sig), nil).Trades {
+			if containsStr(tr.Pool, pool) {
 				trades = append(trades, tr)
 			}
 		}
 		if len(trades) != 1 {
-			t.Fatalf("%s: %d PumpSwap trades, want 1", tc.sig[:8], len(trades))
+			t.Fatalf("%.8s: %d trades in pool %s, want 1", sig, len(trades), pool)
 		}
 		tr := trades[0]
-		quote := tr.InputToken.Mint
-		if tc.want == types.TradeTypeSell {
-			quote = tr.OutputToken.Mint
+		in, out := quoteMint, baseMint
+		if want == types.TradeTypeSell {
+			in, out = baseMint, quoteMint
 		}
-		if tr.Type != tc.want || quote != pumpMint {
-			t.Errorf("%s: %s %s -> %s, want %s with the PUMP quote", tc.sig[:8], tr.Type, tr.InputToken.Mint, tr.OutputToken.Mint, tc.want)
+		if tr.Type != want || tr.AMM != constants.DEX_PROGRAMS.PUMP_SWAP.Name || tr.InputToken.Mint != in || tr.OutputToken.Mint != out {
+			t.Errorf("%.8s: %s %s %s -> %s, want %s %s -> %s", sig, tr.AMM, tr.Type, tr.InputToken.Mint, tr.OutputToken.Mint, want, in, out)
 		}
+	}
+	if sides[types.TradeTypeBuy] == 0 || sides[types.TradeTypeSell] == 0 {
+		t.Errorf("fixtures cover sides %v, want both", sides)
 	}
 }
