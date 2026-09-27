@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +47,32 @@ func fixturePath(sig, encoding string) string {
 		return filepath.Join(fixtureDir, sig+".parsed.json.gz")
 	}
 	return filepath.Join(fixtureDir, sig+".json.gz")
+}
+
+// fixtureSignatures lists the signatures of all stored fixtures for encoding
+// ("json" or "jsonParsed"), sorted.
+func fixtureSignatures(t testing.TB, encoding string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(fixtureDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", fixtureDir, err)
+	}
+	var sigs []string
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasSuffix(name, ".parsed.json.gz"):
+			if encoding == "jsonParsed" {
+				sigs = append(sigs, strings.TrimSuffix(name, ".parsed.json.gz"))
+			}
+		case strings.HasSuffix(name, ".json.gz"):
+			if encoding == "json" {
+				sigs = append(sigs, strings.TrimSuffix(name, ".json.gz"))
+			}
+		}
+	}
+	sort.Strings(sigs)
+	return sigs
 }
 
 func loadFixtureEncoding(t testing.TB, sig, encoding string) *adapter.SolanaTransaction {
