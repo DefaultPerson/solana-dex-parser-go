@@ -2,7 +2,7 @@ package raydium
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
@@ -27,145 +27,104 @@ func NewLaunchpadShredParser(adapter *adapter.TransactionAdapter, classifier *cl
 
 // ProcessInstructions processes Raydium LCP instructions and returns parsed results
 func (p *LaunchpadShredParser) ProcessInstructions() []interface{} {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.RAYDIUM_LCP.ID)
-	return p.parseInstructions(instructions)
+	events, _ := p.ProcessAll()
+	return events
 }
 
 // ProcessTypedInstructions returns typed ParsedShredInstruction results
 func (p *LaunchpadShredParser) ProcessTypedInstructions() []types.ParsedShredInstruction {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.RAYDIUM_LCP.ID)
-	return p.parseTypedInstructions(instructions)
+	_, typed := p.ProcessAll()
+	return typed
 }
 
-func (p *LaunchpadShredParser) parseInstructions(instructions []types.ClassifiedInstruction) []interface{} {
+// ProcessAll decodes the LaunchLab instructions into legacy events and typed
+// meme events in a single pass
+func (p *LaunchpadShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
 	var events []interface{}
+	var typed []types.ParsedShredInstruction
+	d := constants.DISCRIMINATORS.RAYDIUM_LCP
 
-	for _, ci := range instructions {
+	for _, ci := range p.classifier.GetInstructions(constants.DEX_PROGRAMS.RAYDIUM_LCP.ID) {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 8 {
 			continue
 		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
+		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+		disc, payload := data[:8], data[8:]
 
 		var eventType string
 		var eventData interface{}
-
-		payload := data[8:]
-
-		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.INITIALIZE):
-			eventType = "create"
-			eventData = p.decodeCreateInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_IN):
-			eventType = "buy_exact_in"
-			eventData = p.decodeBuyExactIn(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_OUT):
-			eventType = "buy_exact_out"
-			eventData = p.decodeBuyExactOut(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_IN):
-			eventType = "sell_exact_in"
-			eventData = p.decodeSellExactIn(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_OUT):
-			eventType = "sell_exact_out"
-			eventData = p.decodeSellExactOut(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_AMM):
-			eventType = "migrate_to_amm"
-			eventData = p.decodeMigrateToAMM(ci.Instruction)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_CPSWAP):
-			eventType = "migrate_to_cpswap"
-			eventData = p.decodeMigrateToCPSwap(ci.Instruction)
-		default:
-			continue
-		}
-
-		if eventData != nil {
-			event := &LaunchpadShredInstruction{
-				Type:      eventType,
-				Data:      eventData,
-				Slot:      p.adapter.Slot(),
-				Timestamp: p.adapter.BlockTime(),
-				Signature: p.adapter.Signature(),
-				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
-				Signer:    p.adapter.Signers(),
-			}
-			events = append(events, event)
-		}
-	}
-
-	return events
-}
-
-func (p *LaunchpadShredParser) parseTypedInstructions(instructions []types.ClassifiedInstruction) []types.ParsedShredInstruction {
-	var events []types.ParsedShredInstruction
-
-	for _, ci := range instructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 8 {
-			continue
-		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
-		var eventType string
 		var memeEvent *types.MemeEvent
-
-		payload := data[8:]
-		idx := utils.FormatIdx(ci.OuterIndex, innerIdx)
+		var inKind, outKind types.ShredAmountKind
 
 		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.INITIALIZE):
-			eventType = "create"
-			memeEvent = p.decodeCreateMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_IN):
-			eventType = "buy_exact_in"
-			memeEvent = p.decodeBuyExactInMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_OUT):
-			eventType = "buy_exact_out"
-			memeEvent = p.decodeBuyExactOutMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_IN):
-			eventType = "sell_exact_in"
-			memeEvent = p.decodeSellExactInMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_OUT):
-			eventType = "sell_exact_out"
-			memeEvent = p.decodeSellExactOutMemeEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_AMM):
-			eventType = "migrate_to_amm"
-			memeEvent = p.decodeMigrateToAMMMemeEvent(ci.Instruction)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_CPSWAP):
-			eventType = "migrate_to_cpswap"
-			memeEvent = p.decodeMigrateToCPSwapMemeEvent(ci.Instruction)
+		case bytes.Equal(disc, d.INITIALIZE), bytes.Equal(disc, d.INITIALIZE_V2), bytes.Equal(disc, d.INITIALIZE_WITH_TOKEN_2022):
+			if create := p.decodeCreateInstruction(accounts, payload); create != nil {
+				eventType, eventData, memeEvent = "create", create, p.createMemeEvent(create)
+			}
+		case bytes.Equal(disc, d.BUY_EXACT_IN):
+			if trade := p.decodeTrade(accounts, payload, true, false); trade != nil {
+				eventType, eventData, memeEvent = "buy_exact_in", trade, p.buildMemeEvent(trade)
+				inKind, outKind = types.ShredAmountExact, types.ShredAmountMin
+			}
+		case bytes.Equal(disc, d.BUY_EXACT_OUT):
+			if trade := p.decodeTrade(accounts, payload, true, true); trade != nil {
+				eventType, eventData, memeEvent = "buy_exact_out", trade, p.buildMemeEvent(trade)
+				inKind, outKind = types.ShredAmountMax, types.ShredAmountExact
+			}
+		case bytes.Equal(disc, d.SELL_EXACT_IN):
+			if trade := p.decodeTrade(accounts, payload, false, false); trade != nil {
+				eventType, eventData, memeEvent = "sell_exact_in", trade, p.buildMemeEvent(trade)
+				inKind, outKind = types.ShredAmountExact, types.ShredAmountMin
+			}
+		case bytes.Equal(disc, d.SELL_EXACT_OUT):
+			if trade := p.decodeTrade(accounts, payload, false, true); trade != nil {
+				eventType, eventData, memeEvent = "sell_exact_out", trade, p.buildMemeEvent(trade)
+				inKind, outKind = types.ShredAmountMax, types.ShredAmountExact
+			}
+		case bytes.Equal(disc, d.MIGRATE_TO_AMM):
+			if migrate := p.decodeMigrateToAMM(accounts, payload); migrate != nil {
+				eventType, eventData, memeEvent = "migrate_to_amm", migrate, p.migrateMemeEvent(migrate)
+			}
+		case bytes.Equal(disc, d.MIGRATE_TO_CPSWAP):
+			if migrate := p.decodeMigrateToCPSwap(accounts); migrate != nil {
+				eventType, eventData, memeEvent = "migrate_to_cpswap", migrate, p.migrateMemeEvent(migrate)
+			}
 		default:
 			continue
 		}
 
-		if memeEvent != nil {
-			memeEvent.Signature = p.adapter.Signature()
-			memeEvent.Slot = p.adapter.Slot()
-			memeEvent.Timestamp = p.adapter.BlockTime()
-			memeEvent.Idx = idx
-
-			event := types.ParsedShredInstruction{
-				ProgramID:   constants.DEX_PROGRAMS.RAYDIUM_LCP.ID,
-				ProgramName: constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-				Action:      eventType,
-				MemeEvent:   memeEvent,
-				Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
-				Idx:         idx,
-			}
-			events = append(events, event)
+		if eventData == nil {
+			continue
 		}
+		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+		events = append(events, &LaunchpadShredInstruction{
+			Type:      eventType,
+			Data:      eventData,
+			Slot:      p.adapter.Slot(),
+			Timestamp: p.adapter.BlockTime(),
+			Signature: p.adapter.Signature(),
+			Idx:       idx,
+			Signer:    p.adapter.Signers(),
+		})
+
+		memeEvent.Signature = p.adapter.Signature()
+		memeEvent.Slot = p.adapter.Slot()
+		memeEvent.Timestamp = p.adapter.BlockTime()
+		memeEvent.Idx = idx
+		typed = append(typed, types.ParsedShredInstruction{
+			ProgramID:        constants.DEX_PROGRAMS.RAYDIUM_LCP.ID,
+			ProgramName:      constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+			Action:           eventType,
+			MemeEvent:        memeEvent,
+			Accounts:         accounts,
+			Idx:              idx,
+			InputAmountKind:  inKind,
+			OutputAmountKind: outKind,
+		})
 	}
 
-	return events
+	return events, typed
 }
 
 // LaunchpadShredInstruction represents a parsed Raydium LCP instruction
@@ -180,6 +139,7 @@ type LaunchpadShredInstruction struct {
 }
 
 // LaunchpadCreateData contains Raydium LCP create instruction data
+// (initialize, initialize_v2, initialize_with_token_2022)
 type LaunchpadCreateData struct {
 	User      string `json:"user"`
 	Pool      string `json:"pool"`
@@ -188,9 +148,19 @@ type LaunchpadCreateData struct {
 	Name      string `json:"name"`
 	Symbol    string `json:"symbol"`
 	URI       string `json:"uri"`
+	// Decimals is the base mint decimals argument
+	Decimals uint8 `json:"decimals"`
+	// Payer pays for the pool creation; User is the creator
+	Payer string `json:"payer,omitempty"`
+	// PlatformConfig is the launch platform's config account
+	PlatformConfig string `json:"platformConfig,omitempty"`
 }
 
-// LaunchpadTradeData contains Raydium LCP trade instruction data
+// LaunchpadTradeData contains Raydium LCP trade instruction data. The amounts
+// are instruction arguments: for the exact-in instructions InputAmount is
+// exact and OutputAmount the minimum output; for the exact-out instructions
+// (ExactOut) OutputAmount is exact and InputAmount the maximum input. Buys
+// spend the quote mint (WSOL, USD1, ...) for the base mint, sells the reverse.
 type LaunchpadTradeData struct {
 	User           string `json:"user"`
 	Pool           string `json:"pool"`
@@ -202,18 +172,27 @@ type LaunchpadTradeData struct {
 	OutputAmount   uint64 `json:"outputAmount"`
 	TradeType      string `json:"tradeType"`
 	PlatformConfig string `json:"platformConfig"`
+	// ShareFeeRate is the share_fee_rate argument
+	ShareFeeRate uint64 `json:"shareFeeRate,omitempty"`
+	// ExactOut is true for buy_exact_out and sell_exact_out
+	ExactOut bool `json:"exactOut,omitempty"`
 }
 
-// LaunchpadMigrateData contains Raydium LCP migrate instruction data
+// LaunchpadMigrateData contains Raydium LCP migrate instruction data: Pool
+// is the new AMM / CPMM pool, BondingCurve the LaunchLab pool_state
 type LaunchpadMigrateData struct {
-	BaseMint  string `json:"baseMint"`
-	QuoteMint string `json:"quoteMint"`
-	Pool      string `json:"pool"`
-	PoolDex   string `json:"poolDex"`
+	BaseMint     string `json:"baseMint"`
+	QuoteMint    string `json:"quoteMint"`
+	Pool         string `json:"pool"`
+	PoolDex      string `json:"poolDex"`
+	BondingCurve string `json:"bondingCurve,omitempty"`
 }
 
-func (p *LaunchpadShredParser) decodeCreateInstruction(instruction interface{}, data []byte) *LaunchpadCreateData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeCreateInstruction decodes MintParams (decimals u8, name, symbol,
+// uri), the first argument of initialize, initialize_v2 and
+// initialize_with_token_2022. Accounts: 0 payer, 1 creator,
+// 3 platform_config, 5 pool_state, 6 base_mint, 7 quote_mint.
+func (p *LaunchpadShredParser) decodeCreateInstruction(accounts []string, data []byte) *LaunchpadCreateData {
 	if len(accounts) < 8 {
 		return nil
 	}
@@ -221,8 +200,7 @@ func (p *LaunchpadShredParser) decodeCreateInstruction(instruction interface{}, 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
 
-	// Read MintParams
-	reader.ReadU8() // decimals
+	decimals, _ := reader.ReadU8()
 	name, err := reader.ReadString()
 	if err != nil {
 		return nil
@@ -237,279 +215,159 @@ func (p *LaunchpadShredParser) decodeCreateInstruction(instruction interface{}, 
 	}
 
 	return &LaunchpadCreateData{
-		User:      accounts[1],
-		Pool:      accounts[5],
-		BaseMint:  accounts[6],
-		QuoteMint: accounts[7],
-		Name:      name,
-		Symbol:    symbol,
-		URI:       uri,
+		User:           accounts[1],
+		Payer:          accounts[0],
+		PlatformConfig: accounts[3],
+		Pool:           accounts[5],
+		BaseMint:       accounts[6],
+		QuoteMint:      accounts[7],
+		Name:           name,
+		Symbol:         symbol,
+		URI:            uri,
+		Decimals:       decimals,
 	}
 }
 
-func (p *LaunchpadShredParser) decodeCreateMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	createData := p.decodeCreateInstruction(instruction, data)
-	if createData == nil {
-		return nil
-	}
-
+func (p *LaunchpadShredParser) createMemeEvent(createData *LaunchpadCreateData) *types.MemeEvent {
+	decimals := createData.Decimals
 	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Type:         types.TradeTypeCreate,
-		User:         createData.User,
-		BaseMint:     createData.BaseMint,
-		QuoteMint:    createData.QuoteMint,
-		Pool:         createData.Pool,
-		BondingCurve: createData.Pool,
-		Name:         createData.Name,
-		Symbol:       createData.Symbol,
-		URI:          createData.URI,
+		Protocol:       constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+		Type:           types.TradeTypeCreate,
+		User:           createData.User,
+		BaseMint:       createData.BaseMint,
+		QuoteMint:      createData.QuoteMint,
+		Pool:           createData.Pool,
+		BondingCurve:   createData.Pool,
+		PlatformConfig: createData.PlatformConfig,
+		Name:           createData.Name,
+		Symbol:         createData.Symbol,
+		URI:            createData.URI,
+		Decimals:       &decimals,
 	}
 }
 
-func (p *LaunchpadShredParser) decodeBuyExactIn(instruction interface{}, data []byte) *LaunchpadTradeData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeTrade decodes buy_exact_in (amount_in, minimum_amount_out),
+// buy_exact_out (amount_out, maximum_amount_in), sell_exact_in and
+// sell_exact_out, each followed by share_fee_rate. Accounts: 0 payer,
+// 3 platform_config, 4 pool_state, 9 base_token_mint, 10 quote_token_mint.
+func (p *LaunchpadShredParser) decodeTrade(accounts []string, data []byte, buy, exactOut bool) *LaunchpadTradeData {
 	if len(accounts) < 11 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-
+	first, _ := reader.ReadU64()
+	second, _ := reader.ReadU64()
 	if reader.HasError() {
 		return nil
 	}
+	shareFeeRate, _ := reader.ReadU64()
 
-	return &LaunchpadTradeData{
+	trade := &LaunchpadTradeData{
 		User:           accounts[0],
 		Pool:           accounts[4],
 		PlatformConfig: accounts[3],
 		BaseMint:       accounts[9],
 		QuoteMint:      accounts[10],
-		InputMint:      accounts[10], // quoteMint
-		OutputMint:     accounts[9],  // baseMint
-		InputAmount:    inputAmount,
-		OutputAmount:   outputAmount,
-		TradeType:      "buy",
+		ShareFeeRate:   shareFeeRate,
+		ExactOut:       exactOut,
 	}
+	if buy {
+		trade.InputMint, trade.OutputMint, trade.TradeType = trade.QuoteMint, trade.BaseMint, "buy"
+	} else {
+		trade.InputMint, trade.OutputMint, trade.TradeType = trade.BaseMint, trade.QuoteMint, "sell"
+	}
+	if exactOut {
+		trade.OutputAmount, trade.InputAmount = first, second
+	} else {
+		trade.InputAmount, trade.OutputAmount = first, second
+	}
+	return trade
 }
 
-func (p *LaunchpadShredParser) decodeBuyExactInMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	tradeData := p.decodeBuyExactIn(instruction, data)
-	if tradeData == nil {
-		return nil
+// decodeMigrateToAMM decodes migrate_to_amm. The current program takes no
+// arguments and 23 accounts (1 base_mint, 2 quote_mint, 5 amm_pool,
+// 14 pool_state); the earlier OpenBook layout takes (base_lot_size,
+// quote_lot_size, market_vault_signer_nonce) and 32 accounts (13 amm_pool,
+// 23 pool_state).
+func (p *LaunchpadShredParser) decodeMigrateToAMM(accounts []string, data []byte) *LaunchpadMigrateData {
+	pool, poolState := 5, 14
+	if len(data) >= 8+8+1 {
+		pool, poolState = 13, 23
 	}
-
-	return p.buildMemeEvent(tradeData, types.TradeTypeBuy)
-}
-
-func (p *LaunchpadShredParser) decodeBuyExactOut(instruction interface{}, data []byte) *LaunchpadTradeData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 11 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	outputAmount, _ := reader.ReadU64()
-	inputAmount, _ := reader.ReadU64()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &LaunchpadTradeData{
-		User:           accounts[0],
-		Pool:           accounts[4],
-		PlatformConfig: accounts[3],
-		BaseMint:       accounts[9],
-		QuoteMint:      accounts[10],
-		InputMint:      accounts[10], // quoteMint
-		OutputMint:     accounts[9],  // baseMint
-		InputAmount:    inputAmount,
-		OutputAmount:   outputAmount,
-		TradeType:      "buy",
-	}
-}
-
-func (p *LaunchpadShredParser) decodeBuyExactOutMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	tradeData := p.decodeBuyExactOut(instruction, data)
-	if tradeData == nil {
-		return nil
-	}
-
-	return p.buildMemeEvent(tradeData, types.TradeTypeBuy)
-}
-
-func (p *LaunchpadShredParser) decodeSellExactIn(instruction interface{}, data []byte) *LaunchpadTradeData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 11 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &LaunchpadTradeData{
-		User:           accounts[0],
-		Pool:           accounts[4],
-		PlatformConfig: accounts[3],
-		BaseMint:       accounts[9],
-		QuoteMint:      accounts[10],
-		InputMint:      accounts[9],  // baseMint
-		OutputMint:     accounts[10], // quoteMint
-		InputAmount:    inputAmount,
-		OutputAmount:   outputAmount,
-		TradeType:      "sell",
-	}
-}
-
-func (p *LaunchpadShredParser) decodeSellExactInMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	tradeData := p.decodeSellExactIn(instruction, data)
-	if tradeData == nil {
-		return nil
-	}
-
-	return p.buildMemeEvent(tradeData, types.TradeTypeSell)
-}
-
-func (p *LaunchpadShredParser) decodeSellExactOut(instruction interface{}, data []byte) *LaunchpadTradeData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 11 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	outputAmount, _ := reader.ReadU64()
-	inputAmount, _ := reader.ReadU64()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &LaunchpadTradeData{
-		User:           accounts[0],
-		Pool:           accounts[4],
-		PlatformConfig: accounts[3],
-		BaseMint:       accounts[9],
-		QuoteMint:      accounts[10],
-		InputMint:      accounts[9],  // baseMint
-		OutputMint:     accounts[10], // quoteMint
-		InputAmount:    inputAmount,
-		OutputAmount:   outputAmount,
-		TradeType:      "sell",
-	}
-}
-
-func (p *LaunchpadShredParser) decodeSellExactOutMemeEvent(instruction interface{}, data []byte) *types.MemeEvent {
-	tradeData := p.decodeSellExactOut(instruction, data)
-	if tradeData == nil {
-		return nil
-	}
-
-	return p.buildMemeEvent(tradeData, types.TradeTypeSell)
-}
-
-func (p *LaunchpadShredParser) decodeMigrateToAMM(instruction interface{}) *LaunchpadMigrateData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 17 {
+	if len(accounts) <= poolState {
 		return nil
 	}
 
 	return &LaunchpadMigrateData{
-		BaseMint:  accounts[1],
-		QuoteMint: accounts[2],
-		Pool:      accounts[13],
-		PoolDex:   constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
+		BaseMint:     accounts[1],
+		QuoteMint:    accounts[2],
+		Pool:         accounts[pool],
+		BondingCurve: accounts[poolState],
+		PoolDex:      constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
 	}
 }
 
-func (p *LaunchpadShredParser) decodeMigrateToAMMMemeEvent(instruction interface{}) *types.MemeEvent {
-	migrateData := p.decodeMigrateToAMM(instruction)
-	if migrateData == nil {
-		return nil
-	}
-
-	return &types.MemeEvent{
-		Protocol:  constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Type:      types.TradeTypeMigrate,
-		BaseMint:  migrateData.BaseMint,
-		QuoteMint: migrateData.QuoteMint,
-		Pool:      migrateData.Pool,
-		PoolDex:   migrateData.PoolDex,
-	}
-}
-
-func (p *LaunchpadShredParser) decodeMigrateToCPSwap(instruction interface{}) *LaunchpadMigrateData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeMigrateToCPSwap decodes migrate_to_cpswap: accounts 1 base_mint,
+// 2 quote_mint, 5 cpswap_pool, 17 pool_state
+func (p *LaunchpadShredParser) decodeMigrateToCPSwap(accounts []string) *LaunchpadMigrateData {
 	if len(accounts) < 17 {
 		return nil
 	}
 
-	return &LaunchpadMigrateData{
+	migrate := &LaunchpadMigrateData{
 		BaseMint:  accounts[1],
 		QuoteMint: accounts[2],
 		Pool:      accounts[5],
 		PoolDex:   constants.DEX_PROGRAMS.RAYDIUM_CPMM.Name,
 	}
+	if len(accounts) > 17 {
+		migrate.BondingCurve = accounts[17]
+	}
+	return migrate
 }
 
-func (p *LaunchpadShredParser) decodeMigrateToCPSwapMemeEvent(instruction interface{}) *types.MemeEvent {
-	migrateData := p.decodeMigrateToCPSwap(instruction)
-	if migrateData == nil {
-		return nil
-	}
-
+func (p *LaunchpadShredParser) migrateMemeEvent(migrateData *LaunchpadMigrateData) *types.MemeEvent {
 	return &types.MemeEvent{
-		Protocol:  constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Type:      types.TradeTypeMigrate,
-		BaseMint:  migrateData.BaseMint,
-		QuoteMint: migrateData.QuoteMint,
-		Pool:      migrateData.Pool,
-		PoolDex:   migrateData.PoolDex,
+		Protocol:     constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+		Type:         types.TradeTypeMigrate,
+		BaseMint:     migrateData.BaseMint,
+		QuoteMint:    migrateData.QuoteMint,
+		Pool:         migrateData.Pool,
+		PoolDex:      migrateData.PoolDex,
+		BondingCurve: migrateData.BondingCurve,
 	}
 }
 
-func (p *LaunchpadShredParser) buildMemeEvent(data *LaunchpadTradeData, tradeType types.TradeType) *types.MemeEvent {
-	var inputDecimal, outputDecimal uint8
-	if tradeType == types.TradeTypeBuy {
-		inputDecimal, outputDecimal = 9, 6
-	} else {
-		inputDecimal, outputDecimal = 6, 9
+// buildMemeEvent reports a trade; decimals come from the transaction or
+// TOKEN_DECIMALS, 0 when unknown (LaunchLab base mints choose their decimals)
+func (p *LaunchpadShredParser) buildMemeEvent(data *LaunchpadTradeData) *types.MemeEvent {
+	tradeType := types.TradeTypeBuy
+	if data.TradeType == "sell" {
+		tradeType = types.TradeTypeSell
 	}
+	inputDecimal, outputDecimal := shredKnownDecimals(p.adapter, data.InputMint), shredKnownDecimals(p.adapter, data.OutputMint)
 
 	return &types.MemeEvent{
 		Protocol:       constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
 		Type:           tradeType,
 		User:           data.User,
-		BaseMint:       data.InputMint,
-		QuoteMint:      data.OutputMint,
+		BaseMint:       data.BaseMint,
+		QuoteMint:      data.QuoteMint,
 		BondingCurve:   data.Pool,
 		Pool:           data.Pool,
 		PlatformConfig: data.PlatformConfig,
 		InputToken: &types.TokenInfo{
 			Mint:      data.InputMint,
 			Amount:    types.ConvertToUIAmountUint64(data.InputAmount, inputDecimal),
-			AmountRaw: fmt.Sprintf("%d", data.InputAmount),
+			AmountRaw: strconv.FormatUint(data.InputAmount, 10),
 			Decimals:  inputDecimal,
 		},
 		OutputToken: &types.TokenInfo{
 			Mint:      data.OutputMint,
 			Amount:    types.ConvertToUIAmountUint64(data.OutputAmount, outputDecimal),
-			AmountRaw: fmt.Sprintf("%d", data.OutputAmount),
+			AmountRaw: strconv.FormatUint(data.OutputAmount, 10),
 			Decimals:  outputDecimal,
 		},
 	}
