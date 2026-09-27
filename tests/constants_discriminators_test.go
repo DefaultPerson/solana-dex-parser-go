@@ -150,6 +150,8 @@ func constAnchorTable() map[string][]byte {
 		"RAYDIUM_CL.OTHER.COLLECT_FUND_FEE":                   ix("collect_fund_fee"),
 		"RAYDIUM_CL.OTHER.COLLECT_PROTOCOL_FEE":               ix("collect_protocol_fee"),
 		"RAYDIUM_CL.OTHER.COLLECT_REMAINING_REWARDS":          ix("collect_remaining_rewards"),
+		"RAYDIUM_CL.OTHER.INITIALIZE_REWARD":                  ix("initialize_reward"),
+		"RAYDIUM_CL.OTHER.SET_REWARD_PARAMS":                  ix("set_reward_params"),
 		// Raydium CPMM
 		"RAYDIUM_CPMM.CREATE":                     ix("initialize"),
 		"RAYDIUM_CPMM.ADD_LIQUIDITY":              ix("deposit"),
@@ -210,6 +212,10 @@ func constAnchorTable() map[string][]byte {
 		"METEORA_DLMM.LIMIT_ORDER[cancelLimitOrder]":                       ix("cancel_limit_order"),
 		"METEORA_DLMM.LIMIT_ORDER[closeLimitOrderIfEmpty]":                 ix("close_limit_order_if_empty"),
 		"METEORA_DLMM.OTHER[rebalanceLiquidity]":                           ix("rebalance_liquidity"),
+		"METEORA_DLMM.OTHER[fundReward]":                                   ix("fund_reward"),
+		"METEORA_DLMM.OTHER[withdrawIneligibleReward]":                     ix("withdraw_ineligible_reward"),
+		"METEORA_DLMM.OTHER[withdrawProtocolFee]":                          ix("withdraw_protocol_fee"),
+		"METEORA_DLMM.OTHER[zapProtocolFee]":                               ix("zap_protocol_fee"),
 		// Meteora DAMM v1 (amm 0.5.2, camelCase IDL names)
 		"METEORA_DAMM.CREATE":                                   ix("initialize_permissionless_constant_product_pool_with_config"),
 		"METEORA_DAMM.ADD_LIQUIDITY":                            ix("add_balance_liquidity"),
@@ -225,6 +231,8 @@ func constAnchorTable() map[string][]byte {
 		"METEORA_DAMM.BOOTSTRAP_LIQUIDITY":                      ix("bootstrap_liquidity"),
 		"METEORA_DAMM.CLAIM_FEE":                                ix("claim_fee"),
 		"METEORA_DAMM.PARTNER_CLAIM_FEE":                        ix("partner_claim_fee"),
+		"METEORA_DAMM.WITHDRAW_PROTOCOL_FEES":                   ix("withdraw_protocol_fees"),
+		"METEORA_DAMM.LOCK":                                     ix("lock"),
 		// Meteora DAMM v2 (cp_amm 0.2.0)
 		"METEORA_DAMM_V2.INITIALIZE_POOL":                     ix("initialize_pool"),
 		"METEORA_DAMM_V2.INITIALIZE_CUSTOM_POOL":              ix("initialize_customizable_pool"),
@@ -238,6 +246,10 @@ func constAnchorTable() map[string][]byte {
 		"METEORA_DAMM_V2.SWAP2":                               ix("swap2"),
 		"METEORA_DAMM_V2.CLAIM_REWARD":                        ix("claim_reward"),
 		"METEORA_DAMM_V2.SPLIT_POSITION":                      ix("split_position"),
+		"METEORA_DAMM_V2.CLAIM_PROTOCOL_FEE":                  ix("claim_protocol_fee"),
+		"METEORA_DAMM_V2.FUND_REWARD":                         ix("fund_reward"),
+		"METEORA_DAMM_V2.WITHDRAW_INELIGIBLE_REWARD":          ix("withdraw_ineligible_reward"),
+		"METEORA_DAMM_V2.ZAP_PROTOCOL_FEE":                    ix("zap_protocol_fee"),
 		"METEORA_DAMM_V2.SPLIT_POSITION2":                     ix("split_position2"),
 		// Meteora DBC (dynamic_bonding_curve 0.2.1)
 		"METEORA_DBC.SWAP":                                                 ix("swap"),

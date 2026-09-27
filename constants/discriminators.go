@@ -187,6 +187,9 @@ var DISCRIMINATORS = struct {
 			COLLECT_FUND_FEE:          []byte{167, 138, 78, 149, 223, 194, 6, 126},
 			COLLECT_PROTOCOL_FEE:      []byte{136, 136, 252, 221, 194, 66, 126, 89},
 			COLLECT_REMAINING_REWARDS: []byte{18, 237, 166, 197, 34, 16, 213, 144},
+			// Reward funding: the funder transfers reward tokens into the reward vault
+			INITIALIZE_REWARD: []byte{95, 135, 192, 196, 242, 129, 230, 68},
+			SET_REWARD_PARAMS: []byte{112, 52, 167, 75, 32, 201, 211, 137},
 		},
 	},
 	RAYDIUM_CPMM: RaydiumCPMMDiscriminators{
@@ -275,6 +278,11 @@ var DISCRIMINATORS = struct {
 		// deposit and withdraw in the same instruction, so it is neither ADD nor REMOVE.
 		OTHER: map[string][]byte{
 			"rebalanceLiquidity": {92, 4, 176, 193, 119, 185, 83, 9},
+			// Reward funding and protocol-fee withdrawal (admin, single-sided transfers)
+			"fundReward":               {188, 50, 249, 165, 93, 151, 38, 63},
+			"withdrawIneligibleReward": {148, 206, 42, 195, 247, 49, 103, 8},
+			"withdrawProtocolFee":      {158, 201, 158, 189, 33, 93, 162, 103},
+			"zapProtocolFee":           {213, 155, 187, 34, 56, 182, 91, 240},
 		},
 	},
 	METEORA_DAMM: MeteoraDAMMDiscriminators{
@@ -294,6 +302,8 @@ var DISCRIMINATORS = struct {
 		BOOTSTRAP_LIQUIDITY:                      []byte{4, 228, 215, 71, 225, 253, 119, 206},
 		CLAIM_FEE:                                []byte{169, 32, 79, 137, 136, 232, 70, 137},
 		PARTNER_CLAIM_FEE:                        []byte{57, 53, 176, 30, 123, 70, 52, 64},
+		WITHDRAW_PROTOCOL_FEES:                   []byte{11, 68, 165, 98, 18, 208, 134, 73},
+		LOCK:                                     []byte{21, 19, 208, 43, 237, 62, 255, 87},
 	},
 	METEORA_DAMM_V2: MeteoraDAMMV2Discriminators{
 		INITIALIZE_POOL:                     []byte{95, 180, 10, 172, 84, 174, 232, 40},
@@ -311,6 +321,11 @@ var DISCRIMINATORS = struct {
 		CLAIM_REWARD:    []byte{149, 95, 181, 242, 94, 90, 158, 162},
 		SPLIT_POSITION:  []byte{172, 241, 221, 138, 161, 29, 253, 42},
 		SPLIT_POSITION2: []byte{221, 147, 228, 207, 140, 212, 17, 119},
+		// Reward funding and protocol-fee withdrawal (admin, not swaps)
+		CLAIM_PROTOCOL_FEE:         []byte{165, 228, 133, 48, 99, 249, 255, 33},
+		FUND_REWARD:                []byte{188, 50, 249, 165, 93, 151, 38, 63},
+		WITHDRAW_INELIGIBLE_REWARD: []byte{148, 206, 42, 195, 247, 49, 103, 8},
+		ZAP_PROTOCOL_FEE:           []byte{213, 155, 187, 34, 56, 182, 91, 240},
 	},
 	METEORA_DBC: MeteoraDBCDiscriminators{
 		SWAP:                                   []byte{248, 198, 158, 145, 225, 117, 135, 200},
@@ -653,6 +668,8 @@ type MeteoraDAMMDiscriminators struct {
 	BOOTSTRAP_LIQUIDITY                      []byte
 	CLAIM_FEE                                []byte
 	PARTNER_CLAIM_FEE                        []byte
+	WITHDRAW_PROTOCOL_FEES                   []byte
+	LOCK                                     []byte
 }
 
 type MeteoraDAMMV2Discriminators struct {
@@ -670,6 +687,11 @@ type MeteoraDAMMV2Discriminators struct {
 	CLAIM_REWARD    []byte
 	SPLIT_POSITION  []byte
 	SPLIT_POSITION2 []byte
+
+	CLAIM_PROTOCOL_FEE         []byte
+	FUND_REWARD                []byte
+	WITHDRAW_INELIGIBLE_REWARD []byte
+	ZAP_PROTOCOL_FEE           []byte
 }
 
 type MeteoraDBCDiscriminators struct {
@@ -805,6 +827,8 @@ type RaydiumCLOtherDiscriminators struct {
 	COLLECT_FUND_FEE          []byte
 	COLLECT_PROTOCOL_FEE      []byte
 	COLLECT_REMAINING_REWARDS []byte
+	INITIALIZE_REWARD         []byte
+	SET_REWARD_PARAMS         []byte
 }
 
 // MatchDiscriminator checks if data starts with the given discriminator.
