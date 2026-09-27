@@ -28,7 +28,7 @@ func getPumpfunTradeInfo(event *types.MemeEvent, info tradeInfoParams) types.Tra
 		amm = constants.DEX_PROGRAMS.PUMP_FUN.Name
 	}
 
-	return types.TradeInfo{
+	trade := types.TradeInfo{
 		Type:        event.Type,
 		Pool:        pool,
 		InputToken:  *event.InputToken,
@@ -42,6 +42,23 @@ func getPumpfunTradeInfo(event *types.MemeEvent, info tradeInfoParams) types.Tra
 		Signature:   info.Signature,
 		Idx:         info.Idx,
 	}
+
+	// Fees from the TradeEvent (protocol, buyback, creator, cashback), all in
+	// the quote mint; Fee is their sum
+	if len(event.Fees) > 0 {
+		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
+		total := sumFees(event.Fees)
+		first := event.Fees[0]
+		trade.Fee = &types.FeeInfo{
+			Mint:      first.Mint,
+			Amount:    types.ConvertToUIAmount(total, first.Decimals),
+			AmountRaw: total.String(),
+			Decimals:  first.Decimals,
+			Dex:       first.Dex,
+		}
+	}
+
+	return trade
 }
 
 // getPumpswapBuyInfo creates a TradeInfo from a Pumpswap buy event
