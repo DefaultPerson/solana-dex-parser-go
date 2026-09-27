@@ -75,6 +75,7 @@ type pumpfunTradeIx struct {
 	curveIndex   int
 	quoteIndex   int // -1: SOL only (legacy layouts)
 	programIndex int // base token program, -1 when not in the layout
+	buybackIndex int // buyback fee recipient, -1 when not in the layout
 }
 
 // pumpfunTradeIxs maps the trade instruction discriminators to their layouts
@@ -84,12 +85,12 @@ var pumpfunTradeIxs = []struct {
 	disc []byte
 	ix   pumpfunTradeIx
 }{
-	{constants.DISCRIMINATORS.PUMPFUN.BUY, pumpfunTradeIx{"buy", 2, 3, -1, -1}},
-	{constants.DISCRIMINATORS.PUMPFUN.SELL, pumpfunTradeIx{"sell", 2, 3, -1, -1}},
-	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_SOL_IN, pumpfunTradeIx{"buy_exact_sol_in", 2, 3, -1, -1}},
-	{constants.DISCRIMINATORS.PUMPFUN.BUY_V2, pumpfunTradeIx{"buy_v2", 1, 10, 2, 3}},
-	{constants.DISCRIMINATORS.PUMPFUN.SELL_V2, pumpfunTradeIx{"sell_v2", 1, 10, 2, 3}},
-	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_QUOTE_IN_V2, pumpfunTradeIx{"buy_exact_quote_in_v2", 1, 10, 2, 3}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY, pumpfunTradeIx{"buy", 2, 3, -1, -1, -1}},
+	{constants.DISCRIMINATORS.PUMPFUN.SELL, pumpfunTradeIx{"sell", 2, 3, -1, -1, -1}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_SOL_IN, pumpfunTradeIx{"buy_exact_sol_in", 2, 3, -1, -1, -1}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY_V2, pumpfunTradeIx{"buy_v2", 1, 10, 2, 3, 8}},
+	{constants.DISCRIMINATORS.PUMPFUN.SELL_V2, pumpfunTradeIx{"sell_v2", 1, 10, 2, 3, 8}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_QUOTE_IN_V2, pumpfunTradeIx{"buy_exact_quote_in_v2", 1, 10, 2, 3, 8}},
 }
 
 func pumpfunTradeIxLayout(data []byte) *pumpfunTradeIx {
@@ -268,7 +269,11 @@ func (p *PumpfunEventParser) tradeEventToMeme(evt *pumpfunTradeEvent, ordered []
 		fees = append(fees, feeInfo(quoteMint, u64(evt.Fee-evt.BuybackFee), quoteDecimals, dex, "protocol", evt.FeeRecipient))
 	}
 	if evt.BuybackFee > 0 {
-		fees = append(fees, feeInfo(quoteMint, u64(evt.BuybackFee), quoteDecimals, dex, "buyback", ""))
+		buybackRecipient := ""
+		if parentLayout != nil && parentLayout.buybackIndex >= 0 && parentLayout.buybackIndex < len(parentAccounts) {
+			buybackRecipient = parentAccounts[parentLayout.buybackIndex]
+		}
+		fees = append(fees, feeInfo(quoteMint, u64(evt.BuybackFee), quoteDecimals, dex, "buyback", buybackRecipient))
 	}
 	if evt.CreatorFee > 0 {
 		fees = append(fees, feeInfo(quoteMint, u64(evt.CreatorFee), quoteDecimals, dex, "coinCreator", evt.Creator))
