@@ -273,6 +273,12 @@ func (dp *DexParser) registerDefaultParsers() {
 	dp.transferParserFactories[constants.DEX_PROGRAMS.METEORA.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TransferParser {
 		return meteora.NewMeteoraDLMMLimitOrderParser(a, d, t, c)
 	}
+	dp.transferParserFactories[constants.DEX_PROGRAMS.PUMP_FUN.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TransferParser {
+		return pumpfun.NewPumpFeeClaimParser(a, d, t, c)
+	}
+	dp.transferParserFactories[constants.DEX_PROGRAMS.PUMP_SWAP.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TransferParser {
+		return pumpfun.NewPumpFeeClaimParser(a, d, t, c)
+	}
 
 	// Meme event parsers
 	dp.memeEventParserFactories[constants.DEX_PROGRAMS.PUMP_FUN.ID] = func(a *adapter.TransactionAdapter, t map[string][]types.TransferData) parsers.EventParser {

@@ -135,6 +135,21 @@ var DISCRIMINATORS = struct {
 
 		// meme WP: pump.json IDL (pump-public-docs 8109141), sha256 checked
 		MIGRATE_BONDING_CURVE_CREATOR: []byte{87, 124, 52, 191, 52, 38, 214, 232}, // global:migrate_bonding_curve_creator
+
+		// Added 2026-09 (integ): fee payouts (pump IDL), reported as transfers
+		COLLECT_CREATOR_FEE:             []byte{20, 22, 86, 123, 198, 28, 219, 132},
+		COLLECT_CREATOR_FEE_V2:          []byte{207, 17, 138, 242, 4, 34, 19, 56},
+		CLAIM_CASHBACK:                  []byte{37, 58, 35, 126, 190, 53, 228, 197},
+		CLAIM_CASHBACK_V2:               []byte{122, 243, 204, 65, 94, 116, 29, 55},
+		CLAIM_TOKEN_INCENTIVES:          []byte{16, 4, 71, 28, 204, 1, 40, 27},
+		DISTRIBUTE_CREATOR_FEES:         []byte{165, 114, 103, 0, 121, 206, 247, 81},
+		DISTRIBUTE_CREATOR_FEES_V2:      []byte{255, 203, 19, 79, 244, 68, 8, 159},
+		DISTRIBUTE_FEE_TO_HOLDERS:       []byte{98, 54, 145, 97, 2, 70, 173, 43},
+		COLLECT_CREATOR_FEE_EVENT:       []byte{228, 69, 165, 46, 81, 203, 154, 29, 122, 2, 127, 1, 14, 191, 12, 175},
+		CLAIM_CASHBACK_EVENT:            []byte{228, 69, 165, 46, 81, 203, 154, 29, 226, 214, 246, 33, 7, 242, 147, 229},
+		CLAIM_TOKEN_INCENTIVES_EVENT:    []byte{228, 69, 165, 46, 81, 203, 154, 29, 79, 172, 246, 49, 205, 91, 206, 232},
+		DISTRIBUTE_CREATOR_FEES_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 165, 55, 129, 112, 4, 179, 202, 40},
+		DISTRIBUTE_FEE_TO_HOLDERS_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 227, 190, 215, 206, 176, 180, 165, 132},
 	},
 	PUMPSWAP: PumpswapDiscriminators{
 		CREATE_POOL:            []byte{233, 146, 209, 142, 207, 104, 64, 188},
@@ -154,6 +169,16 @@ var DISCRIMINATORS = struct {
 		// Protocol buy-and-burn of a graduated coin; it also emits a BuyEvent.
 		BOOST_BUY_AND_BURN:       []byte{105, 68, 6, 175, 0, 7, 35, 162},                                       // global:boost_buy_and_burn
 		BOOST_BUY_AND_BURN_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 63, 69, 28, 22, 48, 92, 194, 185}, // event:BoostBuyAndBurnEvent
+
+		// Added 2026-09 (integ): fee payouts (pump_amm IDL), reported as transfers
+		COLLECT_COIN_CREATOR_FEE:         []byte{160, 57, 89, 42, 181, 139, 43, 66},
+		CLAIM_CASHBACK:                   []byte{37, 58, 35, 126, 190, 53, 228, 197},
+		CLAIM_TOKEN_INCENTIVES:           []byte{16, 4, 71, 28, 204, 1, 40, 27},
+		TRANSFER_CREATOR_FEES_TO_PUMP:    []byte{139, 52, 134, 85, 228, 229, 108, 241},
+		TRANSFER_CREATOR_FEES_TO_PUMP_V2: []byte{1, 33, 78, 185, 33, 67, 44, 92},
+		COLLECT_COIN_CREATOR_FEE_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 232, 245, 194, 238, 234, 218, 58, 89},
+		CLAIM_CASHBACK_EVENT:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 226, 214, 246, 33, 7, 242, 147, 229},
+		CLAIM_TOKEN_INCENTIVES_EVENT:     []byte{228, 69, 165, 46, 81, 203, 154, 29, 79, 172, 246, 49, 205, 91, 206, 232},
 	},
 	MOONIT: MoonitDiscriminators{
 		BUY:     []byte{102, 6, 61, 18, 1, 218, 235, 234},
@@ -716,6 +741,20 @@ type PumpfunDiscriminators struct {
 	MIGRATE_V2            []byte
 
 	MIGRATE_BONDING_CURVE_CREATOR []byte
+
+	COLLECT_CREATOR_FEE             []byte
+	COLLECT_CREATOR_FEE_V2          []byte
+	CLAIM_CASHBACK                  []byte
+	CLAIM_CASHBACK_V2               []byte
+	CLAIM_TOKEN_INCENTIVES          []byte
+	DISTRIBUTE_CREATOR_FEES         []byte
+	DISTRIBUTE_CREATOR_FEES_V2      []byte
+	DISTRIBUTE_FEE_TO_HOLDERS       []byte
+	COLLECT_CREATOR_FEE_EVENT       []byte
+	CLAIM_CASHBACK_EVENT            []byte
+	CLAIM_TOKEN_INCENTIVES_EVENT    []byte
+	DISTRIBUTE_CREATOR_FEES_EVENT   []byte
+	DISTRIBUTE_FEE_TO_HOLDERS_EVENT []byte
 }
 
 type PumpswapDiscriminators struct {
@@ -734,6 +773,15 @@ type PumpswapDiscriminators struct {
 
 	BOOST_BUY_AND_BURN       []byte
 	BOOST_BUY_AND_BURN_EVENT []byte
+
+	COLLECT_COIN_CREATOR_FEE         []byte
+	CLAIM_CASHBACK                   []byte
+	CLAIM_TOKEN_INCENTIVES           []byte
+	TRANSFER_CREATOR_FEES_TO_PUMP    []byte
+	TRANSFER_CREATOR_FEES_TO_PUMP_V2 []byte
+	COLLECT_COIN_CREATOR_FEE_EVENT   []byte
+	CLAIM_CASHBACK_EVENT             []byte
+	CLAIM_TOKEN_INCENTIVES_EVENT     []byte
 }
 
 type MoonitDiscriminators struct {
