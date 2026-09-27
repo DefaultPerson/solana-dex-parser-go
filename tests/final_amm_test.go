@@ -10,6 +10,7 @@ import (
 	"github.com/mr-tron/base58"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
@@ -393,5 +394,99 @@ func TestFinalDLMMLiquiditySides(t *testing.T) {
 		if ev.Token1Mint != quote {
 			t.Errorf("%s %d: token1 %s, want the quote mint %s", c.sig[:8], c.outer, ev.Token1Mint, quote)
 		}
+	}
+}
+
+// TestFinalOrcaTwoHopV2Fees: in two_hop_swap_v2 only the first hop's input
+// and the last hop's output mint were set, so the second hop's lp and
+// protocol fees had an empty mint. No real two_hop_swap_v2 is in any cached
+// transaction, nor in the recent mainnet blocks scanned for one: the
+// transaction is built from the real fixture 5gpxeUJj, whose Jupiter route
+// swaps SOL -> USDC through whirlpool 4HppGT and USDC -> KMNo3n through
+// whirlpool 3ndjN1. Its two real Traded events are chained into one outer
+// two_hop_swap_v2 (IDL accounts: whirlpool_one 0, whirlpool_two 1,
+// token_mint_input 2, token_mint_intermediate 3, token_mint_output 4). Truth:
+// each hop's fees are in its input mint (SOL, then USDC). amm-5.
+func TestFinalOrcaTwoHopV2Fees(t *testing.T) {
+	const (
+		poolOne = "4HppGTweoGQ8ZZ6UcCgwJKfi5mJD9Dqwy6htCpnbfBLW" // SOL -> USDC
+		poolTwo = "3ndjN1nJVUKGrJBc1hhVpER6kWTZKHdyDrPyCJyX3CXK" // USDC -> KMNo3n
+		kmno    = "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS"
+	)
+	real := loadFixture(t, "5gpxeUJjYMmPifsT2JQq1BmvYdTLunsub5JiwrfhiE1X29HyHKtJSjpk5kkeqiLoGW5DbEN8qscijvrqGPMdgY8y")
+	traded := map[string]string{}
+	for _, l := range real.Meta.LogMessages {
+		if !strings.HasPrefix(l, "Program data: ") {
+			continue
+		}
+		b, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(l, "Program data: "))
+		if len(b) >= 40 && string(b[:8]) == string(anchorEventDisc("Traded")) {
+			traded[base58.Encode(b[8:40])] = l
+		}
+	}
+	if traded[poolOne] == "" || traded[poolTwo] == "" {
+		t.Fatalf("fixture: Traded events %v", traded)
+	}
+
+	tx := cloneTx(t, real)
+	orca := constants.DEX_PROGRAMS.ORCA.ID
+	keys := []string{rawAccountKeys(real)[0], poolOne, poolTwo, solMint, usdcMint, kmno}
+	for _, k := range rawAccountKeys(real)[1:] {
+		if len(keys) == 24 {
+			break
+		}
+		if !containsStr(keys, k) && k != orca {
+			keys = append(keys, k)
+		}
+	}
+	keys = append(keys, orca)
+	// whirlpool_one, whirlpool_two, the three mints, then the other accounts
+	accounts := make([]interface{}, 24)
+	for i := range accounts {
+		accounts[i] = float64((i + 1) % 24)
+	}
+	data := append(append([]byte{}, constants.DISCRIMINATORS.ORCA.TWO_HOP_SWAP_V2...), make([]byte, 60)...)
+	tx.Transaction.Message.AccountKeys = nil
+	for _, k := range keys {
+		tx.Transaction.Message.AccountKeys = append(tx.Transaction.Message.AccountKeys, adapter.AccountKey{Pubkey: k})
+	}
+	tx.Transaction.Message.AddressTableLookups = nil
+	tx.Transaction.Message.Instructions = []interface{}{map[string]interface{}{
+		"programIdIndex": float64(len(keys) - 1), "accounts": accounts, "data": base58.Encode(data),
+	}}
+	tx.Meta.LoadedAddresses = nil
+	tx.Meta.InnerInstructions = nil
+	tx.Meta.PreBalances = make([]uint64, len(keys))
+	tx.Meta.PostBalances = make([]uint64, len(keys))
+	tx.Meta.PreTokenBalances, tx.Meta.PostTokenBalances = nil, nil
+	tx.Meta.LogMessages = []string{
+		"Program " + orca + " invoke [1]",
+		"Program log: Instruction: TwoHopSwapV2",
+		traded[poolOne],
+		traded[poolTwo],
+		"Program " + orca + " success",
+	}
+
+	res := dexparser.NewDexParser().ParseAll(tx, nil)
+	if len(res.Trades) != 1 {
+		t.Fatalf("trades %d (%s), want the two-hop swap", len(res.Trades), res.Msg)
+	}
+	tr := res.Trades[0]
+	if tr.InputToken.Mint != solMint || tr.OutputToken.Mint != kmno || len(tr.Pool) != 2 {
+		t.Fatalf("trade %s -> %s pools %v", tr.InputToken.Mint, tr.OutputToken.Mint, tr.Pool)
+	}
+	var hopOne, hopTwo int
+	for _, f := range tr.Fees {
+		switch f.Mint {
+		case solMint:
+			hopOne++
+		case usdcMint:
+			hopTwo++
+		default:
+			t.Errorf("fee %s %s has mint %q, want SOL (hop one) or USDC (hop two)", f.Type, f.AmountRaw, f.Mint)
+		}
+	}
+	if hopOne != 2 || hopTwo != 2 {
+		t.Errorf("fees %+v: want lp and protocol fees of each hop", tr.Fees)
 	}
 }

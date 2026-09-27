@@ -41,6 +41,7 @@ type orcaSwap struct {
 	// token A and of token B (v1), or input and output mint accounts (v2)
 	vaultsA, vaultsB []int
 	mintIn, mintOut  int // two_hop_swap_v2: token_mint_input / token_mint_output
+	mintMid          int // two_hop_swap_v2: token_mint_intermediate
 	mintA, mintB     int // swap_v2: token_mint_a / token_mint_b
 }
 
@@ -70,7 +71,7 @@ func getSwap(data []byte) *orcaSwap {
 	case bytes.Equal(disc, orca.TWO_HOP_SWAP_V2):
 		// whirlpool_one 0, whirlpool_two 1, token_mint_input 2,
 		// token_mint_intermediate 3, token_mint_output 4, ...
-		return &orcaSwap{minAccounts: 24, pools: []int{0, 1}, mintIn: 2, mintOut: 4, mintA: -1, mintB: -1}
+		return &orcaSwap{minAccounts: 24, pools: []int{0, 1}, mintIn: 2, mintMid: 3, mintOut: 4, mintA: -1, mintB: -1}
 	}
 	return nil
 }
@@ -205,6 +206,11 @@ func (p *OrcaParser) tradeFromEvents(ci types.ClassifiedInstruction, swap *orcaS
 	if swap.mintIn >= 0 {
 		hopMints[0][0] = accounts[swap.mintIn]
 		hopMints[len(hopMints)-1][1] = accounts[swap.mintOut]
+		if len(hopMints) == 2 {
+			// the first hop's output is the second hop's input
+			hopMints[0][1] = accounts[swap.mintMid]
+			hopMints[1][0] = accounts[swap.mintMid]
+		}
 	}
 	inputMint, outputMint := hopMints[0][0], hopMints[len(hopMints)-1][1]
 	if inputMint == "" || outputMint == "" {
