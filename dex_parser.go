@@ -667,9 +667,11 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 					if len(transfers) < 2 {
 						continue
 					}
+					// A SOL or stablecoin leg is required; native SOL
+					// transfers do not count because ProcessSwapData skips them
 					hasSupported := false
 					for _, t := range transfers {
-						if adapt.IsSupportedToken(t.Info.Mint) {
+						if t.ProgramId != constants.SYSTEM_PROGRAM_ID && adapt.IsSupportedToken(t.Info.Mint) {
 							hasSupported = true
 							break
 						}
