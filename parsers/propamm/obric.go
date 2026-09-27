@@ -1,21 +1,27 @@
 package propamm
 
 import (
-	"bytes"
-
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
-	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // ObricParser parses Obric V2 DEX transactions
-type ObricParser struct {
-	adapter                *adapter.TransactionAdapter
-	dexInfo                types.DexInfo
-	transferActions        map[string][]types.TransferData
-	classifiedInstructions []types.ClassifiedInstruction
-	txUtils                *utils.TransactionUtils
+type ObricParser = VenueParser
+
+// decodeObric: Anchor swap and swap2 (25 bytes: is_x_to_y at 8, u64 amount_in
+// at 9, u64 min_amount_out at 17; 2DaS55Tw... and 33VnDBtr...). Accounts: 0
+// trading pair (vault authority), 1/2 oracle accounts, 3/4 pool vaults X/Y,
+// 5/6 user token accounts X/Y, 7/8 unknown, 9 sysvar instructions, 10 user
+// authority, 11 token program. DISCRIMINATORS.OBRIC.SWAP_X_TO_Y and
+// SWAP_Y_TO_X were never seen in an Obric transaction (SWAP_X_TO_Y is
+// Raydium CPMM's swap_base_input) and are not matched.
+func decodeObric(data []byte, n int) *swapLayout {
+	if n < 7 || !(constants.MatchDiscriminator(data, disc.OBRIC.SWAP) ||
+		constants.MatchDiscriminator(data, disc.OBRIC.SWAP2)) {
+		return nil
+	}
+	return &swapLayout{pool: 0, legs: bothDirections(5, 6, 3, 4)}
 }
 
 // NewObricParser creates a new Obric parser
@@ -25,90 +31,5 @@ func NewObricParser(
 	transferActions map[string][]types.TransferData,
 	classifiedInstructions []types.ClassifiedInstruction,
 ) *ObricParser {
-	return &ObricParser{
-		adapter:                adapter,
-		dexInfo:                dexInfo,
-		transferActions:        transferActions,
-		classifiedInstructions: classifiedInstructions,
-		txUtils:                utils.NewTransactionUtils(adapter),
-	}
-}
-
-// ProcessTrades processes Obric trades
-func (p *ObricParser) ProcessTrades() []types.TradeInfo {
-	var trades []types.TradeInfo
-
-	for _, ci := range p.classifiedInstructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 8 {
-			continue
-		}
-
-		disc := data[:8]
-
-		// Check for swap discriminators
-		isSwap := bytes.Equal(disc, constants.DISCRIMINATORS.OBRIC.SWAP) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.OBRIC.SWAP_X_TO_Y) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.OBRIC.SWAP_Y_TO_X)
-
-		if !isSwap {
-			continue
-		}
-
-		trade := p.parseSwap(ci)
-		if trade != nil {
-			trades = append(trades, *trade)
-		}
-	}
-
-	return trades
-}
-
-// parseSwap parses an Obric swap instruction
-func (p *ObricParser) parseSwap(ci types.ClassifiedInstruction) *types.TradeInfo {
-	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
-	// Obric swap account layout (based on IDL):
-	// 0: user (signer)
-	// 1: tradingPair
-	// 2: userTokenAccountX
-	// 3: userTokenAccountY
-	// 4: poolTokenAccountX
-	// 5: poolTokenAccountY
-	// 6: tokenProgram
-	if len(accounts) < 6 {
-		return nil
-	}
-
-	innerIdx := ci.InnerIndex
-	if innerIdx < 0 {
-		innerIdx = 0
-	}
-
-	// Get transfers for this instruction
-	transfers := p.txUtils.GetTransfersForInstruction(
-		p.transferActions,
-		ci.ProgramId,
-		ci.OuterIndex,
-		ci.InnerIndex,
-		nil,
-	)
-
-	if len(transfers) < 2 {
-		return nil
-	}
-
-	dexInfo := types.DexInfo{
-		ProgramId: constants.DEX_PROGRAMS.OBRIC_V2.ID,
-		AMM:       constants.DEX_PROGRAMS.OBRIC_V2.Name,
-		Route:     p.dexInfo.Route,
-	}
-
-	trade := p.txUtils.ProcessSwapData(transfers, dexInfo, false)
-	if trade != nil {
-		trade.Pool = []string{accounts[1]} // tradingPair account
-		trade.Idx = utils.FormatIdx(ci.OuterIndex, innerIdx)
-		trade = p.txUtils.AttachTokenTransferInfo(trade, p.transferActions)
-	}
-
-	return trade
+	return newVenueParser(constants.DEX_PROGRAMS.OBRIC_V2, decodeObric, adapter, dexInfo, transferActions, classifiedInstructions)
 }

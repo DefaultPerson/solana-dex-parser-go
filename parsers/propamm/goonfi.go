@@ -1,21 +1,25 @@
 package propamm
 
 import (
-	"bytes"
-
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
-	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
-// GoonFiParser parses GoonFi DEX transactions
-type GoonFiParser struct {
-	adapter                *adapter.TransactionAdapter
-	dexInfo                types.DexInfo
-	transferActions        map[string][]types.TransferData
-	classifiedInstructions []types.ClassifiedInstruction
-	txUtils                *utils.TransactionUtils
+// GoonFiParser parses GoonFi (V1) DEX transactions. GoonFi V1 is legacy: its
+// vaults were emptied and closed in 2026-02 (see NewGoonFiV2Parser).
+type GoonFiParser = VenueParser
+
+// decodeGoonFi: tag 0x02 (19-20 bytes, direction at 1, u64 amount_in at 2;
+// e.g. 4zQF9pQb...). Accounts: 0 user authority, 1 pool, 2/3 user token
+// accounts A/B, 4/5 pool vaults A/B, 6 oracle, 7 sysvar instructions, 8 token
+// program. Tag 0x04 (admin vault withdrawal, 2 transfers), 0x08 (quote
+// update) and 0x09 (close) are not swaps.
+func decodeGoonFi(data []byte, n int) *swapLayout {
+	if !hasTag(data, disc.GOONFI.SWAP) || n < 6 {
+		return nil
+	}
+	return &swapLayout{pool: 1, legs: bothDirections(2, 3, 4, 5)}
 }
 
 // NewGoonFiParser creates a new GoonFi parser
@@ -25,88 +29,5 @@ func NewGoonFiParser(
 	transferActions map[string][]types.TransferData,
 	classifiedInstructions []types.ClassifiedInstruction,
 ) *GoonFiParser {
-	return &GoonFiParser{
-		adapter:                adapter,
-		dexInfo:                dexInfo,
-		transferActions:        transferActions,
-		classifiedInstructions: classifiedInstructions,
-		txUtils:                utils.NewTransactionUtils(adapter),
-	}
-}
-
-// ProcessTrades processes GoonFi trades
-func (p *GoonFiParser) ProcessTrades() []types.TradeInfo {
-	var trades []types.TradeInfo
-
-	for _, ci := range p.classifiedInstructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 1 {
-			continue
-		}
-
-		disc := data[:1]
-
-		// GoonFi swap discriminator is 0x02
-		if !bytes.Equal(disc, constants.DISCRIMINATORS.GOONFI.SWAP) {
-			continue
-		}
-
-		trade := p.parseSwap(ci)
-		if trade != nil {
-			trades = append(trades, *trade)
-		}
-	}
-
-	return trades
-}
-
-// parseSwap parses a GoonFi swap instruction
-func (p *GoonFiParser) parseSwap(ci types.ClassifiedInstruction) *types.TradeInfo {
-	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
-	// GoonFi swap account layout:
-	// 0: user (signer)
-	// 1: market
-	// 2: userTokenAccountA
-	// 3: userTokenAccountB
-	// 4: poolTokenAccountA
-	// 5: poolTokenAccountB
-	// 6: account
-	// 7: sysvarInstructions
-	// 8: tokenProgram
-	if len(accounts) < 6 {
-		return nil
-	}
-
-	innerIdx := ci.InnerIndex
-	if innerIdx < 0 {
-		innerIdx = 0
-	}
-
-	// Get transfers for this instruction
-	transfers := p.txUtils.GetTransfersForInstruction(
-		p.transferActions,
-		ci.ProgramId,
-		ci.OuterIndex,
-		ci.InnerIndex,
-		nil,
-	)
-
-	if len(transfers) < 2 {
-		return nil
-	}
-
-	dexInfo := types.DexInfo{
-		ProgramId: constants.DEX_PROGRAMS.GOONFI.ID,
-		AMM:       constants.DEX_PROGRAMS.GOONFI.Name,
-		Route:     p.dexInfo.Route,
-	}
-
-	trade := p.txUtils.ProcessSwapData(transfers, dexInfo, false)
-	if trade != nil {
-		trade.Pool = []string{accounts[1]} // market account
-		trade.Idx = utils.FormatIdx(ci.OuterIndex, innerIdx)
-		trade = p.txUtils.AttachTokenTransferInfo(trade, p.transferActions)
-	}
-
-	return trade
+	return newVenueParser(constants.DEX_PROGRAMS.GOONFI, decodeGoonFi, adapter, dexInfo, transferActions, classifiedInstructions)
 }
