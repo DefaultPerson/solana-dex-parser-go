@@ -89,11 +89,14 @@ func ParseProgramLogs(logs []string, outerProgramIds []string, prefix string) []
 				stack = append(stack[:0], frame{programId: programId, innerIndex: -1})
 				continue
 			}
-			if outer < 0 || depth-1 > len(stack) {
-				continue // no enclosing instruction: the log is not usable
+			if outer < 0 {
+				continue // no enclosing outer instruction
 			}
 			inner++
-			stack = append(stack[:depth-1], frame{programId: programId, innerIndex: inner})
+			if depth-1 < len(stack) {
+				stack = stack[:depth-1]
+			}
+			stack = append(stack, frame{programId: programId, innerIndex: inner})
 			continue
 		}
 		if programId, ok := parseReturnLine(line); ok {

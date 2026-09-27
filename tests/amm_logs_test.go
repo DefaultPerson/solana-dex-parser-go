@@ -60,6 +60,13 @@ func TestParseProgramLogsAttribution(t *testing.T) {
 		t.Errorf("ray logs = %+v", ray)
 	}
 
+	// A CPI whose parent frame is missing still counts as the next inner
+	// instruction
+	gap := utils.ParseProgramDataLogs([]string{"Program A111 invoke [1]", "Program B222 invoke [3]", "Program data: AQ==", "Program C333 invoke [2]", "Program data: Ag=="}, nil)
+	if len(gap) != 2 || gap[0].InnerIndex != 0 || gap[0].ProgramId != "B222" || gap[1].InnerIndex != 1 || gap[1].ProgramId != "C333" {
+		t.Errorf("gap = %+v", gap)
+	}
+
 	// With the outer program ids, an outer instruction that writes no invoke
 	// line does not shift the indices of the following ones
 	aligned := utils.ParseProgramDataLogs([]string{"Program E555 invoke [1]", "Program data: AQ==", "Program E555 success"}, []string{"Pre111", "E555"})
