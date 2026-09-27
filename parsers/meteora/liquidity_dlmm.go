@@ -7,6 +7,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // MeteoraDLMMPoolParser parses Meteora DLMM pool events
@@ -43,6 +44,13 @@ func (p *MeteoraDLMMPoolParser) GetPoolAction(data []byte) interface{} {
 	for name, d := range constants.DISCRIMINATORS.METEORA_DLMM.REMOVE_LIQUIDITY {
 		if bytes.Equal(disc, d) {
 			return &PoolActionResult{Name: name, Type: types.PoolEventTypeRemove}
+		}
+	}
+
+	// Pair creation (initialize_lb_pair and its variants)
+	for name, d := range constants.DISCRIMINATORS.METEORA_DLMM.CREATE {
+		if bytes.Equal(disc, d) {
+			return &PoolActionResult{Name: name, Type: types.PoolEventTypeCreate}
 		}
 	}
 
@@ -202,14 +210,54 @@ func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 	return event
 }
 
-// ParseCreateLiquidityEvent - DLMM doesn't have create events in this parser
+// ParseCreateLiquidityEvent parses the creation of a pair. Accounts
+// (lb_clmm IDL 0.12.0): lb_pair 0, token_mint_x 2, token_mint_y 3;
+// initialize_permission_lb_pair has base first (lb_pair 1, mints 3/4). A
+// pair is created empty; any tokens the instruction moves are reported. As
+// for the other pools, the quote mint (SOL or a stablecoin) is token1.
 func (p *MeteoraDLMMPoolParser) ParseCreateLiquidityEvent(
 	instruction interface{},
 	index int,
 	data []byte,
 	transfers []types.TransferData,
 ) *types.PoolEvent {
-	return nil
+	accounts := p.Adapter.GetInstructionAccounts(instruction)
+	poolIndex := 0
+	if constants.MatchDiscriminator(data, constants.DISCRIMINATORS.METEORA_DLMM.CREATE["initializePermissionLbPair"]) {
+		poolIndex = 1
+	}
+	if len(accounts) <= poolIndex+3 {
+		return nil
+	}
+	token0Mint, token1Mint := accounts[poolIndex+2], accounts[poolIndex+3]
+	if utils.GetTradeType(token0Mint, token1Mint) == types.TradeTypeBuy {
+		token0Mint, token1Mint = token1Mint, token0Mint
+	}
+	token0Decimals := p.Adapter.GetTokenDecimals(token0Mint)
+	token1Decimals := p.Adapter.GetTokenDecimals(token1Mint)
+
+	event := &types.PoolEvent{
+		PoolEventBase:  p.Adapter.GetPoolEventBase(types.PoolEventTypeCreate, p.Adapter.GetInstructionProgramId(instruction)),
+		PoolId:         accounts[poolIndex],
+		PoolLpMint:     accounts[poolIndex],
+		Token0Mint:     token0Mint,
+		Token1Mint:     token1Mint,
+		Token0Decimals: &token0Decimals,
+		Token1Decimals: &token1Decimals,
+	}
+	event.Idx = strconv.Itoa(index)
+	for _, t := range p.Utils.GetLPTransfers(transfers) {
+		if t.Info.TokenAmount.UIAmount == nil {
+			continue
+		}
+		switch t.Info.Mint {
+		case token0Mint:
+			event.Token0Amount, event.Token0AmountRaw = t.Info.TokenAmount.UIAmount, t.Info.TokenAmount.Amount
+		case token1Mint:
+			event.Token1Amount, event.Token1AmountRaw = t.Info.TokenAmount.UIAmount, t.Info.TokenAmount.Amount
+		}
+	}
+	return event
 }
 
 // normalizeTokens normalizes token transfers for DLMM
