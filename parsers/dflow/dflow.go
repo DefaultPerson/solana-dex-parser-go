@@ -47,9 +47,7 @@ func (p *DFlowParser) ProcessTrades() []types.TradeInfo {
 		disc := data[:8]
 
 		// Check for swap discriminators
-		isSwap := bytes.Equal(disc, constants.DISCRIMINATORS.DFLOW.SWAP) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.DFLOW.SWAP2) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.DFLOW.SWAP_WITH_DEST)
+		isSwap := isDFlowSwap(disc)
 
 		isFillOrder := bytes.Equal(disc, constants.DISCRIMINATORS.DFLOW.FILL_ORDER)
 
@@ -64,6 +62,19 @@ func (p *DFlowParser) ProcessTrades() []types.TradeInfo {
 	}
 
 	return trades
+}
+
+// isDFlowSwap reports whether disc is one of the swap_orchestrator swap
+// instructions: swap, swap2 and their _with_destination and
+// _with_destination_native variants
+func isDFlowSwap(disc []byte) bool {
+	d := constants.DISCRIMINATORS.DFLOW
+	for _, swap := range [][]byte{d.SWAP, d.SWAP2, d.SWAP_WITH_DEST, d.SWAP2_WITH_DEST, d.SWAP_WITH_DEST_NATIVE, d.SWAP2_WITH_DEST_NATIVE} {
+		if bytes.Equal(disc, swap) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseSwap parses a DFlow swap instruction
