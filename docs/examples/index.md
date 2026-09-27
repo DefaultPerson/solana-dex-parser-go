@@ -1,256 +1,182 @@
 # Examples
 
-Practical code examples for common use cases.
+In the snippets below `tx` is a `*adapter.SolanaTransaction` (see [Fetching transactions](../getting-started.md#fetching-transactions)), `parser` is `dexparser.NewDexParser()` and `shredParser` is `dexparser.NewShredParser()`.
+Complete, runnable programs are in [Getting Started](../getting-started.md); every snippet here is compiled by the test suite.
 
-## Parse All Data
+## Parse all data
 
 ```go
-package main
-
-import (
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "strings"
-
-    dexparser "github.com/DefaultPerson/solana-dex-parser-go"
-    "github.com/DefaultPerson/solana-dex-parser-go/adapter"
-)
-
-func main() {
-    // Get transaction from RPC
-    signature := "4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz"
-    tx, _ := getTransaction(signature, "https://api.mainnet-beta.solana.com")
-
-    // Parse all data in one call
-    parser := dexparser.NewDexParser()
-    result := parser.ParseAll(tx, nil)
-
-    fmt.Printf("Trades: %d\n", len(result.Trades))
-    fmt.Printf("Liquidities: %d\n", len(result.Liquidities))
-    fmt.Printf("Transfers: %d\n", len(result.Transfers))
-    fmt.Printf("MemeEvents: %d\n", len(result.MemeEvents))
+result := parser.ParseAll(tx, nil)
+if !result.State {
+	log.Fatal(result.Msg)
 }
-
-func getTransaction(sig, rpc string) (*adapter.SolanaTransaction, error) {
-    payload := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"getTransaction","params":["%s",{"encoding":"jsonParsed","maxSupportedTransactionVersion":0}]}`, sig)
-    resp, err := http.Post(rpc, "application/json", strings.NewReader(payload))
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
-    body, _ := io.ReadAll(resp.Body)
-    var rpcResp struct {
-        Result *adapter.SolanaTransaction `json:"result"`
-    }
-    json.Unmarshal(body, &rpcResp)
-    return rpcResp.Result, nil
+fmt.Println("status:", result.TxStatus)
+fmt.Println("trades:", len(result.Trades))
+fmt.Println("liquidities:", len(result.Liquidities))
+fmt.Println("meme events:", len(result.MemeEvents))
+fmt.Println("transfers:", len(result.Transfers))
+for _, warning := range result.Warnings {
+	fmt.Println("warning:", warning)
 }
 ```
 
-**Output:**
-```
-Trades: 1
-Liquidities: 0
-Transfers: 2
-MemeEvents: 1
-```
-
-## Parse Trades
+## Trades
 
 ```go
-parser := dexparser.NewDexParser()
-trades := parser.ParseTrades(&tx, nil)
-
-for _, trade := range trades {
-    fmt.Printf("Type: %s\n", trade.Type)
-    fmt.Printf("AMM: %s\n", trade.AMM)
-    fmt.Printf("Input: %s (%.6f)\n", trade.InputToken.Mint[:8], trade.InputToken.Amount)
-    fmt.Printf("Output: %s (%.6f)\n", trade.OutputToken.Mint[:8], trade.OutputToken.Amount)
-    fmt.Printf("User: %s\n", trade.User)
+for _, trade := range parser.ParseTrades(tx, nil) {
+	fmt.Println("type:", trade.Type, "amm:", trade.AMM, "route:", trade.Route, "bot:", trade.Bot)
+	fmt.Println("user:", trade.User, "pool:", trade.Pool, "idx:", trade.Idx)
+	// AmountRaw is exact; Amount is a float64 for display
+	fmt.Println("in: ", trade.InputToken.AmountRaw, trade.InputToken.Mint, trade.InputToken.Decimals)
+	fmt.Println("out:", trade.OutputToken.AmountRaw, trade.OutputToken.Mint, trade.OutputToken.Decimals)
+	for _, fee := range trade.Fees {
+		fmt.Println("fee:", fee.Type, fee.Dex, fee.AmountRaw, fee.Mint, fee.Recipient)
+	}
 }
 ```
 
-**Output:**
-```
-Type: BUY
-AMM: Pumpfun
-Input: So11111.. (0.050000)
-Output: 9gyfSMQ.. (1234567.890000)
-User: 7xKXtg2..
-```
+## Aggregated trade
 
-## Parse Liquidity Events
+A multi-hop or routed swap has one trade per hop; `AggregateTrade` goes from the first input to the last output.
+A nil config computes it; with a config, set `ParseType.AggregateTrade`.
 
 ```go
-events := parser.ParseLiquidity(&tx, nil)
-
-for _, event := range events {
-    fmt.Printf("Type: %s\n", event.Type)
-    fmt.Printf("Pool: %s\n", event.PoolId[:8])
-    fmt.Printf("Token0: %s (%.2f)\n", event.Token0Mint[:8], event.Token0Amount)
-    fmt.Printf("Token1: %s (%.2f)\n", event.Token1Mint[:8], event.Token1Amount)
-    fmt.Printf("LP Tokens: %.2f\n", event.LpAmount)
+result := parser.ParseAll(tx, &types.ParseConfig{ParseType: types.ParseTradesOnly()})
+if agg := result.AggregateTrade; agg != nil {
+	fmt.Println(agg.Type, agg.InputToken.AmountRaw, agg.InputToken.Mint, "->",
+		agg.OutputToken.AmountRaw, agg.OutputToken.Mint, "via", agg.AMMs)
+	fmt.Println("arbitrage:", result.IsArbitrage())
 }
 ```
 
-**Output:**
-```
-Type: ADD
-Pool: 5Q544fK..
-Token0: So11111.. (10.00)
-Token1: EPjFWdd.. (1500.00)
-LP Tokens: 122.47
-```
-
-## Parse Meme Events
+## Liquidity events
 
 ```go
-result := parser.ParseAll(&tx, nil)
+for _, event := range parser.ParseLiquidity(tx, nil) {
+	fmt.Println(event.Type, event.AMM, "pool:", event.PoolId)
+	fmt.Println("token0:", event.Token0AmountRaw, event.Token0Mint)
+	fmt.Println("token1:", event.Token1AmountRaw, event.Token1Mint)
+	fmt.Println("lp:", event.LpAmountRaw, event.PoolLpMint)
+}
+```
 
+## Meme events
+
+```go
+result := parser.ParseAll(tx, nil)
 for _, event := range result.MemeEvents {
-    fmt.Printf("Type: %s\n", event.Type)
-    fmt.Printf("Protocol: %s\n", event.Protocol)
-    fmt.Printf("Mint: %s\n", event.BaseMint[:8])
-    fmt.Printf("User: %s\n", event.User[:8])
+	fmt.Println(event.Protocol, event.Type, "mint:", event.BaseMint, "quote:", event.QuoteMint)
+	fmt.Println("user:", event.User, "pool:", event.Pool, "idx:", event.Idx)
 }
 ```
 
-**Output:**
-```
-Type: BUY
-Protocol: Pumpfun
-Mint: 9gyfSMQ..
-User: 7xKXtg2..
-```
+## Transfers
 
-## Filter by Program
+`Transfers` is filled when the transaction has no trades and no liquidity events.
 
 ```go
-import "github.com/DefaultPerson/solana-dex-parser-go/constants"
+for _, transfer := range parser.ParseTransfers(tx, nil) {
+	fmt.Println(transfer.Type, transfer.Info.TokenAmount.Amount, transfer.Info.Mint,
+		transfer.Info.Source, "->", transfer.Info.Destination, "fee:", transfer.IsFee)
+}
+```
 
+## Filter by program
+
+```go
 config := &types.ParseConfig{
-    ProgramIds: []string{
-        constants.DEX_PROGRAMS.PUMP_FUN.ID,
-        constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
-    },
+	ProgramIds: []string{
+		constants.DEX_PROGRAMS.PUMP_FUN.ID,
+		constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
+	},
 }
 result := parser.ParseAll(tx, config)
+if !result.State {
+	fmt.Println(result.Msg) // "No matching program ids"
+}
 ```
 
-## Ignore Specific Programs
+## Ignore programs
 
 ```go
 config := &types.ParseConfig{
-    IgnoreProgramIds: []string{
-        constants.DEX_PROGRAMS.PHOENIX.ID,
-    },
+	IgnoreProgramIds: []string{constants.DEX_PROGRAMS.PHOENIX.ID},
 }
-result := parser.ParseAll(&tx, config)
+result := parser.ParseAll(tx, config)
+fmt.Println(len(result.Trades))
 ```
 
-## Aggregate Trades
+## Failed transactions
 
 ```go
-config := &types.ParseConfig{
-    AggregateTrades: true,
+result := parser.ParseAll(tx, nil)
+if result.TxStatus == types.TransactionStatusFailed {
+	fmt.Println(result.Msg, "fee:", result.Fee.Amount) // "transaction failed"
 }
-result := parser.ParseAll(&tx, config)
 
-if result.AggregateTrade != nil {
-    fmt.Printf("Total Input: %.6f\n", result.AggregateTrade.InputToken.Amount)
-    fmt.Printf("Total Output: %.6f\n", result.AggregateTrade.OutputToken.Amount)
-}
+// Decode the reverted instructions anyway
+config := types.DefaultParseConfig()
+config.IncludeFailedTxs = true
+result = parser.ParseAll(tx, &config)
+fmt.Println(len(result.Trades))
 ```
 
-## ShredParser for gRPC Streams
-
-ShredParser provides pre-execution instruction analysis for real-time blockchain monitoring via gRPC streams (Helius, Triton, etc.).
-
-### Basic Usage
+## Batch parsing
 
 ```go
-import (
-    dexparser "github.com/DefaultPerson/solana-dex-parser-go"
-    "github.com/DefaultPerson/solana-dex-parser-go/constants"
-    "github.com/DefaultPerson/solana-dex-parser-go/types"
-)
-
-shredParser := dexparser.NewShredParser()
-
-config := &types.ParseConfig{
-    ProgramIds: []string{
-        constants.DEX_PROGRAMS.PUMP_FUN.ID,
-        constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
-    },
-}
-
-result := shredParser.ParseAll(&tx, config)
-
-// Access parsed instructions by program
-for program, instructions := range result.Instructions {
-    fmt.Printf("[%s] %d instructions\n", program[:8], len(instructions))
-}
-
-// Access typed instructions
-for _, inst := range result.ParsedInstructions {
-    fmt.Printf("[%s] %s\n", inst.ProgramName, inst.Action)
-    if inst.Trade != nil {
-        fmt.Printf("  Trade: %s -> %s\n",
-            inst.Trade.InputToken.Mint[:8],
-            inst.Trade.OutputToken.Mint[:8])
-    }
+txs := []*adapter.SolanaTransaction{tx}
+results := parser.ParseBatch(txs, nil, 8) // 8 workers; results keep the input order
+for i, result := range results {
+	fmt.Println(i, result.Signature, len(result.Trades))
 }
 ```
 
-**Output:**
-```
-[6EF8rre..] 1 instructions
-[Pumpfun] BUY
-  Trade: So11111.. -> 9gyfSMQ..
-```
-
-### Supported Protocols
-
-| Protocol | Instructions | Notes |
-|----------|--------------|-------|
-| **Jupiter V6** | Route variants | All route types including shared accounts |
-| **Raydium V4** | Swap, Create, Add/Remove Liquidity | Full AMM support |
-| **Raydium Launchpad** | Buy, Sell, Create, Migrate | Meme token launches |
-| **Meteora DBC** | Swap, Init Pool, Migrate | Dynamic bonding curve |
-| **DFlow** | Swap routing | Order flow aggregation |
-| **Photon** | Multi-hop swaps | Cross-AMM routing |
-| **System/Token** | Transfers | SOL and SPL tokens |
-
-### Use Cases
-
-- **MEV Detection**: Monitor instructions pre-execution
-- **Real-time Pricing**: Track incoming trades
-- **Launch Monitoring**: Detect new token launches instantly
-
-## Raydium Logs Decode
+## ShredParser
 
 ```go
-import "github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
-
-// logData is the base64-encoded log from transaction
-log := raydium.DecodeRaydiumLog(logData)
-
-if log != nil {
-    if swap := raydium.ParseRaydiumSwapLog(log); swap != nil {
-        fmt.Printf("Type: %s\n", swap.Type)
-        fmt.Printf("Mode: %s\n", swap.Mode)
-        fmt.Printf("Input: %s\n", swap.InputAmount.String())
-        fmt.Printf("Output: %s\n", swap.OutputAmount.String())
-    }
+result := shredParser.ParseAll(tx, nil)
+for _, ins := range result.ParsedInstructions {
+	switch {
+	case ins.Trade != nil:
+		fmt.Println(ins.Idx, ins.ProgramName, ins.Action, ins.Trade.Type,
+			ins.Trade.InputToken.AmountRaw, ins.InputAmountKind,
+			ins.Trade.OutputToken.AmountRaw, ins.OutputAmountKind)
+	case ins.MemeEvent != nil:
+		fmt.Println(ins.Idx, ins.ProgramName, ins.Action, ins.MemeEvent.Type, ins.MemeEvent.BaseMint)
+	case ins.Transfer != nil:
+		fmt.Println(ins.Idx, ins.ProgramName, ins.Action, ins.Transfer.Info.TokenAmount.Amount)
+	}
 }
 ```
 
-**Output:**
+See [ShredParser](../shred-parser.md) for what these amounts mean.
+
+## Raydium V4 logs
+
+The Raydium AMM v4 program writes a `ray_log` line per swap, deposit and withdraw:
+
+```go
+for _, line := range tx.Meta.LogMessages {
+	payload, ok := strings.CutPrefix(line, "Program log: ray_log: ")
+	if !ok {
+		continue
+	}
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		continue
+	}
+	if swap := raydium.ParseRaydiumSwapLog(raydium.DecodeRaydiumLog(data)); swap != nil {
+		fmt.Println(swap.Type, swap.Mode, swap.InputAmount, swap.OutputAmount, swap.SlippageProtection)
+	}
+}
 ```
-Type: Buy
-Mode: Exact Input
-Input: 50000000
-Output: 1234567890000
+
+## Constants
+
+```go
+fmt.Println(constants.GetProgramName(constants.DEX_PROGRAMS.ORCA.ID)) // Orca
+fmt.Println(constants.GetProgramName("11111111111111111111111111111111")) // Unknown: not a DEX program
+fmt.Println(constants.IsDexProgram(constants.DEX_PROGRAMS.PUMP_SWAP.ID))  // true
+fmt.Println(constants.GetBotNames())
+fmt.Println(constants.GetTipProvider("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5")) // Jito
 ```
