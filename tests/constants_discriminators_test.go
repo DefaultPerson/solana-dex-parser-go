@@ -336,6 +336,19 @@ func constAnchorTable() map[string][]byte {
 		"DFLOW.SWAP2_WITH_DEST_NATIVE": ix("swap2_with_destination_native"),
 		// HumidiFi: Anchor "swap" hash, unused by the (non-Anchor) parser
 		"HUMIDIFI.SWAP": ix("swap"),
+		// Venues (2026-09): Byreal on-chain IDL, Saros liquidity_book IDL, OKX
+		// "OKX: DEX Router" on-chain IDL, Obric swap2 seen in 33VnDBtr...
+		"BYREAL.SWAP":                                   ix("swap"),
+		"BYREAL.SWAP_V2":                                ix("swap_v2"),
+		"BYREAL.SWAP_V3_DYN":                            ix("swap_v3_dyn"),
+		"SAROS_DLMM.SWAP":                               ix("swap"),
+		"OBRIC.SWAP2":                                   ix("swap2"),
+		"OKX_DEX_V2.SWAP_CPI_EVENT2":                    cpiEv("SwapCpiEvent2"),
+		"OKX_DEX_V2.SWAP_WITH_FEES_CPI_EVENT2":          cpiEv("SwapWithFeesCpiEvent2"),
+		"OKX_DEX_V2.SWAP_WITH_FEES_CPI_EVENT_ENHANCED2": cpiEv("SwapWithFeesCpiEventEnhanced2"),
+		"OKX_DEX_V2.SWAP_TOB_V2_CPI_EVENT2":             cpiEv("SwapTobV2CpiEvent2"),
+		"OKX_DEX_V2.SWAP_TOC_V2_CPI_EVENT2":             cpiEv("SwapTocV2CpiEvent2"),
+		"OKX_DEX_V2.SWAP_WITH_FEE_CPI_EVENT_V3":         cpiEv("SwapWithFeeCpiEventV3"),
 	}
 }
 
@@ -353,6 +366,21 @@ var constNonAnchorDiscriminators = map[string]string{
 	"GOONFI.SWAP":               "native program tag",
 	"OBRIC.SWAP_X_TO_Y":         "unverified legacy value (equals Raydium CPMM swap_base_input)",
 	"OBRIC.SWAP_Y_TO_X":         "unverified legacy value",
+	"SOLFI_V2.SWAP":             "native program tag",
+	"GOONFI_V2.SWAP":            "native program tag",
+	"BISONFI.SWAP":              "native program tag",
+	"BISONFI.SWAP_V2":           "native program tag",
+	"BISONFI.SWAP_WITH_SIG":     "native program tag",
+	"TESSERA_V.SWAP":            "native program tag",
+	"ALPHAQ.SWAP":               "native program tag",
+	"ZERO_FI.SWAP":              "native program tag",
+	"SCORCH.SWAP":               "native program tag",
+	"SCORCH.SWAP_COMPACT":       "native program tag",
+	"QUANTUM.SWAP":              "native program tag",
+	"MANIFEST.SWAP":             "Manifest (shank) instruction tag",
+	"MANIFEST.SWAP_V2":          "Manifest (shank) instruction tag",
+	"TITAN.SWAP_ROUTE_V3":       "native program tag",
+	"TITAN.SWAP_EVENT":          "Titan log event tag (no IDL)",
 }
 
 // walkDiscriminators returns every []byte in constants.DISCRIMINATORS keyed by field path
