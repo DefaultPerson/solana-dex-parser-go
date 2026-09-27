@@ -181,9 +181,9 @@ func (p *VenueParser) buildTrade(ci types.ClassifiedInstruction, pool string, in
 }
 
 // cpiTransfers returns the SPL Token and Token-2022 transfers made inside the
-// CPI group of ci (see cpiGroup)
+// CPI group of ci (utils.TransactionUtils.CPIGroupTransfers)
 func (p *VenueParser) cpiTransfers(ci types.ClassifiedInstruction) []types.TransferData {
-	return groupTransfers(p.adapter, p.txUtils, ci, false)
+	return p.txUtils.CPIGroupTransfers(p.transferActions, ci, false)
 }
 
 // cpiGroup returns the inner instructions of the CPI group of ci
@@ -195,23 +195,4 @@ func cpiGroup(a *adapter.TransactionAdapter, ci types.ClassifiedInstruction) (in
 		instructions = append(instructions, a.GetInnerInstruction(ci.OuterIndex, j))
 	}
 	return indexes, instructions
-}
-
-// groupTransfers returns the SPL Token and Token-2022 transfers of the CPI
-// group of ci, and System program transfers too when withNative is set
-func groupTransfers(a *adapter.TransactionAdapter, tu *utils.TransactionUtils, ci types.ClassifiedInstruction, withNative bool) []types.TransferData {
-	indexes, instructions := cpiGroup(a, ci)
-	var transfers []types.TransferData
-	for i, ix := range instructions {
-		programId := a.GetInstructionProgramId(ix)
-		if programId != constants.TOKEN_PROGRAM_ID && programId != constants.TOKEN_2022_PROGRAM_ID &&
-			!(withNative && programId == constants.SYSTEM_PROGRAM_ID) {
-			continue
-		}
-		t := tu.ParseInstructionAction(ix, utils.FormatIdx(ci.OuterIndex, indexes[i]), nil)
-		if t != nil && (t.Type == "transfer" || t.Type == "transferChecked") {
-			transfers = append(transfers, *t)
-		}
-	}
-	return transfers
 }

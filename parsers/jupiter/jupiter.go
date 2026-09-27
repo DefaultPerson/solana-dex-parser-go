@@ -499,7 +499,7 @@ func (p *JupiterParser) getAMM(info *JupiterSwapInfo) (string, string) {
 
 // unknownAMM is the AMM label of hops through programs without a known name
 // (the name constants.GetProgramName gives unknown programs)
-const unknownAMM = "Unknown"
+const unknownAMM = constants.UnknownProgramName
 
 // containsDCAProgram checks if transaction contains DCA program
 func (p *JupiterParser) containsDCAProgram() bool {

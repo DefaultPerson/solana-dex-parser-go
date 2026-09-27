@@ -196,7 +196,7 @@ func (p *TitanParser) ProcessTrades() []types.TradeInfo {
 		outAmount := new(big.Int).SetUint64(binary.LittleEndian.Uint64(event[8:16]))
 		feeA := binary.LittleEndian.Uint64(event[24:32])
 
-		transfers := groupTransfers(p.adapter, p.txUtils, ci, false)
+		transfers := p.txUtils.CPIGroupTransfers(p.transferActions, ci, false)
 		inMint := p.adapter.GetSplTokenMint(accounts[3])
 		outMint := p.adapter.GetSplTokenMint(accounts[4])
 		for _, t := range transfers {

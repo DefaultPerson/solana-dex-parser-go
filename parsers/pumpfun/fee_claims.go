@@ -98,7 +98,7 @@ func (p *PumpFeeClaimParser) ProcessTransfers() []types.TransferData {
 			transfers = append(transfers, p.all(instructions, ci, "distributeFeeToHolders")...)
 		case !isPumpfun && (constants.MatchDiscriminator(data, ps.TRANSFER_CREATOR_FEES_TO_PUMP) ||
 			constants.MatchDiscriminator(data, ps.TRANSFER_CREATOR_FEES_TO_PUMP_V2)):
-			transfers = append(transfers, p.label(p.instructionTransfers(ci), ci, "transferCreatorFeesToPump")...)
+			transfers = append(transfers, p.label(p.txUtils.CPIGroupTransfers(p.transferActions, ci, true), ci, "transferCreatorFeesToPump")...)
 		}
 	}
 	return transfers
@@ -202,7 +202,7 @@ func (p *PumpFeeClaimParser) single(instructions []types.ClassifiedInstruction, 
 	if emitter == nil {
 		emitter = &event
 	}
-	for _, t := range p.instructionTransfers(*emitter) {
+	for _, t := range p.txUtils.CPIGroupTransfers(p.transferActions, *emitter, true) {
 		if t.Info.TokenAmount.Amount == payout.amount.String() && (payout.mint == "" || t.Info.Mint == payout.mint) {
 			return p.label([]types.TransferData{t}, *emitter, payout.transferType)
 		}
@@ -247,23 +247,7 @@ func (p *PumpFeeClaimParser) all(instructions []types.ClassifiedInstruction, eve
 	if emitter == nil {
 		return nil
 	}
-	return p.label(p.instructionTransfers(*emitter), *emitter, transferType)
-}
-
-// instructionTransfers returns the token and System (SOL) transfers made
-// inside ci, in execution order
-func (p *PumpFeeClaimParser) instructionTransfers(ci types.ClassifiedInstruction) []types.TransferData {
-	first, last := utils.CPIGroup(p.adapter, ci)
-	var result []types.TransferData
-	for _, t := range utils.SortedTransfers(p.transferActions) {
-		if t.Type != "transfer" && t.Type != "transferChecked" {
-			continue
-		}
-		if outer, inner := utils.SplitIdx(t.Idx); outer == ci.OuterIndex && inner >= first && inner <= last {
-			result = append(result, t)
-		}
-	}
-	return result
+	return p.label(p.txUtils.CPIGroupTransfers(p.transferActions, *emitter, true), *emitter, transferType)
 }
 
 // label sets the payout type, the paying program and ci's idx on transfers

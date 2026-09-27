@@ -314,7 +314,7 @@ func GetFinalSwap(trades []types.TradeInfo, dexInfo *types.DexInfo) *types.Trade
 
 // unknownProgramName is the name GetProgramName gives programs that are not
 // in DEX_PROGRAMS (upstream parity)
-const unknownProgramName = "Unknown"
+const unknownProgramName = constants.UnknownProgramName
 
 // isProgramName reports whether name identifies a known program
 func isProgramName(name string) bool {

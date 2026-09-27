@@ -1,8 +1,6 @@
 package systoken
 
 import (
-	"fmt"
-
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -88,7 +86,7 @@ func (x *ProgramShredParser) ProcessAll() ([]interface{}, []types.ParsedShredIns
 	extraTypes := []string{"mintTo", "burn", "mintToChecked", "burnChecked"}
 
 	for _, ci := range p.classifier.GetInstructions(x.programID) {
-		idx := formatInstructionIdx(ci.OuterIndex, ci.InnerIndex)
+		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		transfer := p.txUtils.ParseInstructionAction(ci.Instruction, idx, extraTypes)
 		if transfer == nil {
 			continue
@@ -149,13 +147,6 @@ type TokenInstruction struct {
 	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
-func formatInstructionIdx(outerIndex int, innerIndex int) string {
-	if innerIndex < 0 {
-		return fmt.Sprintf("%d", outerIndex)
-	}
-	return fmt.Sprintf("%d-%d", outerIndex, innerIndex)
-}
-
 func getSysProgramName(programID string) string {
 	switch programID {
 	case constants.SYSTEM_PROGRAM_ID:
@@ -165,5 +156,5 @@ func getSysProgramName(programID string) string {
 	case constants.TOKEN_2022_PROGRAM_ID:
 		return "Token2022"
 	}
-	return "Unknown"
+	return constants.UnknownProgramName
 }

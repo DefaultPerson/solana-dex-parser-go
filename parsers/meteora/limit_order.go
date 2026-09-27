@@ -57,7 +57,7 @@ func (p *MeteoraDLMMLimitOrderParser) ProcessTransfers() []types.TransferData {
 			if !constants.MatchDiscriminator(data, lo.disc) {
 				continue
 			}
-			for _, t := range p.Utils.CPIGroupTransfers(p.TransferActions, ci) {
+			for _, t := range p.Utils.CPIGroupTransfers(p.TransferActions, ci, false) {
 				t.Type = lo.transferType
 				t.ProgramId = ci.ProgramId
 				t.Idx = utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)

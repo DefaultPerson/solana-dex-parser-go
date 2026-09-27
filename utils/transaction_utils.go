@@ -427,16 +427,17 @@ func (tu *TransactionUtils) instructionGroup(idx string) (outer, first, last int
 }
 
 // CPIGroupTransfers returns the SPL Token and Token-2022 transfers made
-// inside the instruction ci (its CPI group, see CPIGroup), in execution order,
-// whatever program the transfer grouping put them under
-func (tu *TransactionUtils) CPIGroupTransfers(transferActions map[string][]types.TransferData, ci types.ClassifiedInstruction) []types.TransferData {
+// inside the instruction ci (its CPI group, see CPIGroup), and System program
+// (SOL) transfers too when withNative is set, in execution order, whatever
+// program the transfer grouping put them under
+func (tu *TransactionUtils) CPIGroupTransfers(transferActions map[string][]types.TransferData, ci types.ClassifiedInstruction, withNative bool) []types.TransferData {
 	first, last := CPIGroup(tu.adapter, ci)
 	if last < first {
 		return nil
 	}
 	var result []types.TransferData
 	for _, t := range SortedTransfers(transferActions) {
-		if t.ProgramId == constants.SYSTEM_PROGRAM_ID || (t.Type != "transfer" && t.Type != "transferChecked") {
+		if (t.ProgramId == constants.SYSTEM_PROGRAM_ID && !withNative) || (t.Type != "transfer" && t.Type != "transferChecked") {
 			continue
 		}
 		if outer, inner := SplitIdx(t.Idx); outer == ci.OuterIndex && inner >= first && inner <= last {

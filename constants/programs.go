@@ -1001,13 +1001,17 @@ func namedDexProgram(id string) DexProgram {
 	}
 }
 
+// UnknownProgramName is the name GetProgramName gives program IDs that are
+// not known DEX programs (same as upstream TS)
+const UnknownProgramName = "Unknown"
+
 // GetProgramName returns the human-readable name for a program ID,
-// or "Unknown" if the ID is not a known DEX program (same as upstream TS).
+// or UnknownProgramName if the ID is not a known DEX program.
 func GetProgramName(programId string) string {
 	if prog, ok := dexProgramMap[programId]; ok {
 		return prog.Name
 	}
-	return "Unknown"
+	return UnknownProgramName
 }
 
 // IsDexProgram checks if a program ID is a known DEX program

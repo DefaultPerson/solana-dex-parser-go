@@ -72,7 +72,7 @@ func (p *RaydiumCLLimitOrderParser) ProcessTransfers() []types.TransferData {
 // limitOrderTransfers returns the token transfers made inside the limit
 // order instruction ci, labelled with transferType, the program and ci's idx
 func limitOrderTransfers(tu *utils.TransactionUtils, transferActions map[string][]types.TransferData, ci types.ClassifiedInstruction, transferType string) []types.TransferData {
-	transfers := tu.CPIGroupTransfers(transferActions, ci)
+	transfers := tu.CPIGroupTransfers(transferActions, ci, false)
 	for i := range transfers {
 		transfers[i].Type = transferType
 		transfers[i].ProgramId = ci.ProgramId

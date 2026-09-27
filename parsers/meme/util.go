@@ -8,10 +8,6 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
-func formatIdx(outerIndex int, innerIndex int) string {
-	return utils.FormatIdx(outerIndex, innerIndex)
-}
-
 // instructionTransfers returns the transfer and transferChecked actions
 // grouped under the instruction (outer instructions keep inner index -1)
 func instructionTransfers(transferActions map[string][]types.TransferData, ci types.ClassifiedInstruction) []types.TransferData {

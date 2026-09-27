@@ -1070,7 +1070,7 @@ func routeAggregateTrades(adapt *adapter.TransactionAdapter, trades, routes []ty
 				}
 			}
 			for _, amm := range append([]string{trade.AMM}, trade.AMMs...) {
-				if amm != "" && amm != "Unknown" && !containsString(route.AMMs, amm) {
+				if amm != "" && amm != constants.UnknownProgramName && !containsString(route.AMMs, amm) {
 					route.AMMs = append(route.AMMs, amm)
 				}
 			}

@@ -153,7 +153,7 @@ func (p *BoopfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 			event.Signature = p.adapter.Signature()
 			event.Slot = p.adapter.Slot()
 			event.Timestamp = p.adapter.BlockTime()
-			event.Idx = formatIdx(ci.OuterIndex, ci.InnerIndex)
+			event.Idx = utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 			events = append(events, event)
 		}
 	}
