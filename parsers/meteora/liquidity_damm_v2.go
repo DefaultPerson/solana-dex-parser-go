@@ -325,20 +325,8 @@ func (p *MeteoraDAMMPoolParser) normalizeTokens(transfers []types.TransferData) 
 // token_a_mint 6, token_b_mint 7; remove_(all_)liquidity and
 // claim_position_fee 7 and 8.
 func (p *MeteoraDAMMPoolParser) applyLiquidityChange(ci types.ClassifiedInstruction, event *types.PoolEvent) {
-	var data []byte
-	for _, other := range p.ClassifiedInstructions {
-		if other.ProgramId != ci.ProgramId || other.OuterIndex != ci.OuterIndex || other.InnerIndex <= ci.InnerIndex {
-			continue
-		}
-		d := p.Adapter.GetInstructionData(other.Instruction)
-		if !isAnchorEvent(d) {
-			break
-		}
-		if constants.MatchDiscriminator(d, constants.DISCRIMINATORS.METEORA_DAMM_V2.EVT_LIQUIDITY_CHANGE) {
-			data = d
-			break
-		}
-	}
+	data := findEvent(p.Adapter, followingEvents(p.Adapter, p.ClassifiedInstructions, ci.ProgramId, ci.OuterIndex, ci.InnerIndex),
+		constants.DISCRIMINATORS.METEORA_DAMM_V2.EVT_LIQUIDITY_CHANGE)
 	const amounts = 16 + 3*32
 	if len(data) < amounts+4*8 || base58.Encode(data[16:48]) != event.PoolId {
 		return

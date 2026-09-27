@@ -41,11 +41,11 @@ func NewMeteoraParser(
 func (p *MeteoraParser) ProcessTrades() []types.TradeInfo {
 	var trades []types.TradeInfo
 
-	for i, ci := range p.ClassifiedInstructions {
+	for _, ci := range p.ClassifiedInstructions {
 		if !isMeteoraProgram(ci.ProgramId) || !p.isSwap(ci.ProgramId, p.Adapter.GetInstructionData(ci.Instruction)) {
 			continue
 		}
-		events := p.instructionEvents(i)
+		events := followingEvents(p.Adapter, p.ClassifiedInstructions, ci.ProgramId, ci.OuterIndex, ci.InnerIndex)
 		// Transfers made after a self-CPI event are grouped under the event
 		transfers := p.GetTransfersForInstruction(ci.ProgramId, ci.OuterIndex, ci.InnerIndex, nil)
 		for _, e := range events {
@@ -131,35 +131,6 @@ func (p *MeteoraParser) getPoolAddress(instruction interface{}, programId string
 	return ""
 }
 
-// instructionEvents returns the self-CPI events the instruction at
-// position i of ClassifiedInstructions emitted: the event instructions of
-// the same program that follow it in the same outer instruction, before the
-// program's next non-event instruction.
-func (p *MeteoraParser) instructionEvents(i int) []types.ClassifiedInstruction {
-	ci := p.ClassifiedInstructions[i]
-	var events []types.ClassifiedInstruction
-	for _, next := range p.ClassifiedInstructions[i+1:] {
-		if next.ProgramId != ci.ProgramId || next.OuterIndex != ci.OuterIndex || next.InnerIndex <= ci.InnerIndex {
-			continue
-		}
-		if !isAnchorEvent(p.Adapter.GetInstructionData(next.Instruction)) {
-			break
-		}
-		events = append(events, next)
-	}
-	return events
-}
-
-// findEvent returns the data of the first event with discriminator
-func (p *MeteoraParser) findEvent(events []types.ClassifiedInstruction, discriminator []byte) []byte {
-	for _, e := range events {
-		if data := p.Adapter.GetInstructionData(e.Instruction); constants.MatchDiscriminator(data, discriminator) {
-			return data
-		}
-	}
-	return nil
-}
-
 // dlmmTradeFromEvent builds a DLMM swap from its Swap or Swap2Evt event.
 // Accounts (swap, swap2, swap_exact_out(2), swap_with_price_impact(2)):
 // lb_pair 0, token_x_mint 6, token_y_mint 7.
@@ -177,9 +148,9 @@ func (p *MeteoraParser) dlmmTradeFromEvent(instructionEvents []types.ClassifiedI
 		return nil
 	}
 	events := constants.DISCRIMINATORS.METEORA_DLMM.EVENTS
-	data := p.findEvent(instructionEvents, events["swap2Evt"])
+	data := findEvent(p.Adapter, instructionEvents, events["swap2Evt"])
 	if data == nil {
-		data = p.findEvent(instructionEvents, events["swap"])
+		data = findEvent(p.Adapter, instructionEvents, events["swap"])
 	}
 	if data == nil || len(data) < 48 {
 		return nil
@@ -319,9 +290,9 @@ func (p *MeteoraParser) dammV2TradeFromEvent(instructionEvents []types.Classifie
 	}
 	v2 := constants.DISCRIMINATORS.METEORA_DAMM_V2
 	// some program versions emit both; EvtSwap2 is the current one
-	data := p.findEvent(instructionEvents, v2.EVT_SWAP2)
+	data := findEvent(p.Adapter, instructionEvents, v2.EVT_SWAP2)
 	if data == nil {
-		data = p.findEvent(instructionEvents, v2.EVT_SWAP)
+		data = findEvent(p.Adapter, instructionEvents, v2.EVT_SWAP)
 	}
 	if data == nil || len(data) < 16+32+2 || base58.Encode(data[16:48]) != accounts[1] {
 		return nil

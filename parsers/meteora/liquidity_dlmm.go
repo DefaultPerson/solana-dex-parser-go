@@ -299,20 +299,8 @@ func (p *MeteoraDLMMPoolParser) parseRebalance(ci types.ClassifiedInstruction) [
 	if len(accounts) < 9 {
 		return nil
 	}
-	var data []byte
-	for _, other := range p.ClassifiedInstructions {
-		if other.ProgramId != ci.ProgramId || other.OuterIndex != ci.OuterIndex || other.InnerIndex <= ci.InnerIndex {
-			continue
-		}
-		d := p.Adapter.GetInstructionData(other.Instruction)
-		if !isAnchorEvent(d) {
-			break
-		}
-		if constants.MatchDiscriminator(d, constants.DISCRIMINATORS.METEORA_DLMM.EVENTS["rebalancing"]) {
-			data = d
-			break
-		}
-	}
+	data := findEvent(p.Adapter, followingEvents(p.Adapter, p.ClassifiedInstructions, ci.ProgramId, ci.OuterIndex, ci.InnerIndex),
+		constants.DISCRIMINATORS.METEORA_DLMM.EVENTS["rebalancing"])
 	const amounts = 16 + 3*32 + 4
 	if len(data) < amounts+4*8 || base58.Encode(data[16:48]) != accounts[1] {
 		return nil

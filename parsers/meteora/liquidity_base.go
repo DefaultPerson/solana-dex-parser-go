@@ -86,13 +86,42 @@ func (p *MeteoraLiquidityParserBase) ParseInstruction(
 	return event
 }
 
-// anchorEventPrefix starts the data of an Anchor self-CPI event instruction
-// (sha256("anchor:event")[:8])
+// anchorEventPrefix starts the data of an Anchor self-CPI event instruction:
+// Anchor's EVENT_IX_TAG 0x1d9acb512ea545e4, little-endian
 var anchorEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
 
 // isAnchorEvent reports whether instruction data is an Anchor self-CPI event
 func isAnchorEvent(data []byte) bool {
 	return len(data) >= 16 && bytes.Equal(data[:8], anchorEventPrefix)
+}
+
+// followingEvents returns the self-CPI events the instruction of programId
+// at (outerIndex, innerIndex) emitted: the program's event instructions
+// that follow it in the same outer instruction, up to the program's next
+// non-event instruction. instructions are in classifier order (a program's
+// inner instructions in execution order).
+func followingEvents(adapt *adapter.TransactionAdapter, instructions []types.ClassifiedInstruction, programId string, outerIndex, innerIndex int) []types.ClassifiedInstruction {
+	var events []types.ClassifiedInstruction
+	for _, ci := range instructions {
+		if ci.ProgramId != programId || ci.OuterIndex != outerIndex || ci.InnerIndex <= innerIndex {
+			continue
+		}
+		if !isAnchorEvent(adapt.GetInstructionData(ci.Instruction)) {
+			break
+		}
+		events = append(events, ci)
+	}
+	return events
+}
+
+// findEvent returns the data of the first of events with discriminator
+func findEvent(adapt *adapter.TransactionAdapter, events []types.ClassifiedInstruction, discriminator []byte) []byte {
+	for _, e := range events {
+		if data := adapt.GetInstructionData(e.Instruction); constants.MatchDiscriminator(data, discriminator) {
+			return data
+		}
+	}
+	return nil
 }
 
 // InstructionTransfers returns the transfers of the instruction at
@@ -114,13 +143,7 @@ func (p *MeteoraLiquidityParserBase) InstructionTransfers(programId string, oute
 		}
 	}
 	add(p.GetTransfersForInstruction(programId, outerIndex, innerIndex, nil))
-	for _, ci := range p.ClassifiedInstructions {
-		if ci.ProgramId != programId || ci.OuterIndex != outerIndex || ci.InnerIndex <= innerIndex {
-			continue
-		}
-		if !isAnchorEvent(p.Adapter.GetInstructionData(ci.Instruction)) {
-			break
-		}
+	for _, ci := range followingEvents(p.Adapter, p.ClassifiedInstructions, programId, outerIndex, innerIndex) {
 		add(p.GetTransfersForInstruction(programId, outerIndex, ci.InnerIndex, nil))
 	}
 	return transfers
