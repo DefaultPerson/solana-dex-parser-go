@@ -1,14 +1,17 @@
 package tests
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"math/big"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/mr-tron/base58"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/meteora"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
@@ -131,6 +134,102 @@ func TestRaydiumV4CreateMatchesInitLog(t *testing.T) {
 			}
 			if e.PoolLpMint == "" || e.LpAmountRaw == "" || e.LpAmountRaw == "0" {
 				t.Errorf("LP mint %q amount %q missing", e.PoolLpMint, e.LpAmountRaw)
+			}
+		})
+	}
+}
+
+// TestRaydiumV4LiquidityFromRayLog: AMM v4 initialize2, deposit and
+// withdraw amounts come from the instruction's ray_log (streamer item 7),
+// with the transfers as the fallback. Truth: the ray_log decoded here at
+// the raydium-amm log.rs offsets (InitLog pc_amount 27, coin_amount 35;
+// DepositLog deduct_coin 81, deduct_pc 89, mint_lp 97; WithdrawLog
+// withdraw_lp 1, out_coin 73, out_pc 81), the coin mint from the
+// instruction accounts (initialize2 coin_mint 8, deposit/withdraw
+// coin_vault 6). "no transfers" is synthetic, built from the real fixture:
+// the instruction's inner instructions are dropped, as when its transfers
+// are grouped under another program (amm-13); "no logs" drops the logs.
+func TestRaydiumV4LiquidityFromRayLog(t *testing.T) {
+	cases := []struct {
+		sig   string
+		typ   types.PoolEventType
+		outer int
+	}{
+		{"2YxPyAJNfnBLrVpBwMx7qMVNPSvBDhxiquwJGhBjwXhkP6i6AbooUg4b4wpi15bQq2Qs4t7BpL1UVvTMcXL8P4uS", types.PoolEventTypeCreate, 4},
+		{"4998xRsghpLWWcZsFFtfN8UBss9SVkN8sMUPkqdBzYS6eRVuxve3RoT89pqBaYvHDgqPSsFt9GDGQc6Us3pwPX5v", types.PoolEventTypeCreate, 2},
+		{"49ejTjaCdqV3hwAs1GomGsTLqZNUWztHduHRCNr8m3Dogfyii29qkNPNauAr9VfEh9j5m7QHq8HYRd6FiaAACCf", types.PoolEventTypeCreate, 2},
+		{"5MRWUUoCWpaFm8B9jSoLp4w6B19p46jcJMQrm26SHHGRZQpAtG3mdEcqGVDwsgUEGKRmC1R6JMFS5NhzmXUnR3X1", types.PoolEventTypeCreate, 3},
+		{"FHz3LurEFNnWREXSfqpenJTRuzybQrmxsNjndmMDw36XUwUofSQ1vRQwVi6uT422Xe2Whb7gfFY3tHGqvEBg6dF", types.PoolEventTypeCreate, 4},
+		{"2S4DdkD4FpqazTn5qHd4x9X5bAHu9g5Ry3jCLWkE44UCmW8bwkcet9eeAsHbzyR7HWtiE3gV268MtsBNrc4X6KpL", types.PoolEventTypeAdd, 4},
+		{"4zFeXoUVaaQ18chkY899hvvTYBRMAJ6CaNfWxbchMDDEY1L56maqwAdY19Faif5LBoTxwBPeEamcEsh76b39fjia", types.PoolEventTypeAdd, 4},
+		{"2MvpoPWEY3gnEE5WxsQATRRa15Go6p8HxBbuxATiTUMxCRJeVQsBCPnCRdrM5YModikwpTiKu1iZbPBeTdHkg3uv", types.PoolEventTypeRemove, 5},
+		{"33HpWkDo8tr4r3jQCnML7ojpL3pFLHiE5yLZsbJDGe1mQzdg7aeJ9EKyD6WayEY4Q1hEivca93bP82TzsVcLzkgf", types.PoolEventTypeRemove, 4},
+	}
+	u64 := func(b []byte, off int) string {
+		return strconv.FormatUint(binary.LittleEndian.Uint64(b[off:]), 10)
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.sig[:12], func(t *testing.T) {
+			tx := loadFixture(t, c.sig)
+			var coin, pc, lp string
+			for _, line := range tx.Meta.LogMessages {
+				if i := strings.Index(line, "ray_log: "); i >= 0 {
+					b, err := base64.StdEncoding.DecodeString(line[i+len("ray_log: "):])
+					if err != nil || len(b) == 0 {
+						continue
+					}
+					switch {
+					case b[0] == 0 && len(b) >= 43:
+						pc, coin = u64(b, 27), u64(b, 35)
+					case b[0] == 1 && len(b) >= 105:
+						coin, pc, lp = u64(b, 81), u64(b, 89), u64(b, 97)
+					case b[0] == 2 && len(b) >= 89:
+						lp, coin, pc = u64(b, 1), u64(b, 73), u64(b, 81)
+					}
+				}
+			}
+			if coin == "" {
+				t.Fatal("no Init/Deposit/Withdraw ray_log")
+			}
+			ctx := newParseContext(tx, nil)
+			accounts := ctx.Adapter.GetInstructionAccounts(instructionAt(t, ctx, constants.DEX_PROGRAMS.RAYDIUM_V4.ID, c.outer, -1).Instruction)
+			coinMint := accounts[8]
+			if c.typ != types.PoolEventTypeCreate {
+				coinMint = ctx.Adapter.GetSplTokenMint(accounts[6])
+			}
+
+			noTransfers := loadFixture(t, c.sig)
+			var inner []adapter.InnerInstructionSet
+			for _, set := range noTransfers.Meta.InnerInstructions {
+				if set.Index != c.outer {
+					inner = append(inner, set)
+				}
+			}
+			noTransfers.Meta.InnerInstructions = inner
+			noLogs := loadFixture(t, c.sig)
+			noLogs.Meta.LogMessages = nil
+
+			for _, v := range []struct {
+				name string
+				tx   *adapter.SolanaTransaction
+			}{{"real", tx}, {"no transfers", noTransfers}, {"no logs", noLogs}} {
+				e := findLiquidity(dexparser.NewDexParser().ParseLiquidity(v.tx, liquidityConfig()), c.typ, strconv.Itoa(c.outer))
+				if e == nil {
+					t.Errorf("%s: no %s event at %d", v.name, c.typ, c.outer)
+					continue
+				}
+				gotCoin, gotPc := e.Token0AmountRaw, e.Token1AmountRaw
+				if e.Token1Mint == coinMint {
+					gotCoin, gotPc = gotPc, gotCoin
+				}
+				if gotCoin != coin || gotPc != pc {
+					t.Errorf("%s: coin %s pc %s, ray_log coin %s pc %s", v.name, gotCoin, gotPc, coin, pc)
+				}
+				// the LP minted by initialize2 is not in the log
+				if lp != "" && e.LpAmountRaw != lp {
+					t.Errorf("%s: LP %s, ray_log %s", v.name, e.LpAmountRaw, lp)
+				}
 			}
 		})
 	}
