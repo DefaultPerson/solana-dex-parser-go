@@ -2,9 +2,12 @@ package utils
 
 import (
 	"encoding/binary"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -17,8 +20,15 @@ func IsTransferCheck(ix *adapter.UnifiedInstruction) bool {
 		return false
 	}
 	programId := ix.ProgramId
-	return (programId == constants.TOKEN_PROGRAM_ID || programId == constants.TOKEN_2022_PROGRAM_ID) &&
+	// also matches transferCheckedWithFee (Token-2022 transfer fee extension)
+	return isTokenProgram(programId) &&
 		strings.Contains(ix.Parsed.Type, "transferChecked")
+}
+
+// isTokenProgram reports whether programId is the SPL Token or Token-2022
+// program (jsonParsed labels both as program "spl-token")
+func isTokenProgram(programId string) bool {
+	return programId == constants.TOKEN_PROGRAM_ID || programId == constants.TOKEN_2022_PROGRAM_ID
 }
 
 // IsTransfer checks if instruction is a transfer instruction
@@ -27,7 +37,7 @@ func IsTransfer(ix *adapter.UnifiedInstruction) bool {
 		return false
 	}
 	return ix.Program == "spl-token" &&
-		ix.ProgramId == constants.TOKEN_PROGRAM_ID &&
+		isTokenProgram(ix.ProgramId) &&
 		ix.Parsed.Type == "transfer"
 }
 
@@ -47,7 +57,7 @@ func IsExtraAction(ix *adapter.UnifiedInstruction, actionType string) bool {
 		return false
 	}
 	return ix.Program == "spl-token" &&
-		ix.ProgramId == constants.TOKEN_PROGRAM_ID &&
+		isTokenProgram(ix.ProgramId) &&
 		ix.Parsed.Type == actionType
 }
 
@@ -63,16 +73,8 @@ func ProcessTransfer(ix *adapter.UnifiedInstruction, idx string, adapt *adapter.
 	authority := getStringFromMap(info, "authority")
 	amount := getStringFromMap(info, "amount")
 
-	// Get mint from token map
-	var mint string
-	if tokenInfo, ok := adapt.SPLTokenMap[destination]; ok {
-		mint = tokenInfo.Mint
-	}
-	if mint == "" {
-		if tokenInfo, ok := adapt.SPLTokenMap[source]; ok {
-			mint = tokenInfo.Mint
-		}
-	}
+	// Get mint from token map, preferring a non-SOL mint of either side
+	mint := transferTokenMint(adapt, source, destination)
 	if mint == "" && ix.ProgramId == constants.TOKENS.NATIVE {
 		mint = constants.TOKENS.SOL
 	}
@@ -81,19 +83,13 @@ func ProcessTransfer(ix *adapter.UnifiedInstruction, idx string, adapt *adapter.
 	}
 
 	decimals := adapt.GetTokenDecimals(mint)
-	if decimals == 0 {
-		if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
-			decimals = d
-		}
-	}
 
 	sourceBalances := adapt.GetTokenAccountBalance([]string{source})
 	destinationBalances := adapt.GetTokenAccountBalance([]string{destination})
 	sourcePreBalances := adapt.GetTokenAccountPreBalance([]string{source})
 	destinationPreBalances := adapt.GetTokenAccountPreBalance([]string{destination})
 
-	amountBig, _ := new(big.Int).SetString(amount, 10)
-	uiAmount := types.ConvertToUIAmount(amountBig, decimals)
+	uiAmount := types.ConvertToUIAmount(parseAmount(amount), decimals)
 
 	return &types.TransferData{
 		Type:      "transfer",
@@ -135,8 +131,10 @@ func ProcessNativeTransfer(ix *adapter.UnifiedInstruction, idx string, adapt *ad
 	sourcePreBalances := adapt.GetAccountPreBalance([]string{source})
 	destinationPreBalances := adapt.GetAccountPreBalance([]string{destination})
 
-	amountBig, _ := new(big.Int).SetString(lamports, 10)
-	uiAmount := types.ConvertToUIAmount(amountBig, decimals)
+	if lamports == "" {
+		return nil
+	}
+	uiAmount := types.ConvertToUIAmount(parseAmount(lamports), decimals)
 
 	return &types.TransferData{
 		Type:      "transfer",
@@ -181,16 +179,18 @@ func ProcessTransferCheck(ix *adapter.UnifiedInstruction, idx string, adapt *ada
 	var tokenAmount types.TokenAmount
 	if ta, ok := info["tokenAmount"].(map[string]interface{}); ok {
 		tokenAmount.Amount = getStringFromMap(ta, "amount")
-		if ui, ok := ta["uiAmount"].(float64); ok {
-			tokenAmount.UIAmount = &ui
+		tokenAmount.Decimals = decimals
+		if d, ok := getUint8FromMap(ta, "decimals"); ok {
+			tokenAmount.Decimals = d
 		}
-		if d, ok := ta["decimals"].(float64); ok {
-			tokenAmount.Decimals = uint8(d)
+		ui, ok := getFloatFromMap(ta, "uiAmount")
+		if !ok {
+			ui = types.ConvertToUIAmount(parseAmount(tokenAmount.Amount), tokenAmount.Decimals)
 		}
+		tokenAmount.UIAmount = &ui
 	} else {
 		amount := getStringFromMap(info, "amount")
-		amountBig, _ := new(big.Int).SetString(amount, 10)
-		uiAmount := types.ConvertToUIAmount(amountBig, decimals)
+		uiAmount := types.ConvertToUIAmount(parseAmount(amount), decimals)
 		tokenAmount = types.TokenAmount{Amount: amount, UIAmount: &uiAmount, Decimals: decimals}
 	}
 
@@ -224,6 +224,18 @@ func ProcessExtraAction(ix *adapter.UnifiedInstruction, idx string, adapt *adapt
 	info := ix.Parsed.Info
 	source := getStringFromMap(info, "source")
 	destination := getStringFromMap(info, "destination")
+	// jsonParsed names the token account "account": the destination of
+	// mintTo and the source of burn
+	switch actionType {
+	case "mintTo", "mintToChecked":
+		if destination == "" {
+			destination = getStringFromMap(info, "account")
+		}
+	case "burn", "burnChecked":
+		if source == "" {
+			source = getStringFromMap(info, "account")
+		}
+	}
 	authority := getStringFromMap(info, "authority")
 	if authority == "" {
 		authority = getStringFromMap(info, "mintAuthority")
@@ -242,8 +254,12 @@ func ProcessExtraAction(ix *adapter.UnifiedInstruction, idx string, adapt *adapt
 	decimals := adapt.GetTokenDecimals(mint)
 
 	amount := getStringFromMap(info, "amount")
-	amountBig, _ := new(big.Int).SetString(amount, 10)
-	uiAmount := types.ConvertToUIAmount(amountBig, decimals)
+	if amount == "" {
+		if ta, ok := info["tokenAmount"].(map[string]interface{}); ok {
+			amount = getStringFromMap(ta, "amount")
+		}
+	}
+	uiAmount := types.ConvertToUIAmount(parseAmount(amount), decimals)
 
 	sourceBalances := adapt.GetTokenAccountBalance([]string{source})
 	destinationBalances := adapt.GetTokenAccountBalance([]string{destination})
@@ -282,13 +298,13 @@ func IsCompiledTransfer(ix *adapter.UnifiedInstruction) bool {
 }
 
 // IsCompiledTransferCheck checks if a compiled instruction is a transferChecked
+// (or a Token-2022 TransferCheckedWithFee)
 func IsCompiledTransferCheck(ix *adapter.UnifiedInstruction) bool {
 	if len(ix.Data) == 0 {
 		return false
 	}
-	programId := ix.ProgramId
-	return (programId == constants.TOKEN_PROGRAM_ID || programId == constants.TOKEN_2022_PROGRAM_ID) &&
-		ix.Data[0] == constants.SPLTokenTransferChecked
+	return (isTokenProgram(ix.ProgramId) && ix.Data[0] == constants.SPLTokenTransferChecked) ||
+		isCompiledTransferCheckedWithFee(ix)
 }
 
 // IsCompiledNativeTransfer checks if a compiled instruction is a native SOL transfer
@@ -335,16 +351,8 @@ func ProcessCompiledTransfer(ix *adapter.UnifiedInstruction, idx string, adapt *
 
 	amount := binary.LittleEndian.Uint64(ix.Data[1:9])
 
-	// Get mint from token map
-	var mint string
-	if tokenInfo, ok := adapt.SPLTokenMap[destination]; ok {
-		mint = tokenInfo.Mint
-	}
-	if mint == "" {
-		if tokenInfo, ok := adapt.SPLTokenMap[source]; ok {
-			mint = tokenInfo.Mint
-		}
-	}
+	// Get mint from token map, preferring a non-SOL mint of either side
+	mint := transferTokenMint(adapt, source, destination)
 	if mint == "" {
 		return nil
 	}
@@ -422,9 +430,24 @@ func ProcessCompiledNativeTransfer(ix *adapter.UnifiedInstruction, idx string, a
 	}
 }
 
-// ProcessCompiledTransferCheck processes a compiled transferChecked instruction
+// ProcessCompiledTransferCheck processes a compiled transferChecked
+// instruction, or a Token-2022 TransferCheckedWithFee (26/1) whose amount is
+// the gross amount debited from the source
 func ProcessCompiledTransferCheck(ix *adapter.UnifiedInstruction, idx string, adapt *adapter.TransactionAdapter) *types.TransferData {
-	if len(ix.Data) < 10 || len(ix.Accounts) < 4 {
+	if len(ix.Accounts) < 4 {
+		return nil
+	}
+
+	var amount uint64
+	var decimals uint8
+	switch {
+	case len(ix.Data) >= 10 && ix.Data[0] == constants.SPLTokenTransferChecked:
+		amount = binary.LittleEndian.Uint64(ix.Data[1:9])
+		decimals = ix.Data[9]
+	case isCompiledTransferCheckedWithFee(ix):
+		amount = binary.LittleEndian.Uint64(ix.Data[2:10])
+		decimals = ix.Data[10]
+	default:
 		return nil
 	}
 
@@ -432,9 +455,6 @@ func ProcessCompiledTransferCheck(ix *adapter.UnifiedInstruction, idx string, ad
 	mint := ix.Accounts[1]
 	destination := ix.Accounts[2]
 	authority := ix.Accounts[3]
-
-	amount := binary.LittleEndian.Uint64(ix.Data[1:9])
-	decimals := ix.Data[9]
 
 	sourceBalances := adapt.GetTokenAccountBalance([]string{source})
 	destinationBalances := adapt.GetTokenAccountBalance([]string{destination})
@@ -464,6 +484,21 @@ func ProcessCompiledTransferCheck(ix *adapter.UnifiedInstruction, idx string, ad
 		Signature: adapt.Signature(),
 	}
 }
+
+// isCompiledTransferCheckedWithFee checks for the Token-2022 TransferFeeExtension
+// (26) sub-instruction TransferCheckedWithFee (1): data 26, 1, amount u64,
+// decimals u8, fee u64; accounts source, mint, destination, authority
+func isCompiledTransferCheckedWithFee(ix *adapter.UnifiedInstruction) bool {
+	return ix.ProgramId == constants.TOKEN_2022_PROGRAM_ID &&
+		len(ix.Data) >= 19 && ix.Data[0] == splTokenTransferFeeExtension && ix.Data[1] == splTokenTransferCheckedWithFee
+}
+
+// SPL Token-2022 TransferFeeExtension instruction tag and its
+// TransferCheckedWithFee sub-instruction
+const (
+	splTokenTransferFeeExtension   = 26
+	splTokenTransferCheckedWithFee = 1
+)
 
 // ProcessCompiledExtraAction processes compiled extra actions
 func ProcessCompiledExtraAction(ix *adapter.UnifiedInstruction, idx string, adapt *adapter.TransactionAdapter, actionType string) *types.TransferData {
@@ -540,12 +575,74 @@ func ProcessCompiledExtraAction(ix *adapter.UnifiedInstruction, idx string, adap
 	}
 }
 
-// Helper to get string from map
+// Helper to get string from map. JSON numbers (json.Number, float64) and Go
+// integers are formatted as exact decimal strings, so numeric fields such as
+// jsonParsed system transfer lamports are read as well.
 func getStringFromMap(m map[string]interface{}, key string) string {
-	if v, ok := m[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
+	v, ok := m[key]
+	if !ok {
+		return ""
+	}
+	switch n := v.(type) {
+	case string:
+		return n
+	case json.Number:
+		return n.String()
+	case float64:
+		if n >= 0 && n == math.Trunc(n) {
+			return strconv.FormatFloat(n, 'f', -1, 64)
 		}
+	case int:
+		return strconv.Itoa(n)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case uint64:
+		return strconv.FormatUint(n, 10)
 	}
 	return ""
+}
+
+// getUint8FromMap reads a small JSON number (e.g. decimals)
+func getUint8FromMap(m map[string]interface{}, key string) (uint8, bool) {
+	s := getStringFromMap(m, key)
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(s, 10, 8)
+	return uint8(v), err == nil
+}
+
+// getFloatFromMap reads a JSON number as float64 (UI amounts)
+func getFloatFromMap(m map[string]interface{}, key string) (float64, bool) {
+	switch n := m[key].(type) {
+	case float64:
+		return n, true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
+// transferTokenMint returns the mint of a token transfer from the token
+// accounts on both sides, preferring a non-SOL mint (a side whose mint is a
+// SOL default is typically a temporary account)
+func transferTokenMint(adapt *adapter.TransactionAdapter, source, destination string) string {
+	var destMint, srcMint string
+	if info, ok := adapt.SPLTokenMap[destination]; ok {
+		destMint = info.Mint
+	}
+	if info, ok := adapt.SPLTokenMap[source]; ok {
+		srcMint = info.Mint
+	}
+	return GetTransferTokenMint(destMint, srcMint)
+}
+
+// parseAmount parses a raw amount string; invalid input yields 0
+func parseAmount(amount string) *big.Int {
+	v, ok := new(big.Int).SetString(amount, 10)
+	if !ok {
+		return new(big.Int)
+	}
+	return v
 }
