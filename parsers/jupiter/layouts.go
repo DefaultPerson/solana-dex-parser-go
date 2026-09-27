@@ -56,6 +56,60 @@ type JupiterSwapEvent struct {
 	Idx                string
 }
 
+// swapEventV2Size is the encoded size of one SwapEventV2:
+// input_mint(32) + input_amount(8) + output_mint(32) + output_amount(8) + amm(32)
+const swapEventV2Size = 112
+
+// ParseJupiterSwapsEvent parses the SwapsEvent emitted by the Jupiter V6
+// *_v2 route instructions: a u32 little-endian count followed by that many
+// SwapEventV2 {input_mint, input_amount, output_mint, output_amount, amm}.
+// The field order differs from SwapEvent (amm comes last). The count is capped
+// by the bytes actually present; a count that does not fit is an error.
+func ParseJupiterSwapsEvent(data []byte) ([]*JupiterSwapEvent, error) {
+	if len(data) < 4 {
+		return nil, ErrInsufficientData
+	}
+	count := binary.LittleEndian.Uint32(data[0:4])
+	body := data[4:]
+	if uint64(count)*swapEventV2Size > uint64(len(body)) {
+		return nil, ErrInsufficientData
+	}
+
+	events := make([]*JupiterSwapEvent, 0, count)
+	for i := 0; i < int(count); i++ {
+		b := body[i*swapEventV2Size : (i+1)*swapEventV2Size]
+		events = append(events, &JupiterSwapEvent{
+			InputMint:    base58.Encode(b[0:32]),
+			InputAmount:  new(big.Int).SetUint64(binary.LittleEndian.Uint64(b[32:40])),
+			OutputMint:   base58.Encode(b[40:72]),
+			OutputAmount: new(big.Int).SetUint64(binary.LittleEndian.Uint64(b[72:80])),
+			AMM:          base58.Encode(b[80:112]),
+		})
+	}
+	return events, nil
+}
+
+// JupiterFeeEvent is the Jupiter V6 FeeEvent: the platform fee of a route,
+// paid in Mint to the platform fee Account
+type JupiterFeeEvent struct {
+	Account string
+	Mint    string
+	Amount  *big.Int
+}
+
+// ParseJupiterFeeEvent parses a Jupiter V6 FeeEvent
+// Layout: account(32) + mint(32) + amount(8)
+func ParseJupiterFeeEvent(data []byte) (*JupiterFeeEvent, error) {
+	if len(data) < 72 {
+		return nil, ErrInsufficientData
+	}
+	return &JupiterFeeEvent{
+		Account: base58.Encode(data[0:32]),
+		Mint:    base58.Encode(data[32:64]),
+		Amount:  new(big.Int).SetUint64(binary.LittleEndian.Uint64(data[64:72])),
+	}, nil
+}
+
 // JupiterDCAFilledLayout represents Jupiter DCA filled event data
 type JupiterDCAFilledLayout struct {
 	UserKey    [32]byte
