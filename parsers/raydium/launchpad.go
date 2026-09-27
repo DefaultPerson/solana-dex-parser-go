@@ -2,13 +2,14 @@ package raydium
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
+	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // RaydiumLaunchpadParser parses Raydium Launchpad transactions
@@ -50,76 +51,8 @@ func (p *RaydiumLaunchpadParser) ProcessTrades() []types.TradeInfo {
 
 // createTradeInfo creates a TradeInfo from a MemeEvent
 func (p *RaydiumLaunchpadParser) createTradeInfo(event *types.MemeEvent) *types.TradeInfo {
-	isBuy := event.Type == types.TradeTypeBuy
-
-	var inputToken, outputToken string
-	var inputDecimal, outputDecimal uint8
-
-	if isBuy {
-		inputToken = event.QuoteMint
-		inputDecimal = p.Adapter.GetTokenDecimals(event.QuoteMint)
-		outputToken = event.BaseMint
-		outputDecimal = p.Adapter.GetTokenDecimals(event.BaseMint)
-	} else {
-		inputToken = event.BaseMint
-		inputDecimal = p.Adapter.GetTokenDecimals(event.BaseMint)
-		outputToken = event.QuoteMint
-		outputDecimal = p.Adapter.GetTokenDecimals(event.QuoteMint)
-	}
-
-	if inputToken == "" || outputToken == "" {
+	if event.InputToken == nil || event.OutputToken == nil || event.InputToken.Mint == "" || event.OutputToken.Mint == "" {
 		return nil
-	}
-
-	trade := getRaydiumTradeInfo(
-		event,
-		inputToken, inputDecimal,
-		outputToken, outputDecimal,
-		p.Adapter.Slot(),
-		p.Adapter.Signature(),
-		p.Adapter.BlockTime(),
-		event.Idx,
-		p.DexInfo,
-	)
-
-	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
-}
-
-// getRaydiumTradeInfo creates a TradeInfo from event data
-func getRaydiumTradeInfo(
-	event *types.MemeEvent,
-	inputMint string, inputDecimal uint8,
-	outputMint string, outputDecimal uint8,
-	slot uint64, signature string, timestamp int64, idx string,
-	dexInfo types.DexInfo,
-) *types.TradeInfo {
-	isBuy := event.Type == types.TradeTypeBuy
-
-	// Calculate total fee from float64 values
-	var feeTotal float64
-	if event.ProtocolFee != nil {
-		feeTotal += *event.ProtocolFee
-	}
-	if event.CreatorFee != nil {
-		feeTotal += *event.CreatorFee
-	}
-	if event.PlatformFee != nil {
-		feeTotal += *event.PlatformFee
-	}
-
-	var feeMint string
-	var feeDecimals uint8
-	if isBuy {
-		feeMint = inputMint
-		feeDecimals = inputDecimal
-	} else {
-		feeMint = outputMint
-		feeDecimals = outputDecimal
-	}
-
-	tradeType := types.TradeTypeSell
-	if isBuy {
-		tradeType = types.TradeTypeBuy
 	}
 
 	var pool []string
@@ -127,42 +60,47 @@ func getRaydiumTradeInfo(
 		pool = []string{event.Pool}
 	}
 
-	programId := dexInfo.ProgramId
+	programId := p.DexInfo.ProgramId
 	if programId == "" {
 		programId = constants.DEX_PROGRAMS.RAYDIUM_LCP.ID
 	}
 
-	// Convert fee to raw amount
-	feeBigInt := new(big.Int).SetUint64(uint64(feeTotal * float64(pow10(feeDecimals))))
-
-	return &types.TradeInfo{
-		Type:        tradeType,
+	trade := &types.TradeInfo{
+		Type:        event.Type,
 		Pool:        pool,
 		InputToken:  *event.InputToken,
 		OutputToken: *event.OutputToken,
-		Fee: &types.FeeInfo{
-			Mint:      feeMint,
-			Amount:    feeTotal,
-			AmountRaw: feeBigInt.String(),
-			Decimals:  feeDecimals,
-		},
-		User:      event.User,
-		ProgramId: programId,
-		AMM:       constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Route:     dexInfo.Route,
-		Slot:      slot,
-		Timestamp: timestamp,
-		Signature: signature,
-		Idx:       idx,
+		User:        event.User,
+		ProgramId:   programId,
+		AMM:         constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+		Route:       p.DexInfo.Route,
+		Slot:        p.Adapter.Slot(),
+		Timestamp:   p.Adapter.BlockTime(),
+		Signature:   p.Adapter.Signature(),
+		Idx:         event.Idx,
 	}
-}
 
-func pow10(n uint8) uint64 {
-	result := uint64(1)
-	for i := uint8(0); i < n; i++ {
-		result *= 10
+	// Fees from the TradeEvent (protocol, platform, creator, share), all in
+	// the quote mint; Fee is their exact sum
+	if len(event.Fees) > 0 {
+		trade.Fees = append([]types.FeeInfo(nil), event.Fees...)
+		total := new(big.Int)
+		for _, f := range event.Fees {
+			if v, ok := new(big.Int).SetString(f.AmountRaw, 10); ok {
+				total.Add(total, v)
+			}
+		}
+		first := event.Fees[0]
+		trade.Fee = &types.FeeInfo{
+			Mint:      first.Mint,
+			Amount:    types.ConvertToUIAmount(total, first.Decimals),
+			AmountRaw: total.String(),
+			Decimals:  first.Decimals,
+			Dex:       first.Dex,
+		}
 	}
-	return result
+
+	return p.Utils.AttachTokenTransferInfo(trade, p.TransferActions)
 }
 
 // RaydiumLaunchpadEventParser parses Raydium Launchpad events
@@ -182,57 +120,72 @@ func NewRaydiumLaunchpadEventParser(
 	}
 }
 
-// ParseInstructions parses classified instructions into meme events
+// lcpEventPrefix is the 8-byte prefix of Anchor self-CPI event instructions
+var lcpEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
+
+// lcpTradeIxNames maps the trade instruction discriminators to their names
+var lcpTradeIxNames = []struct {
+	disc []byte
+	name string
+}{
+	{constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_IN, "buy_exact_in"},
+	{constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_OUT, "buy_exact_out"},
+	{constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_IN, "sell_exact_in"},
+	{constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_OUT, "sell_exact_out"},
+}
+
+// lcpInitializeDiscs are the pool creation instructions; their accounts
+// share the layout 1 creator, 3 platform_config, 5 pool_state, 6 base_mint,
+// 7 quote_mint
+var lcpInitializeDiscs = [][]byte{
+	constants.DISCRIMINATORS.RAYDIUM_LCP.INITIALIZE,
+	constants.DISCRIMINATORS.RAYDIUM_LCP.INITIALIZE_V2,
+	constants.DISCRIMINATORS.RAYDIUM_LCP.INITIALIZE_WITH_TOKEN_2022,
+}
+
+// ParseInstructions parses classified instructions into meme events, in
+// execution order. Trades and creates are matched to the TradeEvent /
+// PoolCreateEvent self-CPI that follows the instruction in the same outer
+// group, so CPI calls (launch platforms, routers) decode like outer ones.
 func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.ClassifiedInstruction) []*types.MemeEvent {
 	var events []*types.MemeEvent
 
+	ordered := make([]types.ClassifiedInstruction, 0, len(instructions))
 	for _, ci := range instructions {
-		if ci.ProgramId != constants.DEX_PROGRAMS.RAYDIUM_LCP.ID {
-			continue
+		if ci.ProgramId == constants.DEX_PROGRAMS.RAYDIUM_LCP.ID {
+			ordered = append(ordered, ci)
 		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].OuterIndex != ordered[j].OuterIndex {
+			return ordered[i].OuterIndex < ordered[j].OuterIndex
+		}
+		return ordered[i].InnerIndex < ordered[j].InnerIndex
+	})
 
+	for pos, ci := range ordered {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 8 {
 			continue
 		}
 
-		// For outer instructions (InnerIndex = -1), track that state
-		innerIdx := ci.InnerIndex
-		isOuterInstruction := innerIdx < 0
-		effectiveInnerIdx := innerIdx
-		if effectiveInnerIdx < 0 {
-			effectiveInnerIdx = 0
-		}
-
 		var event *types.MemeEvent
+		disc := data[:8]
 
-		// Check for trade instruction discriminators (8 bytes)
-		// This approach searches for TRADE_EVENT in inner instructions and uses the
-		// trade instruction's accounts (which have correct BaseMint/QuoteMint)
-		if len(data) >= 8 {
-			disc := data[:8]
-			if bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_IN) ||
-				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.BUY_EXACT_OUT) ||
-				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_IN) ||
-				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.SELL_EXACT_OUT) {
-				event = p.decodeTradeInstruction(ci.Instruction, ci.OuterIndex, effectiveInnerIdx, isOuterInstruction)
+		switch {
+		case bytes.Equal(disc, lcpEventPrefix):
+			if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.RAYDIUM_LCP.CREATE_EVENT) {
+				event = p.decodeCreateEvent(data[16:], ordered, pos)
 			}
-		}
-
-		// Check for create event
-		if event == nil && len(data) >= 16 {
-			disc := data[:16]
-			if bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.CREATE_EVENT) {
-				event = p.decodeCreateEvent(data, ci.OuterIndex)
-			}
-		}
-
-		// Check for migrate events
-		if len(data) >= 8 {
-			disc := data[:8]
-			if bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_AMM) ||
-				bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_CPSWAP) {
-				event = p.decodeCompleteInstruction(data, ci.Instruction)
+		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_AMM) ||
+			bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM_LCP.MIGRATE_TO_CPSWAP):
+			event = p.decodeCompleteInstruction(data, ci.Instruction)
+		default:
+			for _, ix := range lcpTradeIxNames {
+				if bytes.Equal(disc, ix.disc) {
+					event = p.decodeTradeInstruction(ci, ordered, pos, ix.name)
+					break
+				}
 			}
 		}
 
@@ -240,7 +193,7 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 			event.Signature = p.adapter.Signature()
 			event.Slot = p.adapter.Slot()
 			event.Timestamp = p.adapter.BlockTime()
-			event.Idx = fmt.Sprintf("%d-%d", ci.OuterIndex, effectiveInnerIdx)
+			event.Idx = utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 			events = append(events, event)
 		}
 	}
@@ -248,264 +201,177 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 	return events
 }
 
-// decodeTradeEvent decodes a trade event directly from instruction data (when TRADE_EVENT discriminator is found)
-func (p *RaydiumLaunchpadEventParser) decodeTradeEvent(eventData []byte, instruction interface{}) *types.MemeEvent {
-	if len(eventData) < 100 {
-		return nil
-	}
-
-	// Always try V2 layout first (TradeDir at end), fall back to V1 if parsing fails
-	// Most recent Launchpad events use V2 format
-	var evt *RaydiumLCPTradeEvent
-	layout, err := ParseRaydiumLCPTradeV2Layout(eventData)
-	if err == nil && layout != nil {
-		evt = layout.ToObject()
-	} else {
-		// Fall back to V1 if V2 fails
-		layoutV1, errV1 := ParseRaydiumLCPTradeLayout(eventData)
-		if errV1 != nil {
-			return nil
-		}
-		evt = layoutV1.ToObject()
-	}
-
-	// Try to get mints from instruction accounts
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) >= 11 {
-		evt.User = accounts[0]
-		evt.BaseMint = accounts[9]
-		evt.QuoteMint = accounts[10]
-	}
-
-	// If we couldn't get mints from accounts, use transfers to infer them
-	if evt.BaseMint == "" || evt.QuoteMint == "" {
-		// Default QuoteMint to SOL
-		if evt.QuoteMint == "" {
-			evt.QuoteMint = "So11111111111111111111111111111111111111112"
-		}
-	}
-
-	var inputMint, outputMint string
-	var inputAmount, outputAmount *big.Int
-	var inputDecimals, outputDecimals uint8
-
-	if evt.TradeDirection == TradeDirectionBuy {
-		inputMint = evt.QuoteMint
-		inputAmount = evt.AmountIn
-		inputDecimals = 9
-		outputMint = evt.BaseMint
-		outputAmount = evt.AmountOut
-		outputDecimals = 6
-	} else {
-		inputMint = evt.BaseMint
-		inputAmount = evt.AmountIn
-		inputDecimals = 6
-		outputMint = evt.QuoteMint
-		outputAmount = evt.AmountOut
-		outputDecimals = 9
-	}
-
-	eventType := types.TradeTypeSell
-	if evt.TradeDirection == TradeDirectionBuy {
-		eventType = types.TradeTypeBuy
-	}
-
-	inputUIAmount := types.ConvertToUIAmount(inputAmount, inputDecimals)
-	outputUIAmount := types.ConvertToUIAmount(outputAmount, outputDecimals)
-
-	// Convert big.Int fees to float64
-	protocolFee := bigIntToFloat64(evt.ProtocolFee, 9)
-	platformFee := bigIntToFloat64(evt.PlatformFee, 9)
-	shareFee := bigIntToFloat64(evt.ShareFee, 9)
-	creatorFee := bigIntToFloat64(evt.CreatorFee, 9)
-
-	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Type:         eventType,
-		BondingCurve: evt.PoolState,
-		BaseMint:     evt.BaseMint,
-		QuoteMint:    evt.QuoteMint,
-		User:         evt.User,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: inputAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  inputDecimals,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: outputAmount.String(),
-			Amount:    outputUIAmount,
-			Decimals:  outputDecimals,
-		},
-		ProtocolFee: &protocolFee,
-		PlatformFee: &platformFee,
-		ShareFee:    &shareFee,
-		CreatorFee:  &creatorFee,
-	}
-}
-
-// decodeTradeInstruction decodes a trade instruction
-func (p *RaydiumLaunchpadEventParser) decodeTradeInstruction(instruction interface{}, outerIndex int, innerIndex int, isOuterInstruction bool) *types.MemeEvent {
-	// Find inner instruction with TRADE_EVENT discriminator
-	// Search through inner instructions starting from the expected position
-	var eventData []byte
-
-	startIndex := innerIndex + 1
-	if isOuterInstruction {
-		startIndex = 0
-	}
-
-	// Search for the trade event instruction by checking discriminator
-	for i := startIndex; i < startIndex+5; i++ { // Check up to 5 inner instructions
-		innerIx := p.adapter.GetInnerInstruction(outerIndex, i)
-		if innerIx == nil {
-			continue
-		}
-		data := p.adapter.GetInstructionData(innerIx)
-		if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.RAYDIUM_LCP.TRADE_EVENT) {
-			eventData = data[16:]
+// followingEvent returns the data (after the 16-byte discriminator) of the
+// first event with discriminator disc that follows position pos in the same
+// outer group, before the next non-event LaunchLab instruction
+func (p *RaydiumLaunchpadEventParser) followingEvent(ordered []types.ClassifiedInstruction, pos int, disc []byte) []byte {
+	outer := ordered[pos].OuterIndex
+	for j := pos + 1; j < len(ordered) && ordered[j].OuterIndex == outer; j++ {
+		data := p.adapter.GetInstructionData(ordered[j].Instruction)
+		if len(data) < 16 || !bytes.Equal(data[:8], lcpEventPrefix) {
 			break
 		}
+		if bytes.Equal(data[:16], disc) {
+			return data[16:]
+		}
 	}
+	return nil
+}
 
-	if eventData == nil || len(eventData) < 16 {
+// decodeLCPTradeEvent decodes a TradeEvent: 139 bytes in the current layout
+// (creator_fee before share_fee, exact_in at the end), 130 bytes in the
+// original one (no creator_fee)
+func decodeLCPTradeEvent(data []byte) *RaydiumLCPTradeEvent {
+	if len(data) >= 138 {
+		if layout, err := ParseRaydiumLCPTradeV2Layout(data); err == nil {
+			return layout.ToObject()
+		}
 		return nil
 	}
-
-	// Always try V2 layout first (TradeDir at end), fall back to V1 if parsing fails
-	var evt *RaydiumLCPTradeEvent
-	layout, err := ParseRaydiumLCPTradeV2Layout(eventData)
-	if err == nil && layout != nil {
-		evt = layout.ToObject()
-	} else {
-		layoutV1, errV1 := ParseRaydiumLCPTradeLayout(eventData)
-		if errV1 != nil {
-			return nil
-		}
-		evt = layoutV1.ToObject()
+	if layout, err := ParseRaydiumLCPTradeLayout(data); err == nil {
+		return layout.ToObject()
 	}
+	return nil
+}
 
-	// Get instruction accounts
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeTradeInstruction decodes a trade instruction with the TradeEvent it
+// emits. Accounts (IDL): 0 payer, 3 platform_config, 4 pool_state, 9 base
+// mint, 10 quote mint. The event amounts are what the user paid (buys:
+// amount_in includes the fees) and received (sells: amount_out after fees).
+func (p *RaydiumLaunchpadEventParser) decodeTradeInstruction(ci types.ClassifiedInstruction, ordered []types.ClassifiedInstruction, pos int, ixName string) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 	if len(accounts) < 11 {
+		return nil
+	}
+	eventData := p.followingEvent(ordered, pos, constants.DISCRIMINATORS.RAYDIUM_LCP.TRADE_EVENT)
+	if eventData == nil {
+		return nil
+	}
+	evt := decodeLCPTradeEvent(eventData)
+	if evt == nil || (evt.PoolState != accounts[4] && accounts[4] != "") {
 		return nil
 	}
 	evt.User = accounts[0]
 	evt.BaseMint = accounts[9]
 	evt.QuoteMint = accounts[10]
 
-	var inputMint, outputMint string
-	var inputAmount, outputAmount *big.Int
-	var inputDecimals, outputDecimals uint8
+	baseDecimals := p.adapter.GetTokenDecimals(evt.BaseMint)
+	quoteDecimals := p.adapter.GetTokenDecimals(evt.QuoteMint)
+	token := func(mint string, amount *big.Int, decimals uint8) *types.TokenInfo {
+		return &types.TokenInfo{
+			Mint:      mint,
+			AmountRaw: amount.String(),
+			Amount:    types.ConvertToUIAmount(amount, decimals),
+			Decimals:  decimals,
+		}
+	}
 
+	event := &types.MemeEvent{
+		Protocol:             constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+		Type:                 types.TradeTypeSell,
+		BondingCurve:         evt.PoolState,
+		Pool:                 evt.PoolState,
+		PlatformConfig:       accounts[3],
+		BaseMint:             evt.BaseMint,
+		QuoteMint:            evt.QuoteMint,
+		User:                 evt.User,
+		IxName:               ixName,
+		InputToken:           token(evt.BaseMint, evt.AmountIn, baseDecimals),
+		OutputToken:          token(evt.QuoteMint, evt.AmountOut, quoteDecimals),
+		ProtocolFee:          uiAmountPtr(evt.ProtocolFee, quoteDecimals),
+		PlatformFee:          uiAmountPtr(evt.PlatformFee, quoteDecimals),
+		ShareFee:             uiAmountPtr(evt.ShareFee, quoteDecimals),
+		CreatorFee:           uiAmountPtr(evt.CreatorFee, quoteDecimals),
+		VirtualBaseReserves:  evt.VirtualBase.String(),
+		VirtualQuoteReserves: evt.VirtualQuote.String(),
+		RealBaseReserves:     evt.RealBaseAfter.String(),
+		RealQuoteReserves:    evt.RealQuoteAfter.String(),
+	}
 	if evt.TradeDirection == TradeDirectionBuy {
-		inputMint = evt.QuoteMint
-		inputAmount = evt.AmountIn
-		inputDecimals = 9
-		outputMint = evt.BaseMint
-		outputAmount = evt.AmountOut
-		outputDecimals = 6
-	} else {
-		inputMint = evt.BaseMint
-		inputAmount = evt.AmountIn
-		inputDecimals = 6
-		outputMint = evt.QuoteMint
-		outputAmount = evt.AmountOut
-		outputDecimals = 9
+		event.Type = types.TradeTypeBuy
+		event.InputToken = token(evt.QuoteMint, evt.AmountIn, quoteDecimals)
+		event.OutputToken = token(evt.BaseMint, evt.AmountOut, baseDecimals)
 	}
 
-	eventType := types.TradeTypeSell
-	if evt.TradeDirection == TradeDirectionBuy {
-		eventType = types.TradeTypeBuy
+	dex := constants.DEX_PROGRAMS.RAYDIUM_LCP.Name
+	for _, f := range []struct {
+		amount  *big.Int
+		feeType string
+	}{
+		{evt.ProtocolFee, "protocol"},
+		{evt.PlatformFee, "platform"},
+		{evt.CreatorFee, "coinCreator"},
+		{evt.ShareFee, "share"},
+	} {
+		if f.amount == nil || f.amount.Sign() == 0 {
+			continue
+		}
+		event.Fees = append(event.Fees, types.FeeInfo{
+			Mint:      evt.QuoteMint,
+			Amount:    types.ConvertToUIAmount(f.amount, quoteDecimals),
+			AmountRaw: f.amount.String(),
+			Decimals:  quoteDecimals,
+			Dex:       dex,
+			Type:      f.feeType,
+		})
 	}
-
-	inputUIAmount := types.ConvertToUIAmount(inputAmount, inputDecimals)
-	outputUIAmount := types.ConvertToUIAmount(outputAmount, outputDecimals)
-
-	// Convert big.Int fees to float64
-	protocolFee := bigIntToFloat64(evt.ProtocolFee, 9)
-	platformFee := bigIntToFloat64(evt.PlatformFee, 9)
-	shareFee := bigIntToFloat64(evt.ShareFee, 9)
-	creatorFee := bigIntToFloat64(evt.CreatorFee, 9)
-
-	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Type:         eventType,
-		BondingCurve: evt.PoolState,
-		BaseMint:     evt.BaseMint,
-		QuoteMint:    evt.QuoteMint,
-		User:         evt.User,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: inputAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  inputDecimals,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: outputAmount.String(),
-			Amount:    outputUIAmount,
-			Decimals:  outputDecimals,
-		},
-		ProtocolFee: &protocolFee,
-		PlatformFee: &platformFee,
-		ShareFee:    &shareFee,
-		CreatorFee:  &creatorFee,
-	}
+	return event
 }
 
-func bigIntToFloat64(val *big.Int, decimals uint8) float64 {
-	if val == nil {
-		return 0
-	}
-	f := new(big.Float).SetInt(val)
-	divisor := new(big.Float).SetUint64(pow10(decimals))
-	f.Quo(f, divisor)
-	result, _ := f.Float64()
-	return result
+func uiAmountPtr(val *big.Int, decimals uint8) *float64 {
+	v := types.ConvertToUIAmount(val, decimals)
+	return &v
 }
 
-// decodeCreateEvent decodes a create event
-func (p *RaydiumLaunchpadEventParser) decodeCreateEvent(data []byte, outerIndex int) *types.MemeEvent {
-	instructions := p.adapter.Instructions()
-	if outerIndex >= len(instructions) {
-		return nil
-	}
-
-	eventInstruction := instructions[outerIndex]
-
-	// Parse event data
-	eventData := data[16:]
-	layout, err := ParsePoolCreateEventLayout(eventData)
+// decodeCreateEvent decodes a PoolCreateEvent. The mints are accounts 6 and
+// 7 of the initialize* instruction that emitted it (the nearest preceding
+// LaunchLab instruction in the same outer group), which is not necessarily
+// the outer instruction.
+func (p *RaydiumLaunchpadEventParser) decodeCreateEvent(data []byte, ordered []types.ClassifiedInstruction, pos int) *types.MemeEvent {
+	layout, err := ParsePoolCreateEventLayout(data)
 	if err != nil {
 		return nil
 	}
 	evt := layout.ToObject()
 
-	// Get instruction accounts
-	accounts := p.adapter.GetInstructionAccounts(eventInstruction)
-	if len(accounts) < 8 {
+	var platformConfig string
+	outer := ordered[pos].OuterIndex
+	for j := pos - 1; j >= 0 && ordered[j].OuterIndex == outer; j-- {
+		ixData := p.adapter.GetInstructionData(ordered[j].Instruction)
+		if len(ixData) < 8 || bytes.Equal(ixData[:8], lcpEventPrefix) {
+			continue
+		}
+		accounts := p.adapter.GetInstructionAccounts(ordered[j].Instruction)
+		for _, disc := range lcpInitializeDiscs {
+			if bytes.Equal(ixData[:8], disc) && len(accounts) >= 8 && accounts[5] == evt.PoolState {
+				platformConfig = accounts[3]
+				evt.BaseMint = accounts[6]
+				evt.QuoteMint = accounts[7]
+			}
+		}
+		break
+	}
+	if evt.BaseMint == "" {
 		return nil
 	}
-	evt.BaseMint = accounts[6]
-	evt.QuoteMint = accounts[7]
 
 	decimals := evt.BaseMintParam.Decimals
-
 	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
-		Type:         types.TradeTypeCreate,
-		Timestamp:    p.adapter.BlockTime(),
-		User:         evt.Creator,
-		BaseMint:     evt.BaseMint,
-		QuoteMint:    evt.QuoteMint,
-		Name:         evt.BaseMintParam.Name,
-		Symbol:       evt.BaseMintParam.Symbol,
-		URI:          evt.BaseMintParam.URI,
-		Decimals:     &decimals,
-		BondingCurve: evt.PoolState,
-		Creator:      evt.Creator,
+		Protocol:       constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,
+		Type:           types.TradeTypeCreate,
+		Timestamp:      p.adapter.BlockTime(),
+		User:           evt.Creator,
+		BaseMint:       evt.BaseMint,
+		QuoteMint:      evt.QuoteMint,
+		Name:           evt.BaseMintParam.Name,
+		Symbol:         evt.BaseMintParam.Symbol,
+		URI:            evt.BaseMintParam.URI,
+		Decimals:       &decimals,
+		BondingCurve:   evt.PoolState,
+		Pool:           evt.PoolState,
+		PlatformConfig: platformConfig,
+		Creator:        evt.Creator,
+		Curve:          evt.memeCurveParams(),
 	}
 }
 

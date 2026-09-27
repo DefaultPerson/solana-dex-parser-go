@@ -1,8 +1,10 @@
 package raydium
 
 import (
+	"errors"
 	"math/big"
 
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 	"github.com/mr-tron/base58"
 )
@@ -78,6 +80,7 @@ type RaydiumLCPCreateEvent struct {
 	BaseMintParam MintParams
 	CurveParam    CurveParams
 	VestingParam  VestingParams
+	AmmFeeOn      *uint8 // 0: QuoteToken, 1: BothToken; nil in older events
 	BaseMint      string
 	QuoteMint     string
 }
@@ -113,6 +116,7 @@ type PoolCreateEventLayout struct {
 	BaseMintParam MintParams
 	CurveParam    CurveParams
 	VestingParam  VestingParams
+	AmmFeeOn      *uint8 // 0: QuoteToken, 1: BothToken; nil in older events
 }
 
 // ParsePoolCreateEventLayout parses pool creation event from bytes
@@ -137,43 +141,54 @@ func ParsePoolCreateEventLayout(data []byte) (*PoolCreateEventLayout, error) {
 		URI:      uri,
 	}
 
-	// Read curveParam
+	// Read curveParam: an enum tag, then the variant's fields in IDL order
+	// (ConstantCurve: supply, total_base_sell, total_quote_fund_raising,
+	// migrate_type; FixedCurve and LinearCurve: supply,
+	// total_quote_fund_raising, migrate_type)
 	variant, _ := reader.ReadU8()
 	var curveParam CurveParams
-	var migrateType uint8
 
 	switch CurveType(variant) {
 	case CurveTypeConstant:
-		migrateType, _ = reader.ReadU8()
+		supply := reader.ReadU64AsBigInt()
+		totalBaseSell := reader.ReadU64AsBigInt()
+		totalQuoteFundRaising := reader.ReadU64AsBigInt()
+		migrateType, _ := reader.ReadU8()
 		curveParam = CurveParams{
 			Variant: "Constant",
 			Data: ConstantCurve{
-				Supply:                reader.ReadU64AsBigInt(),
-				TotalBaseSell:         reader.ReadU64AsBigInt(),
-				TotalQuoteFundRaising: reader.ReadU64AsBigInt(),
+				Supply:                supply,
+				TotalBaseSell:         totalBaseSell,
+				TotalQuoteFundRaising: totalQuoteFundRaising,
 				MigrateType:           migrateType,
 			},
 		}
 	case CurveTypeFixed:
-		migrateType, _ = reader.ReadU8()
+		supply := reader.ReadU64AsBigInt()
+		totalQuoteFundRaising := reader.ReadU64AsBigInt()
+		migrateType, _ := reader.ReadU8()
 		curveParam = CurveParams{
 			Variant: "Fixed",
 			Data: FixedCurve{
-				Supply:                reader.ReadU64AsBigInt(),
-				TotalQuoteFundRaising: reader.ReadU64AsBigInt(),
+				Supply:                supply,
+				TotalQuoteFundRaising: totalQuoteFundRaising,
 				MigrateType:           migrateType,
 			},
 		}
 	case CurveTypeLinear:
-		migrateType, _ = reader.ReadU8()
+		supply := reader.ReadU64AsBigInt()
+		totalQuoteFundRaising := reader.ReadU64AsBigInt()
+		migrateType, _ := reader.ReadU8()
 		curveParam = CurveParams{
 			Variant: "Linear",
 			Data: LinearCurve{
-				Supply:                reader.ReadU64AsBigInt(),
-				TotalQuoteFundRaising: reader.ReadU64AsBigInt(),
+				Supply:                supply,
+				TotalQuoteFundRaising: totalQuoteFundRaising,
 				MigrateType:           migrateType,
 			},
 		}
+	default:
+		return nil, errUnknownCurveType
 	}
 
 	// Read vestingParam
@@ -187,6 +202,13 @@ func ParsePoolCreateEventLayout(data []byte) (*PoolCreateEventLayout, error) {
 		return nil, reader.Error()
 	}
 
+	// amm_fee_on (AmmCreatorFeeOn enum) was appended later
+	var ammFeeOn *uint8
+	if reader.Remaining() >= 1 {
+		v, _ := reader.ReadU8()
+		ammFeeOn = &v
+	}
+
 	return &PoolCreateEventLayout{
 		PoolState:     poolState,
 		Creator:       creator,
@@ -194,8 +216,12 @@ func ParsePoolCreateEventLayout(data []byte) (*PoolCreateEventLayout, error) {
 		BaseMintParam: baseMintParam,
 		CurveParam:    curveParam,
 		VestingParam:  vestingParam,
+		AmmFeeOn:      ammFeeOn,
 	}, nil
 }
+
+// errUnknownCurveType is returned for a CurveParams tag the IDL does not define
+var errUnknownCurveType = errors.New("unknown LaunchLab curve type")
 
 // ToObject converts layout to RaydiumLCPCreateEvent
 func (l *PoolCreateEventLayout) ToObject() *RaydiumLCPCreateEvent {
@@ -206,9 +232,35 @@ func (l *PoolCreateEventLayout) ToObject() *RaydiumLCPCreateEvent {
 		BaseMintParam: l.BaseMintParam,
 		CurveParam:    l.CurveParam,
 		VestingParam:  l.VestingParam,
+		AmmFeeOn:      l.AmmFeeOn,
 		BaseMint:      "",
 		QuoteMint:     "",
 	}
+}
+
+// memeCurveParams converts the curve and vesting parameters for MemeEvent
+func (e *RaydiumLCPCreateEvent) memeCurveParams() *types.MemeCurveParams {
+	str := func(v *big.Int) string {
+		if v == nil {
+			return ""
+		}
+		return v.String()
+	}
+	c := &types.MemeCurveParams{
+		Type:              e.CurveParam.Variant,
+		TotalLockedAmount: str(e.VestingParam.TotalLockedAmount),
+		CliffPeriod:       str(e.VestingParam.CliffPeriod),
+		UnlockPeriod:      str(e.VestingParam.UnlockPeriod),
+	}
+	switch d := e.CurveParam.Data.(type) {
+	case ConstantCurve:
+		c.Supply, c.TotalBaseSell, c.TotalQuoteFundRaising, c.MigrateType = str(d.Supply), str(d.TotalBaseSell), str(d.TotalQuoteFundRaising), d.MigrateType
+	case FixedCurve:
+		c.Supply, c.TotalQuoteFundRaising, c.MigrateType = str(d.Supply), str(d.TotalQuoteFundRaising), d.MigrateType
+	case LinearCurve:
+		c.Supply, c.TotalQuoteFundRaising, c.MigrateType = str(d.Supply), str(d.TotalQuoteFundRaising), d.MigrateType
+	}
+	return c
 }
 
 // RaydiumLCPTradeLayout parses trade event data (v1)
