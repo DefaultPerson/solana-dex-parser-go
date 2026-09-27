@@ -669,7 +669,7 @@ func GetTipTotal(transferActions map[string][]types.TransferData) *types.TokenAm
 	total := new(big.Int)
 	for _, transfers := range transferActions {
 		for _, t := range transfers {
-			if t.ProgramId != constants.SYSTEM_PROGRAM_ID || !constants.IsTipAccount(t.Info.Destination) {
+			if !isTipTransfer(&t) {
 				continue
 			}
 			if amount, ok := new(big.Int).SetString(t.Info.TokenAmount.Amount, 10); ok && amount.Sign() > 0 {
