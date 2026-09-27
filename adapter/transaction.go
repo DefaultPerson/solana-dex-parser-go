@@ -3,6 +3,8 @@ package adapter
 import (
 	"encoding/binary"
 	"math/big"
+	"reflect"
+	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
@@ -17,7 +19,7 @@ type SolanaTransaction struct {
 	BlockTime   *int64           `json:"blockTime"`
 	Transaction TransactionData  `json:"transaction"`
 	Meta        *TransactionMeta `json:"meta"`
-	Version     interface{}      `json:"version"` // can be "legacy", 0, or nil
+	Version     interface{}      `json:"version"` // can be "legacy", 0, 1, or nil
 }
 
 // TransactionData contains the transaction message and signatures
@@ -39,6 +41,19 @@ type TransactionMessage struct {
 	// Shared fields
 	Instructions        []interface{}        `json:"instructions,omitempty"`
 	AddressTableLookups []AddressTableLookup `json:"addressTableLookups,omitempty"`
+
+	// TransactionConfig holds the compute budget of version 1 transactions,
+	// which carry it in the message instead of ComputeBudget instructions.
+	TransactionConfig *TransactionConfig `json:"transactionConfig,omitempty"`
+}
+
+// TransactionConfig is the message-level compute budget of a version 1
+// transaction (nil fields were not set by the sender)
+type TransactionConfig struct {
+	ComputeUnitLimit            *uint64 `json:"computeUnitLimit,omitempty"`
+	HeapSize                    *uint64 `json:"heapSize,omitempty"`
+	LoadedAccountsDataSizeLimit *uint64 `json:"loadedAccountsDataSizeLimit,omitempty"`
+	PriorityFee                 *uint64 `json:"priorityFee,omitempty"`
 }
 
 // MessageHeader contains message header information
@@ -53,30 +68,53 @@ type AccountKey struct {
 	Pubkey   string `json:"pubkey,omitempty"`
 	Signer   bool   `json:"signer,omitempty"`
 	Writable bool   `json:"writable,omitempty"`
+	// Source is set by the jsonParsed encoding: "transaction" or "lookupTable".
+	Source string `json:"source,omitempty"`
 }
 
-// UnmarshalJSON implements custom unmarshaling to handle both string and object formats
+// UnmarshalJSON implements custom unmarshaling to handle a base58 string, a
+// Buffer object or byte array, and the jsonParsed object format
 func (a *AccountKey) UnmarshalJSON(data []byte) error {
 	// Try to unmarshal as string first
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		a.Pubkey = s
+		*a = AccountKey{Pubkey: s}
 		return nil
 	}
 
 	// Try to unmarshal as object
 	type accountKeyObj struct {
-		Pubkey   string `json:"pubkey"`
-		Signer   bool   `json:"signer"`
-		Writable bool   `json:"writable"`
+		Pubkey   json.RawMessage `json:"pubkey"`
+		Signer   bool            `json:"signer"`
+		Writable bool            `json:"writable"`
+		Source   string          `json:"source"`
+		Type     string          `json:"type"`
+		Data     json.RawMessage `json:"data"`
 	}
 	var obj accountKeyObj
 	if err := json.Unmarshal(data, &obj); err != nil {
+		// Byte array
+		key, kerr := keyFromJSON(data)
+		if kerr != nil {
+			return err
+		}
+		*a = AccountKey{Pubkey: key}
+		return nil
+	}
+	if obj.Pubkey == nil && obj.Data != nil {
+		// Buffer object
+		key, err := keyFromJSON(data)
+		if err != nil {
+			return err
+		}
+		*a = AccountKey{Pubkey: key}
+		return nil
+	}
+	key, err := keyFromJSON(obj.Pubkey)
+	if err != nil {
 		return err
 	}
-	a.Pubkey = obj.Pubkey
-	a.Signer = obj.Signer
-	a.Writable = obj.Writable
+	*a = AccountKey{Pubkey: key, Signer: obj.Signer, Writable: obj.Writable, Source: obj.Source}
 	return nil
 }
 
@@ -85,7 +123,10 @@ type CompiledInstruction struct {
 	ProgramIdIndex    int    `json:"programIdIndex"`
 	Accounts          []int  `json:"accounts,omitempty"`
 	AccountKeyIndexes []int  `json:"accountKeyIndexes,omitempty"`
-	Data              string `json:"data"`
+	Data              string `json:"data"` // base58
+	// DataBytes holds the raw data when it was given as bytes (a Buffer or byte
+	// array in JSON); it takes precedence over Data.
+	DataBytes []byte `json:"-"`
 }
 
 // ParsedInstruction represents a parsed instruction
@@ -129,6 +170,7 @@ type TokenBalance struct {
 	AccountIndex  int               `json:"accountIndex"`
 	Mint          string            `json:"mint"`
 	Owner         string            `json:"owner"`
+	ProgramId     string            `json:"programId,omitempty"`
 	UiTokenAmount types.TokenAmount `json:"uiTokenAmount"`
 }
 
@@ -151,19 +193,101 @@ type TransactionAdapter struct {
 	AccountKeys    []string
 	SPLTokenMap    map[string]types.TokenInfo
 	SPLDecimalsMap map[string]uint8
+
+	// unresolvedLookups is set when address lookup table accounts of a v0
+	// message could not be resolved (their AccountKeys entries are "")
+	unresolvedLookups bool
+	// guessedTokenAccounts marks SPLTokenMap entries whose mint was not known
+	// and defaulted to SOL
+	guessedTokenAccounts map[string]bool
+
+	// lookup tables built once per transaction
+	instructions   []interface{}
+	accountIndex   map[string]int
+	tokenOwners    map[string]string
+	postTokenByKey map[string]*types.TokenAmount
+	preTokenByKey  map[string]*types.TokenAmount
+
+	// caches
+	parsedCache      map[uintptr]*UnifiedInstruction
+	dataCache        map[string][]byte
+	solChanges       [2]map[string]*types.BalanceChange
+	tokenChanges     [2]map[string]map[string]*types.BalanceChange
+	solChangesDone   [2]bool
+	tokenChangesDone [2]bool
 }
 
 // NewTransactionAdapter creates a new TransactionAdapter
 func NewTransactionAdapter(tx *SolanaTransaction, config *types.ParseConfig) *TransactionAdapter {
-	adapter := &TransactionAdapter{
-		tx:             tx,
-		Config:         config,
-		SPLTokenMap:    make(map[string]types.TokenInfo, 32),
-		SPLDecimalsMap: make(map[string]uint8, 16),
+	if tx == nil {
+		tx = &SolanaTransaction{}
 	}
+	adapter := &TransactionAdapter{
+		tx:                   tx,
+		Config:               config,
+		SPLTokenMap:          make(map[string]types.TokenInfo, 32),
+		SPLDecimalsMap:       make(map[string]uint8, 16),
+		guessedTokenAccounts: make(map[string]bool),
+		parsedCache:          make(map[uintptr]*UnifiedInstruction, 32),
+		dataCache:            make(map[string][]byte, 16),
+	}
+	adapter.instructions = adapter.buildInstructions()
 	adapter.AccountKeys = adapter.extractAccountKeys()
+	adapter.buildIndexes()
 	adapter.extractTokenInfo()
 	return adapter
+}
+
+// HasUnresolvedAccounts reports whether some address lookup table accounts of
+// a v0 message could not be resolved (no meta.loadedAddresses and no
+// ParseConfig.AddressLookupTables / ALTsFetcher entry). Their AccountKeys
+// entries are empty strings.
+func (a *TransactionAdapter) HasUnresolvedAccounts() bool {
+	return a.unresolvedLookups
+}
+
+// buildIndexes builds the account index and token balance lookups
+func (a *TransactionAdapter) buildIndexes() {
+	a.accountIndex = make(map[string]int, len(a.AccountKeys))
+	for i, key := range a.AccountKeys {
+		if _, ok := a.accountIndex[key]; !ok && key != "" {
+			a.accountIndex[key] = i
+		}
+	}
+
+	// Token account owners from pre and post balances (post wins), so that
+	// accounts closed within the transaction still resolve to their owner.
+	a.tokenOwners = make(map[string]string)
+	a.preTokenByKey = make(map[string]*types.TokenAmount)
+	a.postTokenByKey = make(map[string]*types.TokenAmount)
+	pre := a.PreTokenBalances()
+	for i := range pre {
+		key := a.GetAccountKey(pre[i].AccountIndex)
+		if key == "" {
+			continue
+		}
+		if pre[i].Owner != "" {
+			a.tokenOwners[key] = pre[i].Owner
+		}
+		if _, ok := a.preTokenByKey[key]; !ok {
+			amount := pre[i].UiTokenAmount
+			a.preTokenByKey[key] = &amount
+		}
+	}
+	post := a.PostTokenBalances()
+	for i := range post {
+		key := a.GetAccountKey(post[i].AccountIndex)
+		if key == "" {
+			continue
+		}
+		if post[i].Owner != "" {
+			a.tokenOwners[key] = post[i].Owner
+		}
+		if _, ok := a.postTokenByKey[key]; !ok {
+			amount := post[i].UiTokenAmount
+			a.postTokenByKey[key] = &amount
+		}
+	}
 }
 
 // IsMessageV0 checks if the transaction uses MessageV0 format
@@ -195,6 +319,10 @@ func (a *TransactionAdapter) Signature() string {
 
 // Instructions returns all outer instructions
 func (a *TransactionAdapter) Instructions() []interface{} {
+	return a.instructions
+}
+
+func (a *TransactionAdapter) buildInstructions() []interface{} {
 	msg := a.tx.Transaction.Message
 	if len(msg.CompiledInstructions) > 0 {
 		result := make([]interface{}, len(msg.CompiledInstructions))
@@ -204,6 +332,14 @@ func (a *TransactionAdapter) Instructions() []interface{} {
 		return result
 	}
 	return msg.Instructions
+}
+
+// InstructionAt returns the outer instruction at index, or nil when out of range
+func (a *TransactionAdapter) InstructionAt(index int) interface{} {
+	if index >= 0 && index < len(a.instructions) {
+		return a.instructions[index]
+	}
+	return nil
 }
 
 // InnerInstructions returns inner instructions
@@ -286,7 +422,7 @@ func (a *TransactionAdapter) Fee() types.TokenAmount {
 	}
 	uiAmount := types.ConvertToUIAmount(new(big.Int).SetUint64(fee), 9)
 	return types.TokenAmount{
-		Amount:   big.NewInt(int64(fee)).String(),
+		Amount:   new(big.Int).SetUint64(fee).String(),
 		UIAmount: &uiAmount,
 		Decimals: 9,
 	}
@@ -311,30 +447,140 @@ func (a *TransactionAdapter) TxStatus() types.TransactionStatus {
 	return types.TransactionStatusFailed
 }
 
-// extractAccountKeys extracts all account keys from the transaction
+// extractAccountKeys extracts all account keys from the transaction: static
+// keys, then the writable and then the readonly addresses loaded from address
+// lookup tables (meta.loadedAddresses, or resolved from the lookups)
 func (a *TransactionAdapter) extractAccountKeys() []string {
 	msg := a.tx.Transaction.Message
 	var keys []string
+	parsedWithLookups := false
 
 	if a.IsMessageV0() {
 		// V0 message
 		keys = append(keys, msg.StaticAccountKeys...)
 	} else {
-		// Legacy message
+		// Legacy message (or json/jsonParsed encoding of any version).
+		// Keep empty entries so that indexes stay aligned.
+		keys = make([]string, 0, len(msg.AccountKeys))
 		for _, key := range msg.AccountKeys {
-			if key.Pubkey != "" {
-				keys = append(keys, key.Pubkey)
+			keys = append(keys, key.Pubkey)
+			if key.Source == "lookupTable" {
+				parsedWithLookups = true
 			}
 		}
+	}
+
+	// jsonParsed already lists the lookup table addresses in accountKeys
+	if parsedWithLookups {
+		return keys
 	}
 
 	// Add loaded addresses
 	if a.tx.Meta != nil && a.tx.Meta.LoadedAddresses != nil {
 		keys = append(keys, a.tx.Meta.LoadedAddresses.Writable...)
 		keys = append(keys, a.tx.Meta.LoadedAddresses.Readonly...)
+		return keys
+	}
+
+	if len(msg.AddressTableLookups) > 0 {
+		writable, readonly := a.resolveLookups(msg.AddressTableLookups, keys)
+		keys = append(keys, writable...)
+		keys = append(keys, readonly...)
 	}
 
 	return keys
+}
+
+// resolveLookups resolves the addresses of address lookup tables when the
+// transaction carries no meta.loadedAddresses (pre-execution data such as
+// shreds), from ParseConfig.AddressLookupTables first and ParseConfig.ALTsFetcher
+// second. Unresolved positions are returned as "" so that later indexes stay
+// aligned, and HasUnresolvedAccounts reports them.
+func (a *TransactionAdapter) resolveLookups(lookups []AddressTableLookup, staticKeys []string) (writable, readonly []string) {
+	var tables map[string][]string
+	var fetcher *types.ALTsFetcher
+	if a.Config != nil {
+		tables = a.Config.AddressLookupTables
+		fetcher = a.Config.ALTsFetcher
+	}
+
+	var fetched map[string]*types.LoadedAddresses
+	if fetcher != nil && fetcher.Fetch != nil && a.fetchAllowed(fetcher.Filter, staticKeys) {
+		var missing []types.AddressTableLookup
+		for _, l := range lookups {
+			if _, ok := tables[l.AccountKey]; !ok {
+				missing = append(missing, types.AddressTableLookup{
+					AccountKey:      l.AccountKey,
+					WritableIndexes: l.WritableIndexes,
+					ReadonlyIndexes: l.ReadonlyIndexes,
+				})
+			}
+		}
+		if len(missing) > 0 {
+			if res, err := fetcher.Fetch(missing); err == nil {
+				fetched = res
+			}
+		}
+	}
+
+	resolve := func(l AddressTableLookup, indexes []int, fromFetch func(*types.LoadedAddresses) []string) []string {
+		out := make([]string, len(indexes))
+		if contents, ok := tables[l.AccountKey]; ok {
+			for i, idx := range indexes {
+				if idx >= 0 && idx < len(contents) {
+					out[i] = contents[idx]
+				} else {
+					a.unresolvedLookups = true
+				}
+			}
+			return out
+		}
+		if la := fetched[l.AccountKey]; la != nil {
+			if addrs := fromFetch(la); len(addrs) == len(indexes) {
+				copy(out, addrs)
+				return out
+			}
+		}
+		if len(indexes) > 0 {
+			a.unresolvedLookups = true
+		}
+		return out
+	}
+
+	for _, l := range lookups {
+		writable = append(writable, resolve(l, l.WritableIndexes, func(la *types.LoadedAddresses) []string { return la.Writable })...)
+	}
+	for _, l := range lookups {
+		readonly = append(readonly, resolve(l, l.ReadonlyIndexes, func(la *types.LoadedAddresses) []string { return la.Readonly })...)
+	}
+	return writable, readonly
+}
+
+// fetchAllowed applies a fetcher's Filter: FetchFilterProgram requires one of
+// ParseConfig.ProgramIds and FetchFilterAccount one of ParseConfig.AccountInclude
+// among keys; FetchFilterAll (or empty) always fetches.
+func (a *TransactionAdapter) fetchAllowed(filter types.FetchFilterType, keys []string) bool {
+	var want []string
+	switch filter {
+	case types.FetchFilterProgram:
+		if a.Config != nil {
+			want = a.Config.ProgramIds
+		}
+	case types.FetchFilterAccount:
+		if a.Config != nil {
+			want = a.Config.AccountInclude
+		}
+	default:
+		return true
+	}
+	for _, w := range want {
+		for _, k := range keys {
+			if w == k {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetAccountKey returns the account key at the given index
@@ -347,21 +593,34 @@ func (a *TransactionAdapter) GetAccountKey(index int) string {
 
 // GetAccountIndex returns the index of an account key
 func (a *TransactionAdapter) GetAccountIndex(address string) int {
-	for i, key := range a.AccountKeys {
-		if key == address {
-			return i
-		}
+	if i, ok := a.accountIndex[address]; ok {
+		return i
 	}
 	return -1
 }
 
-// GetInstruction returns unified instruction data
+// GetInstruction returns unified instruction data.
+// Results are cached per adapter; the returned value must not be modified.
 func (a *TransactionAdapter) GetInstruction(instruction interface{}) *UnifiedInstruction {
 	switch ix := instruction.(type) {
 	case CompiledInstruction:
 		return a.getCompiledInstruction(ix)
+	case *CompiledInstruction:
+		if ix == nil {
+			return nil
+		}
+		return a.getCompiledInstruction(*ix)
 	case map[string]interface{}:
-		return a.getParsedInstructionFromMap(ix)
+		if ix == nil {
+			return nil
+		}
+		key := reflect.ValueOf(ix).Pointer()
+		if ui, ok := a.parsedCache[key]; ok {
+			return ui
+		}
+		ui := a.getParsedInstructionFromMap(ix)
+		a.parsedCache[key] = ui
+		return ui
 	default:
 		return nil
 	}
@@ -374,6 +633,19 @@ type UnifiedInstruction struct {
 	Data      []byte
 	Parsed    *ParsedData
 	Program   string
+}
+
+// decodeData base58-decodes instruction data once per distinct string
+func (a *TransactionAdapter) decodeData(data string) []byte {
+	if data == "" {
+		return nil
+	}
+	if b, ok := a.dataCache[data]; ok {
+		return b
+	}
+	b, _ := base58.Decode(data)
+	a.dataCache[data] = b
+	return b
 }
 
 func (a *TransactionAdapter) getCompiledInstruction(ix CompiledInstruction) *UnifiedInstruction {
@@ -390,7 +662,10 @@ func (a *TransactionAdapter) getCompiledInstruction(ix CompiledInstruction) *Uni
 		accounts[i] = a.GetAccountKey(idx)
 	}
 
-	data, _ := base58.Decode(ix.Data)
+	data := ix.DataBytes
+	if data == nil {
+		data = a.decodeData(ix.Data)
+	}
 
 	return &UnifiedInstruction{
 		ProgramId: programId,
@@ -404,42 +679,65 @@ func (a *TransactionAdapter) getParsedInstructionFromMap(ix map[string]interface
 
 	// Check for programIdIndex (compiled instruction format)
 	if programIdIndex, ok := ix["programIdIndex"]; ok {
-		var idx int
-		switch v := programIdIndex.(type) {
-		case float64:
-			idx = int(v)
-		case int:
-			idx = v
+		if idx, ok := intFromValue(programIdIndex); ok {
+			ui.ProgramId = a.GetAccountKey(idx)
 		}
-		ui.ProgramId = a.GetAccountKey(idx)
 	}
 
 	// Check for programId (parsed instruction format)
-	if programId, ok := ix["programId"].(string); ok {
-		ui.ProgramId = programId
+	if programId, ok := ix["programId"]; ok {
+		if key := keyFromValue(programId); key != "" {
+			ui.ProgramId = key
+		}
 	}
 
 	if program, ok := ix["program"].(string); ok {
 		ui.Program = program
 	}
 
-	// Handle accounts - can be array of strings or array of integers (indexes)
-	if accounts, ok := ix["accounts"].([]interface{}); ok {
-		ui.Accounts = make([]string, len(accounts))
-		for i, acc := range accounts {
-			switch v := acc.(type) {
-			case string:
-				ui.Accounts[i] = v
-			case float64:
-				ui.Accounts[i] = a.GetAccountKey(int(v))
-			case int:
-				ui.Accounts[i] = a.GetAccountKey(v)
+	// Accounts: keys (jsonParsed) or indexes (json), as a JSON array, a Go
+	// slice, a Buffer object or a base58 string of index bytes
+	accounts, ok := ix["accounts"]
+	if !ok {
+		accounts = ix["accountKeyIndexes"]
+	}
+	switch v := accounts.(type) {
+	case []interface{}:
+		ui.Accounts = make([]string, len(v))
+		for i, acc := range v {
+			if s, ok := acc.(string); ok {
+				ui.Accounts[i] = s
+			} else if idx, ok := intFromValue(acc); ok {
+				ui.Accounts[i] = a.GetAccountKey(idx)
+			} else {
+				ui.Accounts[i] = keyFromValue(acc)
 			}
+		}
+	case []string:
+		ui.Accounts = append([]string(nil), v...)
+	case []int:
+		ui.Accounts = make([]string, len(v))
+		for i, idx := range v {
+			ui.Accounts[i] = a.GetAccountKey(idx)
+		}
+	case string:
+		if b, err := base58.Decode(v); err == nil {
+			ui.Accounts = a.keysForIndexBytes(b)
+		}
+	default:
+		if b, ok := bytesFromValue(v); ok {
+			ui.Accounts = a.keysForIndexBytes(b)
 		}
 	}
 
-	if data, ok := ix["data"].(string); ok {
-		ui.Data, _ = base58.Decode(data)
+	switch data := ix["data"].(type) {
+	case string:
+		ui.Data = a.decodeData(data)
+	case nil:
+	default:
+		if b, ok := bytesFromValue(data); ok {
+			ui.Data = b
+		}
 	}
 	if parsed, ok := ix["parsed"].(map[string]interface{}); ok {
 		ui.Parsed = &ParsedData{}
@@ -452,6 +750,14 @@ func (a *TransactionAdapter) getParsedInstructionFromMap(ix map[string]interface
 	}
 
 	return ui
+}
+
+func (a *TransactionAdapter) keysForIndexBytes(b []byte) []string {
+	keys := make([]string, len(b))
+	for i, idx := range b {
+		keys[i] = a.GetAccountKey(int(idx))
+	}
+	return keys
 }
 
 // IsCompiledInstruction checks if an instruction is compiled
@@ -495,14 +801,11 @@ func (a *TransactionAdapter) GetInstructionData(instruction interface{}) []byte 
 	return nil
 }
 
-// GetTokenAccountOwner returns the owner of a token account
+// GetTokenAccountOwner returns the owner of a token account, from the post
+// token balances, then the pre token balances (accounts closed in the
+// transaction), then ParseConfig.TokenAccountsFetcher results
 func (a *TransactionAdapter) GetTokenAccountOwner(accountKey string) string {
-	for _, balance := range a.PostTokenBalances() {
-		if a.AccountKeys[balance.AccountIndex] == accountKey {
-			return balance.Owner
-		}
-	}
-	return ""
+	return a.tokenOwners[accountKey]
 }
 
 // IsSupportedToken checks if a token is supported
@@ -546,6 +849,7 @@ func (a *TransactionAdapter) GetPoolEventBase(eventType types.PoolEventType, pro
 func (a *TransactionAdapter) extractTokenInfo() {
 	a.extractTokenBalances()
 	a.extractTokenFromInstructions()
+	a.fetchTokenAccounts()
 
 	// Add SOL if not exists
 	if _, ok := a.SPLTokenMap[constants.TOKENS.SOL]; !ok {
@@ -561,30 +865,43 @@ func (a *TransactionAdapter) extractTokenInfo() {
 	}
 }
 
-// extractTokenBalances extracts token balances from transaction metadata
+// extractTokenBalances extracts token info from the post token balances, then
+// from pre token balances of accounts closed within the transaction
 func (a *TransactionAdapter) extractTokenBalances() {
 	for _, balance := range a.PostTokenBalances() {
-		if balance.Mint == "" {
-			continue
-		}
+		a.setTokenInfoFromBalance(balance, true)
+	}
+	for _, balance := range a.PreTokenBalances() {
+		a.setTokenInfoFromBalance(balance, false)
+	}
+}
 
-		accountKey := a.AccountKeys[balance.AccountIndex]
-		if _, ok := a.SPLTokenMap[accountKey]; !ok {
-			uiAmount := float64(0)
+func (a *TransactionAdapter) setTokenInfoFromBalance(balance TokenBalance, post bool) {
+	if balance.Mint == "" {
+		return
+	}
+	accountKey := a.GetAccountKey(balance.AccountIndex)
+	if accountKey == "" {
+		return
+	}
+	if _, ok := a.SPLTokenMap[accountKey]; !ok {
+		info := types.TokenInfo{
+			Mint:      balance.Mint,
+			AmountRaw: "0",
+			Decimals:  balance.UiTokenAmount.Decimals,
+		}
+		// SPLTokenMap amounts are post balances; a pre-only account was closed
+		if post {
+			info.AmountRaw = balance.UiTokenAmount.Amount
 			if balance.UiTokenAmount.UIAmount != nil {
-				uiAmount = *balance.UiTokenAmount.UIAmount
-			}
-			a.SPLTokenMap[accountKey] = types.TokenInfo{
-				Mint:      balance.Mint,
-				Amount:    uiAmount,
-				AmountRaw: balance.UiTokenAmount.Amount,
-				Decimals:  balance.UiTokenAmount.Decimals,
+				info.Amount = *balance.UiTokenAmount.UIAmount
 			}
 		}
+		a.SPLTokenMap[accountKey] = info
+	}
 
-		if _, ok := a.SPLDecimalsMap[balance.Mint]; !ok {
-			a.SPLDecimalsMap[balance.Mint] = balance.UiTokenAmount.Decimals
-		}
+	if _, ok := a.SPLDecimalsMap[balance.Mint]; !ok {
+		a.SPLDecimalsMap[balance.Mint] = balance.UiTokenAmount.Decimals
 	}
 }
 
@@ -612,6 +929,11 @@ func (a *TransactionAdapter) extractFromInstruction(ix interface{}) {
 		return
 	}
 
+	if ui.Parsed != nil {
+		a.extractFromParsedInstruction(ui)
+		return
+	}
+
 	if len(ui.Data) == 0 {
 		return
 	}
@@ -619,7 +941,7 @@ func (a *TransactionAdapter) extractFromInstruction(ix interface{}) {
 	instructionType := ui.Data[0]
 	accounts := ui.Accounts
 
-	var source, destination, mint string
+	var source, destination, mint, owner string
 	var decimals uint8
 
 	switch instructionType {
@@ -664,53 +986,100 @@ func (a *TransactionAdapter) extractFromInstruction(ix interface{}) {
 			}
 		}
 	case constants.SPLTokenCloseAccount:
-		if len(accounts) >= 2 {
+		// The destination of CloseAccount receives lamports, not tokens.
+		if len(accounts) >= 1 {
 			source = accounts[0]
-			destination = accounts[1]
+		}
+	case splTokenInitializeAccount:
+		// accounts: account, mint, owner, rent
+		if len(accounts) >= 3 {
+			destination = accounts[0]
+			mint = accounts[1]
+			owner = accounts[2]
+		}
+	case splTokenInitializeAccount2, splTokenInitializeAccount3:
+		// accounts: account, mint (, rent); data: owner pubkey
+		if len(accounts) >= 2 {
+			destination = accounts[0]
+			mint = accounts[1]
+			if len(ui.Data) >= 33 {
+				owner = base58.Encode(ui.Data[1:33])
+			}
+		}
+	case splTokenTransferFeeExtension:
+		// TransferCheckedWithFee: accounts source, mint, destination, authority;
+		// data 26, 1, amount u64, decimals u8, fee u64
+		if len(ui.Data) >= 11 && ui.Data[1] == splTokenTransferCheckedWithFee && len(accounts) >= 3 {
+			source = accounts[0]
+			mint = accounts[1]
+			destination = accounts[2]
+			decimals = ui.Data[10]
 		}
 	}
 
 	a.setTokenInfo(source, destination, mint, decimals)
+	if owner != "" && destination != "" {
+		if _, ok := a.tokenOwners[destination]; !ok {
+			a.tokenOwners[destination] = owner
+		}
+	}
+}
+
+// SPL Token instruction tags used only by the adapter
+const (
+	splTokenInitializeAccount      = 1
+	splTokenInitializeAccount2     = 16
+	splTokenInitializeAccount3     = 18
+	splTokenTransferFeeExtension   = 26
+	splTokenTransferCheckedWithFee = 1
+)
+
+// extractFromParsedInstruction extracts token info from a jsonParsed token
+// program instruction (program "spl-token", for Token and Token-2022)
+func (a *TransactionAdapter) extractFromParsedInstruction(ui *UnifiedInstruction) {
+	info := ui.Parsed.Info
+	if info == nil {
+		return
+	}
+	str := func(key string) string {
+		v, _ := info[key].(string)
+		return v
+	}
+	source, destination, mint := str("source"), str("destination"), str("mint")
+	var decimals uint8
+	if d, ok := intFromValue(info["decimals"]); ok && d >= 0 && d < 256 {
+		decimals = uint8(d)
+	} else if ta, ok := info["tokenAmount"].(map[string]interface{}); ok {
+		if d, ok := intFromValue(ta["decimals"]); ok && d >= 0 && d < 256 {
+			decimals = uint8(d)
+		}
+	}
+	owner := ""
+	switch ui.Parsed.Type {
+	case "mintTo", "mintToChecked":
+		destination = str("account")
+	case "burn", "burnChecked":
+		source = str("account")
+	case "closeAccount":
+		source, destination = str("account"), ""
+	case "initializeAccount", "initializeAccount2", "initializeAccount3":
+		destination = str("account")
+		owner = str("owner")
+	}
+	if source == "" && destination == "" {
+		return
+	}
+	a.setTokenInfo(source, destination, mint, decimals)
+	if owner != "" && destination != "" {
+		if _, ok := a.tokenOwners[destination]; !ok {
+			a.tokenOwners[destination] = owner
+		}
+	}
 }
 
 func (a *TransactionAdapter) setTokenInfo(source, destination, mint string, decimals uint8) {
-	if source != "" {
-		if _, ok := a.SPLTokenMap[source]; !ok {
-			m := mint
-			if m == "" {
-				m = constants.TOKENS.SOL
-			}
-			d := decimals
-			if d == 0 {
-				d = 9
-			}
-			a.SPLTokenMap[source] = types.TokenInfo{
-				Mint:      m,
-				Amount:    0,
-				AmountRaw: "0",
-				Decimals:  d,
-			}
-		}
-	}
-
-	if destination != "" {
-		if _, ok := a.SPLTokenMap[destination]; !ok {
-			m := mint
-			if m == "" {
-				m = constants.TOKENS.SOL
-			}
-			d := decimals
-			if d == 0 {
-				d = 9
-			}
-			a.SPLTokenMap[destination] = types.TokenInfo{
-				Mint:      m,
-				Amount:    0,
-				AmountRaw: "0",
-				Decimals:  d,
-			}
-		}
-	}
+	a.setTokenAccountInfo(source, mint, decimals)
+	a.setTokenAccountInfo(destination, mint, decimals)
 
 	if mint != "" && decimals > 0 {
 		if _, ok := a.SPLDecimalsMap[mint]; !ok {
@@ -719,17 +1088,120 @@ func (a *TransactionAdapter) setTokenInfo(source, destination, mint string, deci
 	}
 }
 
-// GetAccountSolBalanceChanges returns SOL balance changes for all accounts
+// setTokenAccountInfo records the mint of a token account. Accounts whose mint
+// is unknown default to SOL (typically temporary WSOL accounts) and are marked
+// as guessed; a later instruction naming the mint replaces the guess. Entries
+// from token balances or with a known mint are kept.
+func (a *TransactionAdapter) setTokenAccountInfo(account, mint string, decimals uint8) {
+	if account == "" {
+		return
+	}
+	_, exists := a.SPLTokenMap[account]
+	if exists && !a.guessedTokenAccounts[account] {
+		return
+	}
+	if mint == "" {
+		if !exists {
+			a.SPLTokenMap[account] = types.TokenInfo{
+				Mint:      constants.TOKENS.SOL,
+				Amount:    0,
+				AmountRaw: "0",
+				Decimals:  9,
+			}
+			a.guessedTokenAccounts[account] = true
+		}
+		return
+	}
+	if decimals == 0 {
+		if d, ok := a.SPLDecimalsMap[mint]; ok {
+			decimals = d
+		} else if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
+			decimals = d
+		}
+	}
+	a.SPLTokenMap[account] = types.TokenInfo{
+		Mint:      mint,
+		Amount:    0,
+		AmountRaw: "0",
+		Decimals:  decimals,
+	}
+	delete(a.guessedTokenAccounts, account)
+}
+
+// IsGuessedTokenAccount reports whether the mint recorded for a token account
+// in SPLTokenMap is a SOL default because the transaction does not reveal it
+func (a *TransactionAdapter) IsGuessedTokenAccount(account string) bool {
+	return a.guessedTokenAccounts[account]
+}
+
+// fetchTokenAccounts resolves guessed token accounts with
+// ParseConfig.TokenAccountsFetcher
+func (a *TransactionAdapter) fetchTokenAccounts() {
+	if a.Config == nil || a.Config.TokenAccountsFetcher == nil || a.Config.TokenAccountsFetcher.Fetch == nil {
+		return
+	}
+	if len(a.guessedTokenAccounts) == 0 || !a.fetchAllowed(a.Config.TokenAccountsFetcher.Filter, a.AccountKeys) {
+		return
+	}
+	keys := make([]string, 0, len(a.guessedTokenAccounts))
+	for key := range a.guessedTokenAccounts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	infos, err := a.Config.TokenAccountsFetcher.Fetch(keys)
+	if err != nil {
+		return
+	}
+	for i, info := range infos {
+		if i >= len(keys) || info == nil || info.Mint == "" {
+			continue
+		}
+		key := keys[i]
+		amount, ok := new(big.Int).SetString(info.Amount, 10)
+		if !ok {
+			amount = new(big.Int)
+		}
+		a.SPLTokenMap[key] = types.TokenInfo{
+			Mint:      info.Mint,
+			Amount:    types.ConvertToUIAmount(amount, info.Decimals),
+			AmountRaw: amount.String(),
+			Decimals:  info.Decimals,
+		}
+		delete(a.guessedTokenAccounts, key)
+		if _, ok := a.SPLDecimalsMap[info.Mint]; !ok {
+			a.SPLDecimalsMap[info.Mint] = info.Decimals
+		}
+		if _, ok := a.tokenOwners[key]; !ok && info.Owner != "" {
+			a.tokenOwners[key] = info.Owner
+		}
+	}
+}
+
+// GetAccountSolBalanceChanges returns SOL balance changes for all accounts.
+// With isOwner, token accounts are attributed to their owner and all accounts
+// of an owner are summed. The returned map is cached per adapter and shared:
+// callers must not modify it.
 func (a *TransactionAdapter) GetAccountSolBalanceChanges(isOwner bool) map[string]*types.BalanceChange {
-	changes := make(map[string]*types.BalanceChange)
+	slot := 0
+	if isOwner {
+		slot = 1
+	}
+	if a.solChangesDone[slot] {
+		return a.solChanges[slot]
+	}
 
 	preBalances := a.PreBalances()
 	postBalances := a.PostBalances()
 
+	type sums struct{ pre, post *big.Int }
+	totals := make(map[string]*sums)
 	for i, key := range a.AccountKeys {
+		if key == "" {
+			continue
+		}
 		accountKey := key
 		if isOwner {
-			if owner := a.GetTokenAccountOwner(key); owner != "" {
+			if owner := a.tokenOwners[key]; owner != "" {
 				accountKey = owner
 			}
 		}
@@ -743,145 +1215,117 @@ func (a *TransactionAdapter) GetAccountSolBalanceChanges(isOwner bool) map[strin
 			postBalance = postBalances[i]
 		}
 
-		change := int64(postBalance) - int64(preBalance)
-		if change != 0 {
-			preUI := types.ConvertToUIAmount(new(big.Int).SetUint64(preBalance), 9)
-			postUI := types.ConvertToUIAmount(new(big.Int).SetUint64(postBalance), 9)
-			changeUI := types.ConvertToUIAmount(new(big.Int).SetInt64(change), 9)
+		t, ok := totals[accountKey]
+		if !ok {
+			t = &sums{pre: new(big.Int), post: new(big.Int)}
+			totals[accountKey] = t
+		}
+		t.pre.Add(t.pre, new(big.Int).SetUint64(preBalance))
+		t.post.Add(t.post, new(big.Int).SetUint64(postBalance))
+	}
 
-			changes[accountKey] = &types.BalanceChange{
-				Pre: types.TokenAmount{
-					Amount:   new(big.Int).SetUint64(preBalance).String(),
-					UIAmount: &preUI,
-					Decimals: 9,
-				},
-				Post: types.TokenAmount{
-					Amount:   new(big.Int).SetUint64(postBalance).String(),
-					UIAmount: &postUI,
-					Decimals: 9,
-				},
-				Change: types.TokenAmount{
-					Amount:   new(big.Int).SetInt64(change).String(),
-					UIAmount: &changeUI,
-					Decimals: 9,
-				},
-			}
+	changes := make(map[string]*types.BalanceChange)
+	for accountKey, t := range totals {
+		change := new(big.Int).Sub(t.post, t.pre)
+		if change.Sign() != 0 {
+			changes[accountKey] = newBalanceChange(t.pre, t.post, change, 9)
 		}
 	}
 
+	a.solChanges[slot] = changes
+	a.solChangesDone[slot] = true
 	return changes
 }
 
 // GetAccountTokenBalanceChanges returns token balance changes for all accounts
+// (account -> mint -> change). With isOwner, token accounts are attributed to
+// their owner and all accounts of an owner and mint are summed. Accounts closed
+// within the transaction (pre balance only) have post 0 and change -pre.
+// Entries without change are omitted. The returned map is cached per adapter
+// and shared: callers must not modify it.
 func (a *TransactionAdapter) GetAccountTokenBalanceChanges(isOwner bool) map[string]map[string]*types.BalanceChange {
-	changes := make(map[string]map[string]*types.BalanceChange)
-
-	// Process pre token balances
-	for _, balance := range a.PreTokenBalances() {
-		key := a.AccountKeys[balance.AccountIndex]
-		accountKey := key
-		if isOwner {
-			if owner := a.GetTokenAccountOwner(key); owner != "" {
-				accountKey = owner
-			}
-		}
-
-		mint := balance.Mint
-		if mint == "" {
-			continue
-		}
-
-		if _, ok := changes[accountKey]; !ok {
-			changes[accountKey] = make(map[string]*types.BalanceChange)
-		}
-
-		zeroUI := float64(0)
-		changes[accountKey][mint] = &types.BalanceChange{
-			Pre: balance.UiTokenAmount,
-			Post: types.TokenAmount{
-				Amount:   "0",
-				UIAmount: &zeroUI,
-				Decimals: balance.UiTokenAmount.Decimals,
-			},
-			Change: types.TokenAmount{
-				Amount:   "0",
-				UIAmount: &zeroUI,
-				Decimals: balance.UiTokenAmount.Decimals,
-			},
-		}
+	slot := 0
+	if isOwner {
+		slot = 1
+	}
+	if a.tokenChangesDone[slot] {
+		return a.tokenChanges[slot]
 	}
 
-	// Process post token balances
-	for _, balance := range a.PostTokenBalances() {
-		key := a.AccountKeys[balance.AccountIndex]
+	type sums struct {
+		pre, post *big.Int
+		decimals  uint8
+	}
+	totals := make(map[string]map[string]*sums)
+	add := func(balance TokenBalance, isPost bool) {
+		key := a.GetAccountKey(balance.AccountIndex)
+		if key == "" || balance.Mint == "" {
+			return
+		}
 		accountKey := key
 		if isOwner {
-			if owner := a.GetTokenAccountOwner(key); owner != "" {
+			if owner := a.tokenOwners[key]; owner != "" {
 				accountKey = owner
 			}
 		}
-
-		mint := balance.Mint
-		if mint == "" {
-			continue
+		amount, ok := new(big.Int).SetString(balance.UiTokenAmount.Amount, 10)
+		if !ok {
+			amount = new(big.Int)
 		}
-
-		if _, ok := changes[accountKey]; !ok {
-			changes[accountKey] = make(map[string]*types.BalanceChange)
+		byMint, ok := totals[accountKey]
+		if !ok {
+			byMint = make(map[string]*sums)
+			totals[accountKey] = byMint
 		}
-
-		if existing, ok := changes[accountKey][mint]; ok {
-			// Update post balance and calculate change
-			existing.Post = balance.UiTokenAmount
-
-			preAmount, _ := new(big.Int).SetString(existing.Pre.Amount, 10)
-			postAmount, _ := new(big.Int).SetString(balance.UiTokenAmount.Amount, 10)
-			changeAmount := new(big.Int).Sub(postAmount, preAmount)
-
-			preUI := float64(0)
-			postUI := float64(0)
-			if existing.Pre.UIAmount != nil {
-				preUI = *existing.Pre.UIAmount
-			}
-			if balance.UiTokenAmount.UIAmount != nil {
-				postUI = *balance.UiTokenAmount.UIAmount
-			}
-			changeUI := postUI - preUI
-
-			existing.Change = types.TokenAmount{
-				Amount:   changeAmount.String(),
-				UIAmount: &changeUI,
-				Decimals: balance.UiTokenAmount.Decimals,
-			}
-
-			if changeAmount.Sign() == 0 {
-				delete(changes[accountKey], mint)
-				if len(changes[accountKey]) == 0 {
-					delete(changes, accountKey)
-				}
-			}
+		t, ok := byMint[balance.Mint]
+		if !ok {
+			t = &sums{pre: new(big.Int), post: new(big.Int), decimals: balance.UiTokenAmount.Decimals}
+			byMint[balance.Mint] = t
+		}
+		if isPost {
+			t.post.Add(t.post, amount)
 		} else {
-			// No pre-balance, set pre to zero
-			zeroUI := float64(0)
-			changes[accountKey][mint] = &types.BalanceChange{
-				Pre: types.TokenAmount{
-					Amount:   "0",
-					UIAmount: &zeroUI,
-					Decimals: balance.UiTokenAmount.Decimals,
-				},
-				Post:   balance.UiTokenAmount,
-				Change: balance.UiTokenAmount,
+			t.pre.Add(t.pre, amount)
+		}
+	}
+	for _, balance := range a.PreTokenBalances() {
+		add(balance, false)
+	}
+	for _, balance := range a.PostTokenBalances() {
+		add(balance, true)
+	}
+
+	changes := make(map[string]map[string]*types.BalanceChange)
+	for accountKey, byMint := range totals {
+		for mint, t := range byMint {
+			change := new(big.Int).Sub(t.post, t.pre)
+			if change.Sign() == 0 {
+				continue
 			}
+			if _, ok := changes[accountKey]; !ok {
+				changes[accountKey] = make(map[string]*types.BalanceChange)
+			}
+			changes[accountKey][mint] = newBalanceChange(t.pre, t.post, change, t.decimals)
 		}
 	}
 
+	a.tokenChanges[slot] = changes
+	a.tokenChangesDone[slot] = true
 	return changes
+}
+
+func newBalanceChange(pre, post, change *big.Int, decimals uint8) *types.BalanceChange {
+	amount := func(v *big.Int) types.TokenAmount {
+		ui := types.ConvertToUIAmount(v, decimals)
+		return types.TokenAmount{Amount: v.String(), UIAmount: &ui, Decimals: decimals}
+	}
+	return &types.BalanceChange{Pre: amount(pre), Post: amount(post), Change: amount(change)}
 }
 
 // GetInnerInstruction returns an inner instruction by indices
 func (a *TransactionAdapter) GetInnerInstruction(outerIndex, innerIndex int) interface{} {
 	for _, inner := range a.InnerInstructions() {
-		if inner.Index == outerIndex && innerIndex < len(inner.Instructions) {
+		if inner.Index == outerIndex && innerIndex >= 0 && innerIndex < len(inner.Instructions) {
 			return inner.Instructions[innerIndex]
 		}
 	}
@@ -890,33 +1334,20 @@ func (a *TransactionAdapter) GetInnerInstruction(outerIndex, innerIndex int) int
 
 // GetTokenAccountBalance returns token balances for given accounts
 func (a *TransactionAdapter) GetTokenAccountBalance(accountKeys []string) []*types.TokenAmount {
-	result := make([]*types.TokenAmount, len(accountKeys))
-	for i, accountKey := range accountKeys {
-		if accountKey == "" {
-			continue
-		}
-		for _, balance := range a.PostTokenBalances() {
-			if a.AccountKeys[balance.AccountIndex] == accountKey {
-				result[i] = &balance.UiTokenAmount
-				break
-			}
-		}
-	}
-	return result
+	return tokenAmounts(accountKeys, a.postTokenByKey)
 }
 
 // GetTokenAccountPreBalance returns pre-transaction token balances
 func (a *TransactionAdapter) GetTokenAccountPreBalance(accountKeys []string) []*types.TokenAmount {
+	return tokenAmounts(accountKeys, a.preTokenByKey)
+}
+
+func tokenAmounts(accountKeys []string, byKey map[string]*types.TokenAmount) []*types.TokenAmount {
 	result := make([]*types.TokenAmount, len(accountKeys))
 	for i, accountKey := range accountKeys {
-		if accountKey == "" {
-			continue
-		}
-		for _, balance := range a.PreTokenBalances() {
-			if a.AccountKeys[balance.AccountIndex] == accountKey {
-				result[i] = &balance.UiTokenAmount
-				break
-			}
+		if amount, ok := byKey[accountKey]; ok && accountKey != "" {
+			c := *amount
+			result[i] = &c
 		}
 	}
 	return result
@@ -995,15 +1426,4 @@ func ParseTransferCheckedAmount(data []byte) uint64 {
 // GetRawTransaction returns the underlying transaction
 func (a *TransactionAdapter) GetRawTransaction() *SolanaTransaction {
 	return a.tx
-}
-
-// Helper to create TokenAmount from amount and decimals
-func createTokenAmount(amount uint64, decimals uint8) types.TokenAmount {
-	amountBig := new(big.Int).SetUint64(amount)
-	uiAmount := types.ConvertToUIAmount(amountBig, decimals)
-	return types.TokenAmount{
-		Amount:   amountBig.String(),
-		UIAmount: &uiAmount,
-		Decimals: decimals,
-	}
 }
