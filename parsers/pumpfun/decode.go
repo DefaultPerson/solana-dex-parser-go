@@ -41,14 +41,6 @@ func (t *tailReader) u64() uint64 {
 	return v
 }
 
-func (t *tailReader) u16() uint16 {
-	if !t.has(2) {
-		return 0
-	}
-	v, _ := t.r.ReadU16()
-	return v
-}
-
 func (t *tailReader) boolean() bool {
 	if !t.has(1) {
 		return false

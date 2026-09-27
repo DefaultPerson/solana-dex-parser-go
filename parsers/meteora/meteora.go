@@ -152,7 +152,7 @@ func (p *MeteoraParser) dlmmTradeFromEvent(instructionEvents []types.ClassifiedI
 	if data == nil {
 		data = findEvent(p.Adapter, instructionEvents, events["swap"])
 	}
-	if data == nil || len(data) < 48 {
+	if len(data) < 48 {
 		return nil
 	}
 	u64 := func(offset int) uint64 { return binary.LittleEndian.Uint64(data[offset : offset+8]) }

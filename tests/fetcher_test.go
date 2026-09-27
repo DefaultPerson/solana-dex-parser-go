@@ -132,6 +132,7 @@ func TestPoolInfoFetcher(t *testing.T) {
 		TokenBMint string
 	}
 
+	//lint:ignore SA1019 the deprecated constructor stays exported for compatibility and is tested
 	fetcher := types.NewPoolInfoFetcher(
 		types.FetchFilterAccount,
 		func(pools []string) ([]interface{}, error) {
