@@ -480,7 +480,7 @@ func (dp *DexParser) parseConcurrentlyWithCallback(
 }
 
 // jupiterOrderProgramIds lists the Jupiter order programs (DCA/Recurring,
-// Value Average, Limit v2/Trigger). A keeper fills their orders by routing
+// Value Average, Limit v2/Trigger, legacy Limit v1). A keeper fills their orders by routing
 // through Jupiter v6 in the same transaction.
 var jupiterOrderProgramIds = []string{
 	constants.DEX_PROGRAMS.JUPITER_DCA.ID,
@@ -496,11 +496,11 @@ var jupiterProgramIds = append(append([]string{}, jupiterOrderProgramIds...), co
 
 // parseWithClassifier is the main parsing logic.
 //
-// Trades: Jupiter parsers (v6, DCA, VA, Limit v2) run first whenever their
+// Trades: Jupiter parsers (v6, DCA, VA, Limit v1/v2) run first whenever their
 // program appears in the transaction; their trades are authoritative for the
 // outer instructions they cover, so the other trade parsers and the
 // unknown-DEX fallback skip those outer instructions. When an order program
-// (DCA, VA, Limit v2) reports a fill, the Jupiter v6 route in the same
+// (DCA, VA, Limit v1/v2) reports a fill, the Jupiter v6 route in the same
 // transaction is the keeper's execution of that fill: its trades are dropped
 // and its outer instructions stay covered. Trades are returned in
 // execution order (numeric idx) with duplicates of the same idx removed (first
@@ -639,8 +639,12 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 
 	// Jupiter parsers first, order programs before v6. coveredBy maps an
 	// outer instruction index to the Jupiter program whose trades cover it; the
-	// first program to cover an outer instruction keeps it.
+	// first program to cover an outer instruction keeps it. When a Jupiter
+	// program runs by CPI inside another program's outer instruction (an
+	// arbitrage or bot program), only the Jupiter instruction's subtree is
+	// covered: coveredInner maps the outer index to those inner ranges.
 	coveredBy := make(map[int]string)
+	coveredInner := make(map[int][][2]int)
 	if shouldParseTrades {
 		orderFilled := false
 		for _, programId := range jupiterProgramIds {
@@ -654,11 +658,15 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 			isOrderProgram := containsString(jupiterOrderProgramIds, programId)
 			parser := factory(adapt, dexInfoFor(programId), transferActions, instrClassifier.GetInstructions(programId))
 			for _, trade := range parser.ProcessTrades() {
-				outer := outerIndexOf(trade.Idx)
+				outer, inner := splitIdx(trade.Idx)
 				if owner, ok := coveredBy[outer]; ok && owner != programId {
 					continue
 				}
-				coveredBy[outer] = programId
+				if first, last, ok := jupiterCPIRange(adapt, programId, outer, inner); ok {
+					coveredInner[outer] = append(coveredInner[outer], [2]int{first, last})
+				} else {
+					coveredBy[outer] = programId
+				}
 				if isOrderProgram {
 					orderFilled = true
 				} else if orderFilled {
@@ -668,9 +676,16 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 			}
 		}
 	}
-	isCovered := func(outer int) bool {
-		_, ok := coveredBy[outer]
-		return ok
+	isCovered := func(outer, inner int) bool {
+		if _, ok := coveredBy[outer]; ok {
+			return true
+		}
+		for _, r := range coveredInner[outer] {
+			if inner >= r[0] && inner <= r[1] {
+				return true
+			}
+		}
+		return false
 	}
 
 	// Process instructions for each program
@@ -685,10 +700,10 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		if shouldParseTrades && !containsString(jupiterProgramIds, programId) {
 			if factory, ok := dp.tradeParserFactories[programId]; ok {
 				instructions := classifiedInstructions
-				if len(coveredBy) > 0 {
+				if len(coveredBy) > 0 || len(coveredInner) > 0 {
 					instructions = make([]types.ClassifiedInstruction, 0, len(classifiedInstructions))
 					for _, ci := range classifiedInstructions {
-						if !isCovered(ci.OuterIndex) {
+						if !isCovered(ci.OuterIndex, ci.InnerIndex) {
 							instructions = append(instructions, ci)
 						}
 					}
@@ -696,7 +711,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 				if len(instructions) > 0 {
 					parser := factory(adapt, dexInfoFor(programId), transferActions, instructions)
 					for _, trade := range parser.ProcessTrades() {
-						if !isCovered(outerIndexOf(trade.Idx)) {
+						if !isCovered(splitIdx(trade.Idx)) {
 							trades = append(trades, trade)
 						}
 					}
@@ -705,7 +720,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 				// Try to parse unknown DEX programs from their transfer groups
 				prefix := programId + ":"
 				for _, key := range utils.SortedTransferKeys(transferActions) {
-					if !strings.HasPrefix(key, prefix) || isCovered(outerIndexOf(key[len(prefix):])) {
+					if !strings.HasPrefix(key, prefix) || isCovered(splitIdx(key[len(prefix):])) {
 						continue
 					}
 					transfers := transferActions[key]
@@ -829,6 +844,59 @@ func outerIndexOf(idx string) int {
 		return -1
 	}
 	return n
+}
+
+// splitIdx returns the outer and inner instruction index of an idx ("5" gives
+// 5, -1; "5-3" gives 5, 3), or -1, -1 when it cannot be parsed
+func splitIdx(idx string) (int, int) {
+	i := strings.IndexByte(idx, '-')
+	if i < 0 {
+		return outerIndexOf(idx), -1
+	}
+	inner, err := strconv.Atoi(idx[i+1:])
+	if err != nil {
+		return -1, -1
+	}
+	return outerIndexOf(idx[:i]), inner
+}
+
+// jupiterCPIRange returns the inner range [first, last] of the subtree of the
+// programId instruction that produced a Jupiter trade at (outer, inner), when
+// that instruction runs by CPI inside the outer instruction of a program that
+// is not a Jupiter program. ok is false when the outer instruction itself
+// belongs to a Jupiter program, the trade is an outer instruction, or stack
+// heights are unknown: the whole outer instruction is covered then.
+func jupiterCPIRange(adapt *adapter.TransactionAdapter, programId string, outer, inner int) (first, last int, ok bool) {
+	if inner < 0 || containsString(jupiterProgramIds, adapt.GetInstructionProgramId(adapt.InstructionAt(outer))) {
+		return 0, 0, false
+	}
+	// the outermost programId instruction among the trade's instruction and
+	// its invoking ancestors (a route above its own event or hop)
+	root := -1
+	for j := inner; j >= 0; {
+		if adapt.GetInstructionProgramId(adapt.GetInnerInstruction(outer, j)) == programId {
+			root = j
+		} else if root >= 0 {
+			break
+		}
+		_, parent, found := adapt.GetParentInstruction(outer, j)
+		if !found {
+			return 0, 0, false
+		}
+		j = parent
+	}
+	if root < 0 {
+		return 0, 0, false
+	}
+	height := adapt.GetInstructionStackHeight(outer, root)
+	if height < 2 {
+		return 0, 0, false
+	}
+	last = root
+	for j := root + 1; adapter.InstructionStackHeight(adapt.GetInnerInstruction(outer, j)) > height; j++ {
+		last = j
+	}
+	return root, last, true
 }
 
 // txSignature returns the first signature of tx for error messages
