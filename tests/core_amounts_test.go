@@ -418,18 +418,36 @@ func hideTokenAccount(t *testing.T, orig *adapter.SolanaTransaction, dest string
 }
 
 // TestCoreDetectBotNeedsFee: DetectBot attributed a bot when any of its fee
-// accounts merely appeared in the tx (1-lamport dust tagged an arbitrage as
-// Axiom). D9. constants-5.
+// accounts merely appeared in the tx (1-lamport dust tagged a trade as Axiom).
+// A credit counts only when it is >= 10000 lamports or >= 0.1% of a trade leg
+// in that mint. D9. constants-5.
 func TestCoreDetectBotNeedsFee(t *testing.T) {
 	p := dexparser.NewDexParser()
 	dust := loadFixture(t, sigAxiomDust)
-	for _, acct := range []string{"8m5GkL7nVy95G4YVUbs79z873oVKqg2afgKRmqxsiiRm", "DZfEurFKFtSbdWZsKSDTqpqsQgvXxmESpvRtXkAdgLwM"} {
-		if constants.GetBotName(acct) != "Axiom" || lamportDelta(dust, acct).Int64() >= utils.BotFeeMinLamports {
-			t.Fatalf("fixture: %s is not an Axiom account with a dust credit", acct)
+	const (
+		axiomOne = "8m5GkL7nVy95G4YVUbs79z873oVKqg2afgKRmqxsiiRm"
+		axiomTen = "DZfEurFKFtSbdWZsKSDTqpqsQgvXxmESpvRtXkAdgLwM"
+	)
+	for acct, want := range map[string]int64{axiomOne: 1, axiomTen: 10} {
+		if constants.GetBotName(acct) != "Axiom" || lamportDelta(dust, acct).Int64() != want {
+			t.Fatalf("fixture: %s is not an Axiom account credited %d lamports", acct, want)
 		}
 	}
-	if r := p.ParseAll(dust, nil); r.AggregateTrade == nil || r.AggregateTrade.Bot != "" {
-		t.Errorf("dust credits: aggregate %v, want no bot", r.AggregateTrade)
+	// The same credits on a 0.01 SOL leg (threshold 10000 lamports) are dust
+	trade := types.TradeInfo{
+		User:        "FiVhagUrpAQDn2QveV94Q84zx1VLUsRBRx6xPXEcTnRF",
+		InputToken:  types.TokenInfo{Mint: "BxftAowY2dVa2h9KMqDTPk4oMxzU9k6uVbZuoorXpump", AmountRaw: "226925"},
+		OutputToken: types.TokenInfo{Mint: "So11111111111111111111111111111111111111112", AmountRaw: "10000000"},
+	}
+	utils.NewTransactionUtils(adapter.NewTransactionAdapter(dust, nil)).DetectBot(&trade)
+	if trade.Bot != "" {
+		t.Errorf("dust credits on a 0.01 SOL leg: Bot = %q, want none", trade.Bot)
+	}
+	// The real trade sells for 1001 lamports through Axiom's router FLASHX8D;
+	// the 10 lamports to DZfE are Axiom's 1% fee (>= 0.1% of the leg), the
+	// 1 lamport to 8m5G alone would not count (< 2 lamports)
+	if r := p.ParseAll(dust, nil); r.AggregateTrade == nil || r.AggregateTrade.OutputToken.AmountRaw != "1001" || r.AggregateTrade.Bot != "Axiom" {
+		t.Errorf("1%% fee on a 1001-lamport leg: aggregate %v, want output 1001 and bot Axiom", r.AggregateTrade)
 	}
 
 	paid := loadFixture(t, sigAxiomPaid)

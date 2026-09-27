@@ -130,14 +130,25 @@ func TestCore2DetectBotThresholds(t *testing.T) {
 		t.Errorf("fee wallet as the user: Bot = %q, want none", got)
 	}
 
-	// 1 and 10 lamports of dust to Axiom wallets never count, whatever the leg
+	// SOL: the 10-lamport credit to an Axiom wallet counts up to a leg of
+	// 10000 lamports (0.1%), not above; the 10000-lamport floor caps the
+	// threshold on large legs
 	dust := loadFixture(t, sigAxiomDust)
-	tiny := types.TradeInfo{
-		InputToken:  types.TokenInfo{Mint: solMint, AmountRaw: "100"},
-		OutputToken: types.TokenInfo{Mint: usdcMint, AmountRaw: "100"},
+	solLeg := func(amount string) types.TradeInfo {
+		return types.TradeInfo{
+			InputToken:  types.TokenInfo{Mint: usdcMint, AmountRaw: "100"},
+			OutputToken: types.TokenInfo{Mint: solMint, AmountRaw: amount},
+		}
 	}
-	if got := detect(dust, tiny); got != "" {
-		t.Errorf("dust: Bot = %q, want none", got)
+	if got := detect(dust, solLeg("10000")); got != "Axiom" {
+		t.Errorf("10 lamports = 0.1%% of the SOL leg: Bot = %q, want Axiom", got)
+	}
+	if got := detect(dust, solLeg("10001")); got != "" {
+		t.Errorf("10 lamports < 0.1%% of the SOL leg: Bot = %q, want none", got)
+	}
+	paid := loadFixture(t, sigAxiomPaid) // 13511 lamports to an Axiom wallet
+	if got := detect(paid, solLeg("1000000000000")); got != "Axiom" {
+		t.Errorf(">= 10000 lamports on a 1000 SOL leg: Bot = %q, want Axiom", got)
 	}
 }
 

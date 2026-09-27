@@ -579,15 +579,15 @@ const BotFeeMinLegDivisor = 1000
 // DetectBot attributes a trading bot when one of its fee accounts
 // (constants.BOT_FEE_ACCOUNTS), or a token account owned by one, receives in
 // the transaction either at least BotFeeMinLamports of SOL or WSOL, or an
-// amount of the trade's input or output mint that is at least 0.1% of that
-// trade leg (some bots, e.g. BONKbot, take their fee in the traded token).
+// amount of the trade's input or output mint (SOL included) that is at least
+// 0.1% of that trade leg (some bots, e.g. BONKbot, take their fee in the
+// traded token).
 // Credits are balance deltas, so fees moved by a program without a transfer
 // instruction count too; the owner of a token account comes from the token
 // balances, so the fee wallet itself need not be in the account keys. Presence
 // of a fee account alone never counts, and the trade's user and the signers are
-// never fee receivers. For SOL/WSOL only the absolute threshold applies, so
-// dust never counts on small trades. Accounts are checked in account-key order;
-// the first match wins.
+// never fee receivers. Accounts are checked in account-key order; the first
+// match wins.
 func (tu *TransactionUtils) DetectBot(trade *types.TradeInfo) {
 	if trade == nil || trade.Bot != "" {
 		return
@@ -597,11 +597,11 @@ func (tu *TransactionUtils) DetectBot(trade *types.TradeInfo) {
 	byAccount := tu.adapter.GetAccountTokenBalanceChanges(false)
 	byOwner := tu.adapter.GetAccountTokenBalanceChanges(true)
 
-	// Minimum credit per mint: BotFeeMinLamports for SOL/WSOL, 0.1% (rounded
-	// up, at least 1) of the smaller trade leg for the traded mints
+	// Minimum credit per mint: 0.1% (rounded up, at least 1) of the smaller
+	// trade leg in that mint; for SOL/WSOL at most BotFeeMinLamports
 	minFee := map[string]*big.Int{constants.TOKENS.SOL: big.NewInt(BotFeeMinLamports)}
 	for _, leg := range []types.TokenInfo{trade.InputToken, trade.OutputToken} {
-		if leg.Mint == "" || leg.Mint == constants.TOKENS.SOL {
+		if leg.Mint == "" {
 			continue
 		}
 		amount, ok := new(big.Int).SetString(leg.AmountRaw, 10)
