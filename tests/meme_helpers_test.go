@@ -35,16 +35,18 @@ type memeRawBalance struct {
 	Mint          string `json:"mint"`
 	Owner         string `json:"owner"`
 	UiTokenAmount struct {
-		Amount string `json:"amount"`
+		Amount   string `json:"amount"`
+		Decimals uint8  `json:"decimals"`
 	} `json:"uiTokenAmount"`
 }
 
 type memeRawTx struct {
-	keys  []string
-	outer []memeRawIx
-	inner map[int][]memeRawIx
-	owner map[string]string // token account -> owner
-	mint  map[string]string // token account -> mint
+	keys     []string
+	outer    []memeRawIx
+	inner    map[int][]memeRawIx
+	owner    map[string]string // token account -> owner
+	mint     map[string]string // token account -> mint
+	decimals map[string]uint8  // mint -> decimals
 }
 
 // memeRawTransfer is a SOL or token transfer decoded from raw instruction data
@@ -88,11 +90,12 @@ func loadMemeRaw(t testing.TB, sig string) *memeRawTx {
 		t.Fatalf("unmarshal %s: %v", sig, err)
 	}
 	r := &memeRawTx{
-		keys:  f.Transaction.Message.AccountKeys,
-		outer: f.Transaction.Message.Instructions,
-		inner: map[int][]memeRawIx{},
-		owner: map[string]string{},
-		mint:  map[string]string{},
+		keys:     f.Transaction.Message.AccountKeys,
+		outer:    f.Transaction.Message.Instructions,
+		inner:    map[int][]memeRawIx{},
+		owner:    map[string]string{},
+		mint:     map[string]string{},
+		decimals: map[string]uint8{solMint: 9},
 	}
 	if la := f.Meta.LoadedAddresses; la != nil {
 		r.keys = append(r.keys, la.Writable...)
@@ -104,6 +107,7 @@ func loadMemeRaw(t testing.TB, sig string) *memeRawTx {
 	for _, b := range append(f.Meta.PreTokenBalances, f.Meta.PostTokenBalances...) {
 		r.owner[r.keys[b.AccountIndex]] = b.Owner
 		r.mint[r.keys[b.AccountIndex]] = b.Mint
+		r.decimals[b.Mint] = b.UiTokenAmount.Decimals
 	}
 	return r
 }
