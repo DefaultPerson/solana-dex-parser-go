@@ -253,13 +253,13 @@ func (p *DBCShredParser) swapDirection(swap *DBCSwapData) types.TradeType {
 	if swap.BaseMint == "" || swap.QuoteMint == "" {
 		return types.TradeTypeSwap
 	}
-	switch p.tokenAccountMint(swap.InputTokenAccount) {
+	switch p.adapter.KnownTokenAccountMint(swap.InputTokenAccount) {
 	case swap.BaseMint:
 		return types.TradeTypeSell
 	case swap.QuoteMint:
 		return types.TradeTypeBuy
 	}
-	switch p.tokenAccountMint(swap.OutputTokenAccount) {
+	switch p.adapter.KnownTokenAccountMint(swap.OutputTokenAccount) {
 	case swap.BaseMint:
 		return types.TradeTypeBuy
 	case swap.QuoteMint:
@@ -281,28 +281,6 @@ func (p *DBCShredParser) swapDirection(swap *DBCSwapData) types.TradeType {
 	return types.TradeTypeSwap
 }
 
-// tokenAccountMint returns the mint of a token account when the transaction
-// reveals it, "" otherwise (never a guess)
-func (p *DBCShredParser) tokenAccountMint(account string) string {
-	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
-		return ""
-	}
-	return p.adapter.GetSplTokenMint(account)
-}
-
-// decimals returns the decimals of mint when the transaction reveals them or
-// TOKEN_DECIMALS lists them, 0 (unknown) otherwise; DBC base mints choose
-// their decimals
-func (p *DBCShredParser) decimals(mint string) uint8 {
-	if mint == "" {
-		return 0
-	}
-	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	return constants.TOKEN_DECIMALS[mint]
-}
-
 func dbcSwapAmountKinds(swap *DBCSwapData) (types.ShredAmountKind, types.ShredAmountKind) {
 	if swap.ExactOut {
 		return types.ShredAmountMax, types.ShredAmountExact
@@ -311,7 +289,7 @@ func dbcSwapAmountKinds(swap *DBCSwapData) (types.ShredAmountKind, types.ShredAm
 }
 
 func (p *DBCShredParser) swapMemeEvent(swap *DBCSwapData) *types.MemeEvent {
-	inDecimals, outDecimals := p.decimals(swap.InputMint), p.decimals(swap.OutputMint)
+	inDecimals, outDecimals := p.adapter.GetTokenDecimals(swap.InputMint), p.adapter.GetTokenDecimals(swap.OutputMint)
 	return &types.MemeEvent{
 		Type:         types.TradeType(swap.TradeType),
 		User:         swap.User,

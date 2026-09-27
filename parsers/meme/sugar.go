@@ -238,7 +238,7 @@ func (p *SugarEventParser) decodeCreateEvent(data []byte, instruction interface{
 		Pool:         pool,
 		Creator:      creator,
 	}
-	if d, ok := p.adapter.SPLDecimalsMap[baseMint]; ok {
+	if d, ok := p.adapter.KnownDecimals(baseMint); ok {
 		event.Decimals = &d
 	}
 	return event

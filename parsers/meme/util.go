@@ -4,7 +4,6 @@ import (
 	"math/big"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
-	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
@@ -54,9 +53,7 @@ func userLegs(a *adapter.TransactionAdapter, transfers []types.TransferData, use
 		if !found {
 			return nil
 		}
-		if d, ok := a.SPLDecimalsMap[mint]; ok {
-			decimals = d
-		} else if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
+		if d, ok := a.KnownDecimals(mint); ok {
 			decimals = d
 		}
 		return &types.TokenInfo{

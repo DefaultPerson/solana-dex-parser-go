@@ -142,7 +142,7 @@ func (p *DFlowShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstr
 			continue
 		}
 		if swap.OutputMint == "" && swap.DestinationAccount != "" {
-			swap.OutputMint = p.tokenAccountMint(swap.DestinationAccount)
+			swap.OutputMint = p.adapter.KnownTokenAccountMint(swap.DestinationAccount)
 		}
 		if l := legs[swapKey(ci)]; len(l) > 0 {
 			swap.InputMint = l[0].inputMint
@@ -333,40 +333,14 @@ func decodeDFlowActions(reader *utils.BinaryReader) (names []string, firstAmount
 	return names, firstAmount, hasAmount, true
 }
 
-// tokenAccountMint returns the mint of a token account when the transaction
-// reveals it, "" otherwise (never a guess)
-func (p *DFlowShredParser) tokenAccountMint(account string) string {
-	if p.adapter.IsGuessedTokenAccount(account) {
-		return ""
-	}
-	return p.adapter.GetSplTokenMint(account)
-}
-
-// decimals returns the decimals of mint when known, 0 (unknown) otherwise
-func (p *DFlowShredParser) decimals(mint string) uint8 {
-	if mint == "" {
-		return 0
-	}
-	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	return constants.TOKEN_DECIMALS[mint]
-}
-
 func (p *DFlowShredParser) buildTradeInfo(swap *DFlowSwapData) *types.TradeInfo {
 	slippageBps := int(swap.SlippageBps)
-	inDecimals, outDecimals := p.decimals(swap.InputMint), p.decimals(swap.OutputMint)
-
-	// A route can end in the mint it starts with (circular arbitrage) or
-	// join any two mints, so one known side does not give the direction:
-	// SWAP unless both mints are known and differ
-	tradeType := types.TradeTypeSwap
-	if swap.InputMint != "" && swap.OutputMint != "" && swap.InputMint != swap.OutputMint {
-		tradeType = utils.GetTradeType(swap.InputMint, swap.OutputMint)
-	}
+	inDecimals, outDecimals := p.adapter.GetTokenDecimals(swap.InputMint), p.adapter.GetTokenDecimals(swap.OutputMint)
 
 	return &types.TradeInfo{
-		Type: tradeType,
+		// A route can end in the mint it starts with (circular arbitrage)
+		// or join any two mints: SWAP unless both are known and differ
+		Type: utils.GetShredTradeType(swap.InputMint, swap.OutputMint),
 		Pool: []string{},
 		User: swap.User,
 		InputToken: types.TokenInfo{

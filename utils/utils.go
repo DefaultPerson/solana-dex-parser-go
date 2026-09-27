@@ -62,6 +62,17 @@ func GetTradeType(inMint, outMint string) types.TradeType {
 	return types.TradeTypeSell
 }
 
+// GetShredTradeType is GetTradeType for instructions decoded before
+// execution, whose mints may be unknown (""): SWAP when a mint is unknown or
+// both are the same (a route can join any two mints or end in the one it
+// starts with), else GetTradeType.
+func GetShredTradeType(inMint, outMint string) types.TradeType {
+	if inMint == "" || outMint == "" || inMint == outMint {
+		return types.TradeTypeSwap
+	}
+	return GetTradeType(inMint, outMint)
+}
+
 // GetAMMs extracts AMM names from transfer action keys
 func GetAMMs(transferActionKeys []string) []string {
 	var result []string

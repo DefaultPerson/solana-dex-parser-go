@@ -271,7 +271,7 @@ func (p *JupiterShredParser) decodeRoute(route jupiterRoute, accounts []string, 
 	if route.sourceMint >= 0 {
 		routeData.InputMint = accounts[route.sourceMint]
 	} else {
-		routeData.InputMint = p.tokenAccountMint(routeData.InputTokenAccount)
+		routeData.InputMint = p.adapter.KnownTokenAccountMint(routeData.InputTokenAccount)
 	}
 	if route.exactOut {
 		routeData.OutputAmount, routeData.InputAmount = first, second
@@ -281,43 +281,12 @@ func (p *JupiterShredParser) decodeRoute(route jupiterRoute, accounts []string, 
 	return routeData
 }
 
-// tokenAccountMint returns the mint of a token account when the transaction
-// reveals it, "" otherwise (never a guess)
-func (p *JupiterShredParser) tokenAccountMint(account string) string {
-	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
-		return ""
-	}
-	return p.adapter.GetSplTokenMint(account)
-}
-
-// decimals returns the decimals of mint when known, 0 (unknown) otherwise
-func (p *JupiterShredParser) decimals(mint string) uint8 {
-	if mint == "" {
-		return 0
-	}
-	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	return constants.TOKEN_DECIMALS[mint]
-}
-
-// shredTradeType is utils.GetTradeType when both mints are known. A route
-// can end in the mint it starts with (circular arbitrage) or join any two
-// mints, so one known side does not give the direction: SWAP when a mint is
-// unknown ("") or both are the same.
-func shredTradeType(inMint, outMint string) types.TradeType {
-	if inMint == "" || outMint == "" || inMint == outMint {
-		return types.TradeTypeSwap
-	}
-	return utils.GetTradeType(inMint, outMint)
-}
-
 func (p *JupiterShredParser) buildTradeInfo(data *JupiterRouteData) *types.TradeInfo {
 	slippageBps := int(data.SlippageBps)
-	inDecimals, outDecimals := p.decimals(data.InputMint), p.decimals(data.OutputMint)
+	inDecimals, outDecimals := p.adapter.GetTokenDecimals(data.InputMint), p.adapter.GetTokenDecimals(data.OutputMint)
 
 	return &types.TradeInfo{
-		Type: shredTradeType(data.InputMint, data.OutputMint),
+		Type: utils.GetShredTradeType(data.InputMint, data.OutputMint),
 		Pool: []string{},
 		User: data.User,
 		InputToken: types.TokenInfo{

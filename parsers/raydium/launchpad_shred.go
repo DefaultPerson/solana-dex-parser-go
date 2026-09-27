@@ -352,7 +352,7 @@ func (p *LaunchpadShredParser) buildMemeEvent(data *LaunchpadTradeData) *types.M
 	if data.TradeType == "sell" {
 		tradeType = types.TradeTypeSell
 	}
-	inputDecimal, outputDecimal := shredKnownDecimals(p.adapter, data.InputMint), shredKnownDecimals(p.adapter, data.OutputMint)
+	inputDecimal, outputDecimal := p.adapter.GetTokenDecimals(data.InputMint), p.adapter.GetTokenDecimals(data.OutputMint)
 
 	return &types.MemeEvent{
 		Protocol:       constants.DEX_PROGRAMS.RAYDIUM_LCP.Name,

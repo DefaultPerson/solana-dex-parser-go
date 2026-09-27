@@ -223,6 +223,11 @@ type ParseShredResult struct {
 	// empty strings; decoders never guess them.
 	HasUnresolvedAccounts bool `json:"hasUnresolvedAccounts,omitempty"`
 
+	// Warnings lists non-fatal problems that make the result incomplete, as
+	// in ParseResult.Warnings: ALTsFetcher / TokenAccountsFetcher errors and
+	// address lookup table accounts that stayed unresolved
+	Warnings []string `json:"warnings,omitempty"`
+
 	// Msg contains optional error or status message
 	Msg string `json:"msg,omitempty"`
 }

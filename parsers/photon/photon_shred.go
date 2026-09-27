@@ -237,31 +237,6 @@ type PhotonCollectFeeData struct {
 	Mode      uint8  `json:"mode"`
 }
 
-// tokenAccountMint returns the mint of a token account when the transaction
-// reveals it, "" otherwise (never a guess)
-func (p *PhotonShredParser) tokenAccountMint(account string) string {
-	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
-		return ""
-	}
-	return p.adapter.GetSplTokenMint(account)
-}
-
-// decimals returns the decimals of mint when the transaction reveals them or
-// TOKEN_DECIMALS lists them, else fallback (a protocol-guaranteed value, or 0
-// meaning unknown)
-func (p *PhotonShredParser) decimals(mint string, fallback uint8) uint8 {
-	if mint == "" {
-		return fallback
-	}
-	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
-		return d
-	}
-	return fallback
-}
-
 // pumpBaseDecimals is the decimals of every Pump.fun bonding-curve mint
 const pumpBaseDecimals = 6
 
@@ -309,14 +284,14 @@ func (p *PhotonShredParser) decodePhotonSwapData(accounts []string, data []byte)
 // of the token accounts, then from the user's associated token account of
 // the base mint; SWAP when neither decides
 func (p *PhotonShredParser) swapDirection(swap *PhotonSwapData) types.TradeType {
-	switch p.tokenAccountMint(swap.InputTokenAccount) {
+	switch p.adapter.KnownTokenAccountMint(swap.InputTokenAccount) {
 	case "":
 	case swap.BaseMint:
 		return types.TradeTypeSell
 	case swap.QuoteMint:
 		return types.TradeTypeBuy
 	}
-	switch p.tokenAccountMint(swap.OutputTokenAccount) {
+	switch p.adapter.KnownTokenAccountMint(swap.OutputTokenAccount) {
 	case "":
 	case swap.BaseMint:
 		return types.TradeTypeBuy
@@ -345,8 +320,8 @@ func (p *PhotonShredParser) swapInstruction(swap *PhotonSwapData) *types.ParsedS
 			Type:        tradeType,
 			Pool:        []string{swap.Pool},
 			User:        swap.User,
-			InputToken:  tokenInfo(inputMint, swap.InputAmount, p.decimals(inputMint, 0)),
-			OutputToken: tokenInfo(outputMint, swap.OutputAmount, p.decimals(outputMint, 0)),
+			InputToken:  tokenInfo(inputMint, swap.InputAmount, p.adapter.GetTokenDecimals(inputMint)),
+			OutputToken: tokenInfo(outputMint, swap.OutputAmount, p.adapter.GetTokenDecimals(outputMint)),
 			ProgramId:   swap.TargetProgram,
 			AMM:         utils.GetProgramName(swap.TargetProgram),
 			AMMs:        []string{utils.GetProgramName(swap.TargetProgram)},
@@ -477,8 +452,12 @@ func (p *PhotonShredParser) decodePhotonPumpSellV2Data(accounts []string, data [
 }
 
 func (p *PhotonShredParser) pumpfunInstruction(d *PhotonPumpfunData, inKind, outKind types.ShredAmountKind) *types.ParsedShredInstruction {
-	quote := tokenInfo(d.QuoteMint, 0, p.decimals(d.QuoteMint, 0))
-	base := tokenInfo(d.BaseMint, 0, p.decimals(d.BaseMint, pumpBaseDecimals))
+	quote := tokenInfo(d.QuoteMint, 0, p.adapter.GetTokenDecimals(d.QuoteMint))
+	baseDecimals, ok := p.adapter.KnownDecimals(d.BaseMint)
+	if !ok {
+		baseDecimals = pumpBaseDecimals
+	}
+	base := tokenInfo(d.BaseMint, 0, baseDecimals)
 	tradeType := types.TradeTypeBuy
 	input, output := quote, base
 	if d.TradeType == "sell" {
@@ -563,10 +542,10 @@ func (p *PhotonShredParser) moonitInstruction(d *PhotonMoonitData, inKind, outKi
 	sol := constants.TOKENS.SOL
 	tradeType := types.TradeTypeBuy
 	input := tokenInfo(sol, d.InputAmount, 9)
-	output := tokenInfo(d.BaseMint, d.OutputAmount, p.decimals(d.BaseMint, 0))
+	output := tokenInfo(d.BaseMint, d.OutputAmount, p.adapter.GetTokenDecimals(d.BaseMint))
 	if d.TradeType == "sell" {
 		tradeType = types.TradeTypeSell
-		input = tokenInfo(d.BaseMint, d.InputAmount, p.decimals(d.BaseMint, 0))
+		input = tokenInfo(d.BaseMint, d.InputAmount, p.adapter.GetTokenDecimals(d.BaseMint))
 		output = tokenInfo(sol, d.OutputAmount, 9)
 	}
 	slippageBps := int(d.SlippageBps)
@@ -711,8 +690,8 @@ func (p *PhotonShredParser) hopTwoSwapInstruction(swapData *PhotonHopTwoSwapData
 			Type:        tradeType,
 			Pool:        swapData.Pools,
 			User:        swapData.User,
-			InputToken:  tokenInfo(swapData.InputMint, swapData.InputAmount, p.decimals(swapData.InputMint, 0)),
-			OutputToken: tokenInfo(swapData.OutputMint, swapData.OutputAmount, p.decimals(swapData.OutputMint, 0)),
+			InputToken:  tokenInfo(swapData.InputMint, swapData.InputAmount, p.adapter.GetTokenDecimals(swapData.InputMint)),
+			OutputToken: tokenInfo(swapData.OutputMint, swapData.OutputAmount, p.adapter.GetTokenDecimals(swapData.OutputMint)),
 			ProgramId:   constants.DEX_PROGRAMS.PHOTON.ID,
 			AMMs:        swapData.Programs,
 			Route:       constants.DEX_PROGRAMS.PHOTON.Name,

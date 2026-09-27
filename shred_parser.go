@@ -95,6 +95,7 @@ func (p *ShredParser) parseWithClassifier(tx *adapter.SolanaTransaction, config 
 	result.Signer = txAdapter.Signers()
 	result.TxStatus = txAdapter.TxStatus()
 	result.HasUnresolvedAccounts = txAdapter.HasUnresolvedAccounts()
+	result.Warnings = txAdapter.Warnings()
 
 	// Filter by programIds if specified
 	if len(config.ProgramIds) > 0 {
@@ -242,22 +243,6 @@ func fillShredContext(a *adapter.TransactionAdapter, instructions []types.Parsed
 	}
 }
 
-// shredDecimals returns the decimals of mint when the transaction reveals
-// them (token balances, checked transfers) or TOKEN_DECIMALS lists them,
-// otherwise fallback: a protocol-guaranteed value, or 0 meaning unknown
-func shredDecimals(a *adapter.TransactionAdapter, mint string, fallback uint8) uint8 {
-	if mint == "" {
-		return fallback
-	}
-	if d, ok := a.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
-		return d
-	}
-	return fallback
-}
-
 // shredToken builds a TokenInfo from a raw instruction amount
 func shredToken(mint string, amount uint64, decimals uint8) types.TokenInfo {
 	return types.TokenInfo{
@@ -270,6 +255,15 @@ func shredToken(mint string, amount uint64, decimals uint8) types.TokenInfo {
 
 // pumpBaseDecimals is the decimals of every Pump.fun bonding-curve mint
 const pumpBaseDecimals = 6
+
+// pumpBaseMintDecimals returns the decimals of a Pump.fun bonding-curve mint:
+// the known ones (adapter.KnownDecimals), else pumpBaseDecimals
+func pumpBaseMintDecimals(a *adapter.TransactionAdapter, mint string) uint8 {
+	if decimals, ok := a.KnownDecimals(mint); ok {
+		return decimals
+	}
+	return pumpBaseDecimals
+}
 
 // quoteOrSOL returns the quote mint named by an instruction, SOL (WSOL) when
 // the instruction has no quote mint account
@@ -737,8 +731,8 @@ func (p *PumpfunInstructionParser) decodeMigrateV2(accounts []string) *PumpfunMi
 }
 
 func (p *PumpfunInstructionParser) buyInstruction(b *PumpfunBuyData) *types.ParsedShredInstruction {
-	input := shredToken(b.QuoteMint, b.SolAmount, shredDecimals(p.adapter, b.QuoteMint, 0))
-	output := shredToken(b.Mint, b.TokenAmount, shredDecimals(p.adapter, b.Mint, pumpBaseDecimals))
+	input := shredToken(b.QuoteMint, b.SolAmount, p.adapter.GetTokenDecimals(b.QuoteMint))
+	output := shredToken(b.Mint, b.TokenAmount, pumpBaseMintDecimals(p.adapter, b.Mint))
 	inKind, outKind := types.ShredAmountMax, types.ShredAmountExact
 	if b.ExactQuoteIn {
 		inKind, outKind = types.ShredAmountExact, types.ShredAmountMin
@@ -747,8 +741,8 @@ func (p *PumpfunInstructionParser) buyInstruction(b *PumpfunBuyData) *types.Pars
 }
 
 func (p *PumpfunInstructionParser) sellInstruction(s *PumpfunSellData) *types.ParsedShredInstruction {
-	input := shredToken(s.Mint, s.TokenAmount, shredDecimals(p.adapter, s.Mint, pumpBaseDecimals))
-	output := shredToken(s.QuoteMint, s.SolAmount, shredDecimals(p.adapter, s.QuoteMint, 0))
+	input := shredToken(s.Mint, s.TokenAmount, pumpBaseMintDecimals(p.adapter, s.Mint))
+	output := shredToken(s.QuoteMint, s.SolAmount, p.adapter.GetTokenDecimals(s.QuoteMint))
 	return p.tradeInstruction("sell", types.TradeTypeSell, s.User, s.BondingCurve, s.Mint, s.QuoteMint, input, output, types.ShredAmountExact, types.ShredAmountMin)
 }
 
@@ -1076,8 +1070,8 @@ func (p *PumpswapInstructionParser) tradeInstruction(action string, tradeType ty
 			Type:        tradeType,
 			Pool:        []string{pool},
 			User:        user,
-			InputToken:  shredToken(inMint, inAmount, shredDecimals(p.adapter, inMint, 0)),
-			OutputToken: shredToken(outMint, outAmount, shredDecimals(p.adapter, outMint, 0)),
+			InputToken:  shredToken(inMint, inAmount, p.adapter.GetTokenDecimals(inMint)),
+			OutputToken: shredToken(outMint, outAmount, p.adapter.GetTokenDecimals(outMint)),
 			ProgramId:   constants.DEX_PROGRAMS.PUMP_SWAP.ID,
 			AMM:         constants.DEX_PROGRAMS.PUMP_SWAP.Name,
 		},
@@ -1089,8 +1083,8 @@ func (p *PumpswapInstructionParser) tradeInstruction(action string, tradeType ty
 // liquidityInstruction builds a PoolEvent; for liquidity the input side is
 // what the user deposits (base/quote for CREATE and ADD, LP for REMOVE)
 func (p *PumpswapInstructionParser) liquidityInstruction(action string, eventType types.PoolEventType, user, pool, lpMint, baseMint, quoteMint string, baseAmount, quoteAmount, lpAmount uint64, inKind, outKind types.ShredAmountKind) *types.ParsedShredInstruction {
-	base := shredToken(baseMint, baseAmount, shredDecimals(p.adapter, baseMint, 0))
-	quote := shredToken(quoteMint, quoteAmount, shredDecimals(p.adapter, quoteMint, 0))
+	base := shredToken(baseMint, baseAmount, p.adapter.GetTokenDecimals(baseMint))
+	quote := shredToken(quoteMint, quoteAmount, p.adapter.GetTokenDecimals(quoteMint))
 	event := &types.PoolEvent{
 		PoolEventBase: types.PoolEventBase{
 			User:      user,
@@ -1110,7 +1104,7 @@ func (p *PumpswapInstructionParser) liquidityInstruction(action string, eventTyp
 		Token1Decimals:  &quote.Decimals,
 	}
 	if eventType != types.PoolEventTypeCreate {
-		lp := types.ConvertToUIAmountUint64(lpAmount, shredDecimals(p.adapter, lpMint, 0))
+		lp := types.ConvertToUIAmountUint64(lpAmount, p.adapter.GetTokenDecimals(lpMint))
 		event.LpAmount = &lp
 		event.LpAmountRaw = strconv.FormatUint(lpAmount, 10)
 	}

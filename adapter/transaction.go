@@ -852,15 +852,36 @@ func (a *TransactionAdapter) IsSupportedToken(mint string) bool {
 	return constants.IsSOL(mint) || constants.IsStablecoin(mint)
 }
 
-// GetTokenDecimals returns the decimals for a token
+// GetTokenDecimals returns the decimals for a token, 0 when they are
+// unknown (see KnownDecimals)
 func (a *TransactionAdapter) GetTokenDecimals(mint string) uint8 {
+	decimals, _ := a.KnownDecimals(mint)
+	return decimals
+}
+
+// KnownDecimals returns the decimals of mint when the transaction reveals
+// them (token balances, checked transfers, fetched token accounts) or
+// constants.TOKEN_DECIMALS lists them; ok is false when they are unknown, so
+// that a caller can apply a protocol-guaranteed value instead (D6).
+func (a *TransactionAdapter) KnownDecimals(mint string) (decimals uint8, ok bool) {
+	if mint == "" {
+		return 0, false
+	}
 	if decimals, ok := a.SPLDecimalsMap[mint]; ok {
-		return decimals
+		return decimals, true
 	}
-	if decimals, ok := constants.TOKEN_DECIMALS[mint]; ok {
-		return decimals
+	decimals, ok = constants.TOKEN_DECIMALS[mint]
+	return decimals, ok
+}
+
+// KnownTokenAccountMint returns the mint of a token account when the
+// transaction reveals it (token balances, instructions, fetched accounts),
+// "" otherwise: never the SOL default of a guessed account.
+func (a *TransactionAdapter) KnownTokenAccountMint(account string) string {
+	if account == "" || a.IsGuessedTokenAccount(account) {
+		return ""
 	}
-	return 0
+	return a.GetSplTokenMint(account)
 }
 
 // GetSplTokenMint returns the mint address for a token account

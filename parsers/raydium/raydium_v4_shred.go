@@ -180,32 +180,6 @@ type RaydiumV4LiquidityData struct {
 	HasMinAmounts bool `json:"hasMinAmounts,omitempty"`
 }
 
-// tokenAccountMint returns the mint of a token account when the transaction
-// reveals it, "" otherwise (never a guess)
-func (p *RaydiumV4ShredParser) tokenAccountMint(account string) string {
-	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
-		return ""
-	}
-	return p.adapter.GetSplTokenMint(account)
-}
-
-// decimals returns the decimals of mint when known, 0 (unknown) otherwise
-func (p *RaydiumV4ShredParser) decimals(mint string) uint8 {
-	return shredKnownDecimals(p.adapter, mint)
-}
-
-// shredKnownDecimals returns the decimals of mint when the transaction reveals
-// them or TOKEN_DECIMALS lists them, 0 (unknown) otherwise
-func shredKnownDecimals(a *adapter.TransactionAdapter, mint string) uint8 {
-	if mint == "" {
-		return 0
-	}
-	if d, ok := a.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	return constants.TOKEN_DECIMALS[mint]
-}
-
 // decodeSwap decodes swap_base_in / swap_base_out. Accounts: 0 token_program,
 // 1 amm, then either the v1 layout with (18 accounts) or without (17, current
 // SDK) amm_target_orders at 4, whose last three accounts are the user source,
@@ -246,9 +220,9 @@ func (p *RaydiumV4ShredParser) decodeSwap(accounts []string, data []byte, v2, ex
 
 	// Mints of the user's accounts; when one side is unknown but both vault
 	// mints are, it is the vault mint the other side does not use
-	swap.InputMint = p.tokenAccountMint(swap.InputTokenAccount)
-	swap.OutputMint = p.tokenAccountMint(swap.OutputTokenAccount)
-	coinMint, pcMint := p.tokenAccountMint(swap.CoinVault), p.tokenAccountMint(swap.PcVault)
+	swap.InputMint = p.adapter.KnownTokenAccountMint(swap.InputTokenAccount)
+	swap.OutputMint = p.adapter.KnownTokenAccountMint(swap.OutputTokenAccount)
+	coinMint, pcMint := p.adapter.KnownTokenAccountMint(swap.CoinVault), p.adapter.KnownTokenAccountMint(swap.PcVault)
 	if coinMint != "" && pcMint != "" {
 		other := func(m string) string {
 			switch m {
@@ -269,27 +243,29 @@ func (p *RaydiumV4ShredParser) decodeSwap(accounts []string, data []byte, v2, ex
 	return swap
 }
 
-// shredTradeType is utils.GetTradeType for mints that may be unknown ("").
-// The two mints of a pool differ, so a known WSOL side decides alone: WSOL
-// in is a BUY and WSOL out a SELL whatever the other mint is. Any other
-// single known side does not (USDC in is a BUY against a token but a SELL
-// against SOL) and gives SWAP, as do two equal mints.
+// shredTradeType is utils.GetShredTradeType for one pool, whose two mints
+// differ, so one known side can decide what utils.GetTradeType would say
+// whatever the other mint is: WSOL in is a BUY, WSOL out a SELL, and an input
+// that is neither SOL nor a stablecoin a SELL. Any other single known side
+// does not (USDC in is a BUY against a token but a SELL against SOL) and
+// gives SWAP.
 func shredTradeType(inMint, outMint string) types.TradeType {
+	if inMint != "" && outMint != "" {
+		return utils.GetShredTradeType(inMint, outMint)
+	}
 	switch {
-	case inMint != "" && inMint == outMint:
-		return types.TradeTypeSwap
-	case inMint != "" && outMint != "":
-		return utils.GetTradeType(inMint, outMint)
 	case inMint == constants.TOKENS.SOL:
 		return types.TradeTypeBuy
 	case outMint == constants.TOKENS.SOL:
+		return types.TradeTypeSell
+	case inMint != "" && !constants.IsSOL(inMint) && !constants.IsStablecoin(inMint):
 		return types.TradeTypeSell
 	}
 	return types.TradeTypeSwap
 }
 
 func (p *RaydiumV4ShredParser) swapInstruction(action string, swap *RaydiumV4SwapData) *types.ParsedShredInstruction {
-	inDecimals, outDecimals := p.decimals(swap.InputMint), p.decimals(swap.OutputMint)
+	inDecimals, outDecimals := p.adapter.GetTokenDecimals(swap.InputMint), p.adapter.GetTokenDecimals(swap.OutputMint)
 	inKind, outKind := types.ShredAmountExact, types.ShredAmountMin
 	if swap.ExactOut {
 		inKind, outKind = types.ShredAmountMax, types.ShredAmountExact
@@ -379,8 +355,8 @@ func (p *RaydiumV4ShredParser) decodeAddLiquidity(accounts []string, data []byte
 	return &RaydiumV4LiquidityData{
 		Pool:        accounts[1],
 		User:        accounts[12],
-		BaseMint:    p.tokenAccountMint(accounts[6]),
-		QuoteMint:   p.tokenAccountMint(accounts[7]),
+		BaseMint:    p.adapter.KnownTokenAccountMint(accounts[6]),
+		QuoteMint:   p.adapter.KnownTokenAccountMint(accounts[7]),
 		LpMint:      accounts[5],
 		BaseVault:   accounts[6],
 		QuoteVault:  accounts[7],
@@ -412,8 +388,8 @@ func (p *RaydiumV4ShredParser) decodeRemoveLiquidity(accounts []string, data []b
 	remove := &RaydiumV4LiquidityData{
 		Pool:       accounts[1],
 		User:       accounts[owner],
-		BaseMint:   p.tokenAccountMint(accounts[6]),
-		QuoteMint:  p.tokenAccountMint(accounts[7]),
+		BaseMint:   p.adapter.KnownTokenAccountMint(accounts[6]),
+		QuoteMint:  p.adapter.KnownTokenAccountMint(accounts[7]),
 		LpMint:     accounts[5],
 		BaseVault:  accounts[6],
 		QuoteVault: accounts[7],
@@ -430,7 +406,7 @@ func (p *RaydiumV4ShredParser) decodeRemoveLiquidity(accounts []string, data []b
 // liquidityInstruction builds a PoolEvent; for liquidity the input side is
 // what the user deposits (token amounts for CREATE and ADD, LP for REMOVE)
 func (p *RaydiumV4ShredParser) liquidityInstruction(action string, eventType types.PoolEventType, l *RaydiumV4LiquidityData, inKind, outKind types.ShredAmountKind) *types.ParsedShredInstruction {
-	baseDecimals, quoteDecimals := p.decimals(l.BaseMint), p.decimals(l.QuoteMint)
+	baseDecimals, quoteDecimals := p.adapter.GetTokenDecimals(l.BaseMint), p.adapter.GetTokenDecimals(l.QuoteMint)
 	baseAmount := types.ConvertToUIAmountUint64(l.BaseAmount, baseDecimals)
 	quoteAmount := types.ConvertToUIAmountUint64(l.QuoteAmount, quoteDecimals)
 
@@ -455,7 +431,7 @@ func (p *RaydiumV4ShredParser) liquidityInstruction(action string, eventType typ
 		event.Token1AmountRaw = strconv.FormatUint(l.QuoteAmount, 10)
 	}
 	if eventType == types.PoolEventTypeRemove {
-		lpAmount := types.ConvertToUIAmountUint64(l.LpAmount, p.decimals(l.LpMint))
+		lpAmount := types.ConvertToUIAmountUint64(l.LpAmount, p.adapter.GetTokenDecimals(l.LpMint))
 		event.LpAmount = &lpAmount
 		event.LpAmountRaw = strconv.FormatUint(l.LpAmount, 10)
 	}

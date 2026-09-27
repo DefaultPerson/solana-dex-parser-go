@@ -284,7 +284,7 @@ func (p *HeavenEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedIn
 		event.Pool = creation[10]
 		event.PlatformConfig = creation[11]
 	}
-	if d, ok := p.adapter.SPLDecimalsMap[accounts[2]]; ok {
+	if d, ok := p.adapter.KnownDecimals(accounts[2]); ok {
 		event.Decimals = &d
 	}
 	return event

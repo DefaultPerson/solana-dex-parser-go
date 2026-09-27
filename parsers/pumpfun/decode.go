@@ -138,10 +138,7 @@ func findParentInstruction(
 // tokenDecimals returns the decimals of mint known to the transaction (token
 // balances, instructions), then the constants table, else fallback
 func tokenDecimals(a *adapter.TransactionAdapter, mint string, fallback uint8) uint8 {
-	if d, ok := a.SPLDecimalsMap[mint]; ok {
-		return d
-	}
-	if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
+	if d, ok := a.KnownDecimals(mint); ok {
 		return d
 	}
 	return fallback

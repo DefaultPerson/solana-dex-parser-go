@@ -95,9 +95,9 @@ func (x *ProgramShredParser) ProcessAll() ([]interface{}, []types.ParsedShredIns
 		}
 		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 
-		// Check if it's a fee transfer
-		if constants.IsFeeAccount(transfer.Info.Destination) ||
-			constants.IsFeeAccount(transfer.Info.DestinationOwner) {
+		// Check if it's a fee transfer (a relay tip is not a fee)
+		if constants.IsTradeFeeAccount(transfer.Info.Destination) ||
+			constants.IsTradeFeeAccount(transfer.Info.DestinationOwner) {
 			transfer.IsFee = true
 		}
 		if transfer.Signature == "" {
