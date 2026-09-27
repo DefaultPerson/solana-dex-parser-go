@@ -146,8 +146,8 @@ func (p *aggregatorParser) routeTrade(ci types.ClassifiedInstruction, program co
 // account (accounts[4]), what the user received. User is accounts[1]. fee_a
 // (the integrator's fee) is reported as Fee, Type "platform", Recipient the
 // receiving owner, when Titan itself (not a hop venue) made a transfer of
-// that amount in the input or output mint to another owner; fee_c (kept in Titan's intermediate account,
-// not a transfer) is not.
+// that amount in the input or output mint to another owner; fee_c (kept in
+// Titan's intermediate account, not a transfer) is not.
 type TitanParser struct {
 	aggregatorParser
 }
