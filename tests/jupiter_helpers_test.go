@@ -9,6 +9,8 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/mr-tron/base58"
+
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 )
 
 // Helpers for the jupiter WP tests. They decode the raw "json" fixture
@@ -180,4 +182,46 @@ func jupInstruction(t *testing.T, sig, program, name string) jupRawIx {
 	}
 	t.Fatalf("%.8s: no %s instruction", sig, name)
 	return jupRawIx{}
+}
+
+// jupRouteAuthorityPos is the position of user_transfer_authority, the owner
+// of the swapped tokens, in the accounts of each Jupiter v6 route instruction
+// (on-chain JUP6 IDL).
+var jupRouteAuthorityPos = map[string]int{
+	"route": 1, "route_with_token_ledger": 1, "exact_out_route": 1,
+	"shared_accounts_route": 2, "shared_accounts_route_with_token_ledger": 2, "shared_accounts_exact_out_route": 2,
+	"route_v2": 0, "exact_out_route_v2": 0,
+	"shared_accounts_route_v2": 1, "shared_accounts_exact_out_route_v2": 1,
+}
+
+// jupRouteAuthorities returns the user_transfer_authority of every Jupiter v6
+// route instruction of sig, in execution order.
+func jupRouteAuthorities(t *testing.T, sig string) []string {
+	t.Helper()
+	var out []string
+	for _, x := range jupRawInstructions(t, sig) {
+		if x.Program != jupV6ID || len(x.Data) < 8 {
+			continue
+		}
+		for name, pos := range jupRouteAuthorityPos {
+			if bytes.Equal(x.Data[:8], jupDisc("global:"+name)) && pos < len(x.Accounts) {
+				out = append(out, x.Accounts[pos])
+			}
+		}
+	}
+	return out
+}
+
+// jupUserValueDelta returns the balance change of owner in mint: its token
+// accounts, plus for SOL its lamports (the transaction fee added back when
+// owner pays it).
+func jupUserValueDelta(tx *adapter.SolanaTransaction, owner, mint string) *big.Int {
+	d := ownerTokenDelta(tx, owner, mint)
+	if mint == solMint {
+		d.Add(d, lamportDelta(tx, owner))
+		if rawAccountKeys(tx)[0] == owner {
+			d.Add(d, new(big.Int).SetUint64(tx.Meta.Fee))
+		}
+	}
+	return d
 }

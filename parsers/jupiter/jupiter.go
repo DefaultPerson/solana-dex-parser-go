@@ -59,16 +59,17 @@ func (p *JupiterParser) ProcessTrades() []types.TradeInfo {
 			}
 			event := layout.ToSwapEvent()
 			event.Idx = idx
-			trades = p.appendHopTrade(trades, event)
+			trades = p.appendHopTrade(trades, event, p.routeUser(ci))
 		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER.SWAPS_EVENT):
 			events, err := ParseJupiterSwapsEvent(data[16:])
 			if err != nil {
 				continue
 			}
 			hopIdx := p.hopIndexes(ci, events)
+			user := p.routeUser(ci)
 			for i, event := range events {
 				event.Idx = hopIdx[i]
-				trades = p.appendHopTrade(trades, event)
+				trades = p.appendHopTrade(trades, event, user)
 			}
 		case bytes.Equal(data[:16], constants.DISCRIMINATORS.JUPITER.FEE_EVENT):
 			event, err := ParseJupiterFeeEvent(data[16:])
@@ -91,14 +92,51 @@ type jupiterFeeEventAt struct {
 	event *JupiterFeeEvent
 }
 
-// appendHopTrade converts one hop event into a trade and appends it
-func (p *JupiterParser) appendHopTrade(trades []types.TradeInfo, event *JupiterSwapEvent) []types.TradeInfo {
+// appendHopTrade converts one hop event of the route of user into a trade and
+// appends it
+func (p *JupiterParser) appendHopTrade(trades []types.TradeInfo, event *JupiterSwapEvent, user string) []types.TradeInfo {
 	event.InputMintDecimals = p.Adapter.GetTokenDecimals(event.InputMint)
 	event.OutputMintDecimals = p.Adapter.GetTokenDecimals(event.OutputMint)
-	if trade := p.processSwapData([]*JupiterSwapEvent{event}); trade != nil {
+	if trade := p.processSwapData([]*JupiterSwapEvent{event}, user); trade != nil {
 		trades = append(trades, *trade)
 	}
 	return trades
+}
+
+// routeUser returns the user_transfer_authority of the Jupiter v6 route
+// instruction that emitted the event ci, i.e. the owner of the tokens the
+// route swaps. It differs from the fee payer on gasless (relayed) routes.
+// Its position depends on the route (on-chain JUP6 IDL): accounts[0] for
+// route_v2 and exact_out_route_v2, accounts[1] for shared_accounts_*_v2 and
+// the legacy route, route_with_token_ledger and exact_out_route, accounts[2]
+// for the legacy shared_accounts_* routes. It returns "" when the route
+// instruction is not found.
+func (p *JupiterParser) routeUser(ci types.ClassifiedInstruction) string {
+	route := findEmittingInstruction(p.Adapter, p.ClassifiedInstructions, ci)
+	if route == nil {
+		return ""
+	}
+	data := p.Adapter.GetInstructionData(route.Instruction)
+	if len(data) < 8 {
+		return ""
+	}
+	d := constants.DISCRIMINATORS.JUPITER
+	pos := -1
+	switch disc := data[:8]; {
+	case bytes.Equal(disc, d.ROUTE_V2), bytes.Equal(disc, d.EXACT_OUT_ROUTE_V2):
+		pos = 0
+	case bytes.Equal(disc, d.SHARED_ACCOUNTS_ROUTE_V2), bytes.Equal(disc, d.SHARED_ACCOUNTS_EXACT_OUT_ROUTE_V2),
+		bytes.Equal(disc, d.ROUTE), bytes.Equal(disc, d.ROUTE_WITH_TOKEN_LEDGER), bytes.Equal(disc, d.ROUTE_EXACT_OUT):
+		pos = 1
+	case bytes.Equal(disc, d.SHARE_ACCOUNTS_ROUTE), bytes.Equal(disc, d.SHARE_ACCOUNTS_ROUTE_WITH_TOKEN_LEDGER),
+		bytes.Equal(disc, d.SHARE_ACCOUNTS_EXACT_OUT_ROUTE):
+		pos = 2
+	}
+	accounts := p.Adapter.GetInstructionAccounts(route.Instruction)
+	if pos < 0 || pos >= len(accounts) {
+		return ""
+	}
+	return accounts[pos]
 }
 
 // hopIndexes returns an idx for every hop of a SwapsEvent: the idx of the
@@ -271,13 +309,14 @@ func outerIndexOf(idx string) int {
 	return n
 }
 
-// processSwapData processes swap events into trade info
-func (p *JupiterParser) processSwapData(events []*JupiterSwapEvent) *types.TradeInfo {
+// processSwapData processes swap events of the route of user into trade info
+func (p *JupiterParser) processSwapData(events []*JupiterSwapEvent, user string) *types.TradeInfo {
 	if len(events) == 0 {
 		return nil
 	}
 
 	info := p.buildIntermediateInfo(events)
+	info.User = user
 	return p.convertToTradeInfo(info)
 }
 
@@ -289,6 +328,7 @@ type JupiterSwapInfo struct {
 	TokenOut map[string]*big.Int
 	Decimals map[string]uint8
 	Idx      string
+	User     string // user_transfer_authority of the route, "" when unknown
 }
 
 // buildIntermediateInfo builds intermediate swap info from events
@@ -363,11 +403,16 @@ func (p *JupiterParser) convertToTradeInfo(info *JupiterSwapInfo) *types.TradeIn
 	inDecimals := info.Decimals[inMint]
 	outDecimals := info.Decimals[outMint]
 
-	signerIndex := 0
-	if p.containsDCAProgram() {
-		signerIndex = 2
+	// The user is the route's token owner. Without it, and for the keeper
+	// routes of DCA fills (reported by the DCA parser), the signer as before.
+	signer := info.User
+	if signer == "" || p.containsDCAProgram() {
+		signerIndex := 0
+		if p.containsDCAProgram() {
+			signerIndex = 2
+		}
+		signer = p.Adapter.GetAccountKey(signerIndex)
 	}
-	signer := p.Adapter.GetAccountKey(signerIndex)
 
 	inUIAmount := types.ConvertToUIAmount(inAmount, inDecimals)
 	outUIAmount := types.ConvertToUIAmount(outAmount, outDecimals)

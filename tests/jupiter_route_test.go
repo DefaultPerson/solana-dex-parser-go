@@ -84,6 +84,7 @@ func TestJupiterRouteV2SwapsEvent(t *testing.T) {
 		"1V8cnQVrAApj", "2jm6y95jSBHP", "2zRhMn1ADKEU", "34sGGDUK4A1x", "NeF1UiWXKUbu", // shared_accounts_route_v2
 		"2d32B4VReyxf", "3VdmWK159atQ", "4YEiZ5wX7cJj", "5pXteqTXGiFk", "3pnp1kpTvnZM", // route_v2
 		"5iaG7mCfMRQx", "3cbL8koKqz7s", "3Nb6n7meLAN6", "4wFykYbVDgXK", "5sV51YrwGRFw",
+		"3H4KQatUX3Qm", "mLQ2LNtkgyRo", "5WndHVfpJxhb", // route_v2, fee payer is not the user
 	}
 	kinds := make(map[string]int)
 	for _, pre := range prefixes {
@@ -104,7 +105,21 @@ func TestJupiterRouteV2SwapsEvent(t *testing.T) {
 		}
 		hops := jupDecodeSwapsEvent(payloads[0])
 		tx := loadFixture(t, sig)
-		jupCheckHops(t, sig, jupV6Trades(tx), hops, nil)
+		trades := jupV6Trades(tx)
+		jupCheckHops(t, sig, trades, hops, nil)
+
+		// The user is the route's user_transfer_authority, the owner of
+		// the swapped tokens, not the fee payer (gasless routes). R2-G1.
+		auths := jupRouteAuthorities(t, sig)
+		if len(auths) != 1 {
+			t.Fatalf("%.8s: %d route instructions", sig, len(auths))
+		}
+		user := auths[0]
+		for _, tr := range trades {
+			if tr.User != user {
+				t.Errorf("%.8s: hop %s user %s, route authority %s", sig, tr.Idx, tr.User, user)
+			}
+		}
 
 		// Through ParseAll the signer's own token legs match the route's
 		// first input and last output. Arbitrages are excluded: 5sV51Yrw
@@ -129,15 +144,26 @@ func TestJupiterRouteV2SwapsEvent(t *testing.T) {
 		if len(hops) > 1 && fmt.Sprint(agg.AMMs) != fmt.Sprint(amms) {
 			t.Errorf("%.8s: aggregate AMMs %v, hops %v", sig, agg.AMMs, amms)
 		}
-		signer := rawAccountKeys(tx)[0]
+		if agg.User != user {
+			t.Errorf("%.8s: aggregate user %s, route authority %s", sig, agg.User, user)
+		}
 		if agg.InputToken.Mint == agg.OutputToken.Mint {
 			continue
 		}
-		if d := ownerTokenDelta(tx, signer, agg.InputToken.Mint); d.Sign() < 0 && new(big.Int).Neg(d).String() != agg.InputToken.AmountRaw {
-			t.Errorf("%.8s: aggregate input %s %s, signer delta %s", sig, agg.InputToken.Mint, agg.InputToken.AmountRaw, d)
+		// The user paid at least the route input and received at most its
+		// output: gasless routes move relayer fees in separate transfers
+		// outside the route (3H4KQ, 2zRhMn, 1V8cnQVr, 5WndHVfp), mLQ2LN pays
+		// part of the output on to another wallet, and the destination of
+		// 3VdmWK belongs to another wallet (nothing received). A SOL output
+		// can exceed the route output by the rent refunded when the user's
+		// WSOL account is closed (4YEiZ5wX), so it has no upper bound.
+		paid := new(big.Int).Neg(jupUserValueDelta(tx, user, agg.InputToken.Mint))
+		if paid.Sign() <= 0 || paid.Cmp(bigStr(agg.InputToken.AmountRaw)) < 0 {
+			t.Errorf("%.8s: aggregate input %s %s, user paid %s", sig, agg.InputToken.Mint, agg.InputToken.AmountRaw, paid)
 		}
-		if d := ownerTokenDelta(tx, signer, agg.OutputToken.Mint); d.Sign() > 0 && d.String() != agg.OutputToken.AmountRaw {
-			t.Errorf("%.8s: aggregate output %s %s, signer delta %s", sig, agg.OutputToken.Mint, agg.OutputToken.AmountRaw, d)
+		got := jupUserValueDelta(tx, user, agg.OutputToken.Mint)
+		if (got.Sign() <= 0 && pre != "3VdmWK159atQ") || (agg.OutputToken.Mint != solMint && got.Cmp(bigStr(agg.OutputToken.AmountRaw)) > 0) {
+			t.Errorf("%.8s: aggregate output %s %s, user received %s", sig, agg.OutputToken.Mint, agg.OutputToken.AmountRaw, got)
 		}
 	}
 	if kinds["route_v2"] == 0 || kinds["shared_accounts_route_v2"] == 0 {
@@ -146,9 +172,14 @@ func TestJupiterRouteV2SwapsEvent(t *testing.T) {
 }
 
 // TestJupiterRouteV1SwapEvent: the legacy routes keep one trade per SwapEvent
-// hop, labelled with the hop AMM.
+// hop, labelled with the hop AMM. The user is the route's
+// user_transfer_authority (accounts[1] of route, accounts[2] of
+// shared_accounts_route), not the fee payer: 4KssE9yR, 4NqDXY6v and 4uwZQJDD
+// are routes paid by a relayer, 47CbsEer a shared_accounts_route called by
+// another program for a PDA. R2-G1.
 func TestJupiterRouteV1SwapEvent(t *testing.T) {
-	for _, pre := range []string{"5vjkR1vooYfu", "5XZyrL4mfCZd", "33Pob2j9ZRVJ", "2WMyNETEo1WA", "46ncRkgcUzF1"} {
+	for _, pre := range []string{"5vjkR1vooYfu", "5XZyrL4mfCZd", "33Pob2j9ZRVJ", "2WMyNETEo1WA", "46ncRkgcUzF1",
+		"4KssE9yRoqEY", "4NqDXY6v2a96", "4uwZQJDDipF1", "47CbsEeriB5J"} {
 		sig := jupFindSig(t, pre)
 		ixs, payloads := jupEvents(t, sig, jupV6ID, "SwapEvent")
 		if len(payloads) == 0 {
@@ -158,7 +189,17 @@ func TestJupiterRouteV1SwapEvent(t *testing.T) {
 		for _, p := range payloads {
 			hops = append(hops, jupDecodeSwapEvent(p))
 		}
-		jupCheckHops(t, sig, jupV6Trades(loadFixture(t, sig)), hops, ixs)
+		trades := jupV6Trades(loadFixture(t, sig))
+		jupCheckHops(t, sig, trades, hops, ixs)
+		auths := jupRouteAuthorities(t, sig)
+		if len(auths) != 1 {
+			t.Fatalf("%.8s: %d route instructions", sig, len(auths))
+		}
+		for _, tr := range trades {
+			if tr.User != auths[0] {
+				t.Errorf("%.8s: hop %s user %s, route authority %s", sig, tr.Idx, tr.User, auths[0])
+			}
+		}
 	}
 }
 
