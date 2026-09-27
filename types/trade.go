@@ -35,6 +35,19 @@ type TokenAmount struct {
 	Decimals uint8    `json:"decimals"` // Token decimals
 }
 
+// Copy returns a deep copy of the amount (including UIAmount), or nil for nil
+func (t *TokenAmount) Copy() *TokenAmount {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	if t.UIAmount != nil {
+		ui := *t.UIAmount
+		c.UIAmount = &ui
+	}
+	return &c
+}
+
 // TokenInfo contains token information including balances and accounts
 type TokenInfo struct {
 	Mint                  string       `json:"mint"`                            // Token mint address

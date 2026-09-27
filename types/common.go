@@ -40,6 +40,14 @@ type BalanceChange struct {
 	Change TokenAmount `json:"change"` // Net change in token balance (post - pre)
 }
 
+// Copy returns a deep copy of the balance change, or nil for nil
+func (b *BalanceChange) Copy() *BalanceChange {
+	if b == nil {
+		return nil
+	}
+	return &BalanceChange{Pre: *b.Pre.Copy(), Post: *b.Post.Copy(), Change: *b.Change.Copy()}
+}
+
 // TransactionStatus represents the transaction execution status
 type TransactionStatus string
 

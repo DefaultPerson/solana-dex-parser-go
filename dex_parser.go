@@ -550,11 +550,14 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	// Process fee
 	result.Fee = adapt.Fee()
 
-	// Process balance changes
-	result.SolBalanceChange = adapt.GetAccountSolBalanceChanges(false)[adapt.Signer()]
+	// Process balance changes (copies: the adapter's maps are cached and shared)
+	result.SolBalanceChange = adapt.GetAccountSolBalanceChanges(false)[adapt.Signer()].Copy()
 	tokenChanges := adapt.GetAccountTokenBalanceChanges(true)
 	if userTokenChanges, ok := tokenChanges[adapt.Signer()]; ok {
-		result.TokenBalanceChange = userTokenChanges
+		result.TokenBalanceChange = make(map[string]*types.BalanceChange, len(userTokenChanges))
+		for mint, change := range userTokenChanges {
+			result.TokenBalanceChange[mint] = change.Copy()
+		}
 	}
 
 	// A failed transaction reverted everything its instructions did

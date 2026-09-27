@@ -468,13 +468,13 @@ func (tu *TransactionUtils) AttachTokenTransferInfo(trade *types.TradeInfo, tran
 		trade.InputToken.Source = inputTransfer.Info.Source
 		trade.InputToken.Destination = inputTransfer.Info.Destination
 		trade.InputToken.DestinationOwner = inputTransfer.Info.DestinationOwner
-		trade.InputToken.DestinationBalance = inputTransfer.Info.DestinationBalance
-		trade.InputToken.DestinationPreBalance = inputTransfer.Info.DestinationPreBalance
-		trade.InputToken.SourceBalance = inputTransfer.Info.SourceBalance
-		trade.InputToken.SourcePreBalance = inputTransfer.Info.SourcePreBalance
+		trade.InputToken.DestinationBalance = inputTransfer.Info.DestinationBalance.Copy()
+		trade.InputToken.DestinationPreBalance = inputTransfer.Info.DestinationPreBalance.Copy()
+		trade.InputToken.SourceBalance = inputTransfer.Info.SourceBalance.Copy()
+		trade.InputToken.SourcePreBalance = inputTransfer.Info.SourcePreBalance.Copy()
 	} else if inputAmt != nil {
-		trade.InputToken.SourceBalance = &inputAmt.Post
-		trade.InputToken.SourcePreBalance = &inputAmt.Pre
+		trade.InputToken.SourceBalance = inputAmt.Post.Copy()
+		trade.InputToken.SourcePreBalance = inputAmt.Pre.Copy()
 	}
 
 	if outputTransfer != nil {
@@ -482,13 +482,13 @@ func (tu *TransactionUtils) AttachTokenTransferInfo(trade *types.TradeInfo, tran
 		trade.OutputToken.Source = outputTransfer.Info.Source
 		trade.OutputToken.Destination = outputTransfer.Info.Destination
 		trade.OutputToken.DestinationOwner = outputTransfer.Info.DestinationOwner
-		trade.OutputToken.DestinationBalance = outputTransfer.Info.DestinationBalance
-		trade.OutputToken.DestinationPreBalance = outputTransfer.Info.DestinationPreBalance
-		trade.OutputToken.SourceBalance = outputTransfer.Info.SourceBalance
-		trade.OutputToken.SourcePreBalance = outputTransfer.Info.SourcePreBalance
+		trade.OutputToken.DestinationBalance = outputTransfer.Info.DestinationBalance.Copy()
+		trade.OutputToken.DestinationPreBalance = outputTransfer.Info.DestinationPreBalance.Copy()
+		trade.OutputToken.SourceBalance = outputTransfer.Info.SourceBalance.Copy()
+		trade.OutputToken.SourcePreBalance = outputTransfer.Info.SourcePreBalance.Copy()
 	} else if outputAmt != nil {
-		trade.OutputToken.DestinationBalance = &outputAmt.Post
-		trade.OutputToken.DestinationPreBalance = &outputAmt.Pre
+		trade.OutputToken.DestinationBalance = outputAmt.Post.Copy()
+		trade.OutputToken.DestinationPreBalance = outputAmt.Pre.Copy()
 	}
 
 	trade.Signer = tu.adapter.Signers()
