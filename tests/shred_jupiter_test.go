@@ -11,12 +11,13 @@ import (
 )
 
 // Jupiter v6 shred decoding. Expected amounts are read from the instruction
-// bytes with the on-chain JUP6 IDL layouts: v1 routes end with (amount u64,
-// amount u64, slippage_bps u16, platform_fee_bps u8), token-ledger routes
-// with (quoted_out u64, slippage_bps u16, platform_fee_bps u8), v2 routes
-// start with (amount u64, amount u64, slippage_bps u16, platform_fee_bps u16,
-// positive_slippage_bps u16). shred-1, shred-9, shred-10, shred-11, shred-22,
-// shred-18, shred-30.
+// bytes with the on-chain JUP6 IDL layouts: v1 routes put (amount u64,
+// amount u64, slippage_bps u16, platform_fee_bps u8) after the route plan,
+// token-ledger routes (quoted_out u64, slippage_bps u16, platform_fee_bps
+// u8); unless a client appends bytes (see TestShredJupiterRouteV1TrailingBytes)
+// they end the data. v2 routes start with (amount u64, amount u64,
+// slippage_bps u16, platform_fee_bps u16, positive_slippage_bps u16).
+// shred-1, shred-9, shred-10, shred-11, shred-22, shred-18, shred-30.
 
 const (
 	// shared_accounts_route (v1) at outer 3: token -> SOL
@@ -106,6 +107,133 @@ func TestShredJupiterRouteV1Tail(t *testing.T) {
 	}
 	if got := ownerTokenDelta(tx, ix.accounts[2], ix.accounts[7]); got.Cmp(new(big.Int).Neg(new(big.Int).SetUint64(in))) != 0 {
 		t.Errorf("user token delta %s, want -in_amount %d", got, in)
+	}
+}
+
+// jupiterTrailingByteRoutes are the v1 route instructions of the fixtures
+// whose data carries one byte after the arguments (arbitrage bots using
+// DynamicV1 route steps; Anchor ignores the extra byte). Values from an
+// independent forward Borsh decode of the data with the on-chain JUP6 IDL.
+// 2nGCisM2, 3B6obLz1, 3TQUG4mM, 3iqy9mXd and 63YrUjW9 are failed arbitrage
+// attempts (Jupiter error 6001, slippage exceeded) and are parsed with
+// IncludeFailedTxs for their arguments.
+var jupiterTrailingByteRoutes = []struct {
+	sig, idx  string
+	in, quote uint64
+	slippage  uint16
+}{
+	{"22VFxreHs9cEvHoYiooU62iLsK76vJo6E1WGXsjFRcM7PwCrUUhNiBhvUMztPCdxCgyfcDCB79TUaRDEC2VPLYAF", "2", 248815402, 248815402, 0},
+	{"2nGCisM2rPEsCiYSJf9nF3gTT2TAPwE8HnTZdF5hTTU4HdQPgAga5rbWp15ex2gjhGHrUh5WQoFEhtS7e6tMzDaP", "2", 1981207406, 1981207406, 0},
+	{"3B6obLz1zWtKuaWXutuDM5JrQWmBaNRRPxWmKjgne3utvkzjeUNJiq8bBxdDrbSTbwQeEdoAwqitGTSx3K4Bv65W", "2", 1999106820, 1999106820, 0},
+	{"3PdYUcfbEcdMk22ECoy6Rm9PBVXWU7TUDrXV86ePbuW55ucuoYx15Qd42S4Ja37vAWC3KVQeP9C62kKKSA1PXqeK", "2", 249994350, 249994350, 0},
+	{"3TQUG4mMQHBqr4PwkLTJHCgjF8YK6zKAYPqucoxD3x3YSp3wzdvoQwj3oQNLS9wXf2111W4khBTtrCk77UJTeEQp", "2", 399946582, 399946582, 0},
+	{"3iqy9mXdNDq5h25yu4YhV4CXabDMxXjoDT77XvZd1YH8o5M7HjuoRqxPQ3DqE8rpVeFVVd4Mp1brcqA76dV1nNmU", "2", 1981104831, 1981104831, 0},
+	{"3pwNydeB4tYLfKKSHhUuXuc4bCVRg3yprB9Rvp2r76nVYmCE35iTZfz2MNr7sc7K6PEEKjmpd33RedtDr3EpyW5u", "2", 399948180, 399948180, 0},
+	{"42R1nX4F9ru6RqcV24FN64ABpgX4g6iFRdD6aQ1eoaHcQhLLsx26rJGhS1RYX6XxnpAc1meHXmiXj3pk5REgLbaz", "2", 249992150, 249992150, 0},
+	{"4icGS61HbeVVTNfNgHJbSsHfMawwm7XwZTw3WcVzNfpyQU4dR6YuGnS1TcySPRxEb9zYUcpX2tbZpzzxqy7648Vk", "2", 248824789, 248824789, 0},
+	{"4ukv6RptTLbnNUUEyiURNGLnvMYJJr5a176N6Ls3vD5ppDx44GmjMW8MKogowNeKr93htRdeuwnLYM2nhVAo69tF", "2", 248824631, 248824631, 0},
+	{"58sMwRAPd3P5Rx1kWmjG5Qx4JPUUebgXzH49HvH8Voex6F3dTL6d1kQ79hYNGw3DDBPjc8G6DjqBZLAQFrJHqHV9", "2", 498854111, 498854111, 0},
+	{"5ZNgvprhpDXXDkgN1og1b5RfXUx7KbNbdxQwGt65dMNrPry9gC5Z5J2We1BbwwEEFj3xiAyyCKjz4kyaxrMo1NJU", "2", 399743501, 399743501, 0},
+	{"5aYQQooT6XAxdoBGVkH9BQqYkFaJNdnRGhuGHG4jLYBpHC5PoPffpepyCZaKQGpuFdg76AssrTwLnEkW7rUnL48V", "2", 399902365, 399902365, 0},
+	{"5bVS61KWqTJFGE83tEV8qcYvD2VpGdnYm4X8nf29jGL8oCVzPmBX31DpiHgxMdKyAYGC7pqabrW21Wqvys89w6CE", "2", 249998500, 249998500, 0},
+	{"5taLhKa6CAsbst2Q8iGEhTVRmyXp4oMKSHbiGfL8RVeJrKzUzAnvtD1kT8SEHuTvdAWp14cTGLVhEHJoSSe94gju", "2", 399692248, 399692248, 0},
+	{"63YrUjW9noejDkUUi9URvhpr8XiHCtJmteb6AHgkrAUPpMLCZtJupoAfVmJ7d9g8AtbEGH9RfG6fnWXHET11gNcG", "2", 1981151337, 1981151337, 0},
+	{"VGufZu2U81ohKNt1bYZN6Yvf5nTwK3yCspJBxay99iHED9kxNShntatU5KoKTNzGj1iEwKtciAyUdPGzGFoR4zL", "2", 250001650, 250001650, 0},
+	{"YQSsXmPHCmpNYuwT3J4gPnj2pLdG4phTCYUCBsSbN7MvByAPhqs6Pma5MJkHPWZzEW2dpG4DdK2UWaEzc1ZxCjW", "2", 248827292, 248827292, 0},
+	{"jyt8hjNDDvKtbSDJ8ETzvSRb4AgPKZ9Nx4Dg7y7Mtbhs8SB73CwSqJCEFLuqAojCTSrCd58QHJxTVK8v8N1LgrL", "2", 248823466, 248823466, 0},
+}
+
+// firstTokenTransferFrom returns the amount of the first SPL Token transfer
+// (Transfer or TransferChecked) out of source inside outer instruction outer
+func firstTokenTransferFrom(t *testing.T, tx *adapterTx, outer int, source string) (uint64, bool) {
+	t.Helper()
+	for _, ix := range fixtureIxs(t, tx) {
+		if ix.outer != outer || ix.inner < 0 || len(ix.data) < 9 || len(ix.accounts) == 0 || ix.accounts[0] != source {
+			continue
+		}
+		if ix.programId != constants.TOKEN_PROGRAM_ID && ix.programId != constants.TOKEN_2022_PROGRAM_ID {
+			continue
+		}
+		if ix.data[0] == 3 || ix.data[0] == 12 {
+			return le64At(ix.data, 1), true
+		}
+	}
+	return 0, false
+}
+
+// TestShredJupiterRouteV1TrailingBytes: the v1 arguments were read from the
+// last 19 bytes of the data, so a route with a byte after its arguments gave
+// garbage (22VFxreH: in 3026418949593945247, out 971935 instead of
+// 248815402/248815402). The decoder now walks the route plan. shred-1.
+func TestShredJupiterRouteV1TrailingBytes(t *testing.T) {
+	for _, c := range jupiterTrailingByteRoutes {
+		t.Run(c.sig[:12], func(t *testing.T) {
+			tx := loadFixture(t, c.sig)
+			ix := findIx(t, tx, constants.DEX_PROGRAMS.JUPITER.ID, constants.DISCRIMINATORS.JUPITER.ROUTE)
+			if utils.FormatIdx(ix.outer, -1) != c.idx {
+				t.Fatalf("route at %d, want %s", ix.outer, c.idx)
+			}
+			// The arguments end one byte before the end of the data
+			n := len(ix.data)
+			if le64At(ix.data, n-20) != c.in || le64At(ix.data, n-12) != c.quote || le16At(ix.data, n-4) != c.slippage {
+				t.Fatalf("fixture data does not hold the arguments at len-20")
+			}
+			// Execution: the source token account sent in_amount
+			if sent, ok := firstTokenTransferFrom(t, tx, ix.outer, ix.accounts[2]); !ok || sent != c.in {
+				t.Errorf("source account sent %d (found %v), want in_amount %d", sent, ok, c.in)
+			}
+
+			res := parseShred(t, tx, &types.ParseConfig{IncludeFailedTxs: true})
+			_, trade := jupTrade(t, res, c.idx)
+			if trade.InputToken.AmountRaw != u64str(c.in) || trade.OutputToken.AmountRaw != u64str(c.quote) || *trade.SlippageBps != int(c.slippage) {
+				t.Errorf("amounts = in %s out %s slippage %d, want %d %d %d", trade.InputToken.AmountRaw, trade.OutputToken.AmountRaw, *trade.SlippageBps, c.in, c.quote, c.slippage)
+			}
+			ev := res.Instructions[constants.DEX_PROGRAMS.JUPITER.Name]
+			if len(ev) != 1 {
+				t.Fatalf("%d Jupiter events, want 1", len(ev))
+			}
+			data := ev[0].(*jupiter.JupiterShredInstruction).Data.(*jupiter.JupiterRouteData)
+			if data.InputAmount != c.in || data.OutputAmount != c.quote || data.SlippageBps != c.slippage || data.PlatformFeeBps != 0 {
+				t.Errorf("legacy event = %+v", data)
+			}
+		})
+	}
+}
+
+// TestShredJupiterUnknownSwapVariant: a route step with a Swap variant newer
+// than the decoder's table falls back to the argument tail; a malformed
+// route plan gives no event. Synthetic: the Swap tag and an Option tag of
+// real routes are overwritten, as no real transaction has them. shred-1.
+func TestShredJupiterUnknownSwapVariant(t *testing.T) {
+	// 5jNLWdMv (route, no trailing bytes): first Swap tag at data[12]
+	tx := loadFixture(t, sigJupRouteV1)
+	ix := findIx(t, tx, constants.DEX_PROGRAMS.JUPITER.ID, constants.DISCRIMINATORS.JUPITER.ROUTE)
+	data := append([]byte{}, ix.data...)
+	data[12] = 0xff
+	setIxData(ix, data)
+	res := parseShred(t, tx, nil)
+	_, trade := jupTrade(t, res, "4")
+	if trade.InputToken.AmountRaw != "13358" || trade.OutputToken.AmountRaw != "65409684" || *trade.SlippageBps != 800 {
+		t.Errorf("unknown variant fallback = %s %s %d, want 13358 65409684 800", trade.InputToken.AmountRaw, trade.OutputToken.AmountRaw, *trade.SlippageBps)
+	}
+
+	// 22VFxreH: the first step is DynamicV1 (tag 111) with one BisonFiV2
+	// candidate; its best_position Option tag is at data[19]
+	c := jupiterTrailingByteRoutes[0]
+	tx = loadFixture(t, c.sig)
+	ix = findIx(t, tx, constants.DEX_PROGRAMS.JUPITER.ID, constants.DISCRIMINATORS.JUPITER.ROUTE)
+	if ix.data[12] != 111 || ix.data[17] != 7 || ix.data[19] != 1 {
+		t.Fatalf("unexpected route plan head %x", ix.data[12:20])
+	}
+	data = append([]byte{}, ix.data...)
+	data[19] = 2
+	setIxData(ix, data)
+	res = parseShred(t, tx, nil)
+	if got := typedAt(res, constants.DEX_PROGRAMS.JUPITER.ID, c.idx); len(got) != 0 {
+		t.Errorf("route with an invalid Option tag decoded: %+v", got[0].Trade)
+	}
+	if ev := res.Instructions[constants.DEX_PROGRAMS.JUPITER.Name]; len(ev) != 0 {
+		t.Errorf("legacy events for an invalid route plan: %d", len(ev))
 	}
 }
 
