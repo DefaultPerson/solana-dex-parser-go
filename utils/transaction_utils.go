@@ -401,9 +401,39 @@ func (tu *TransactionUtils) GetLPTransfers(transfers []types.TransferData) []typ
 	return tokens
 }
 
+// instructionGroup returns the outer index and the inner index range of the
+// CPI group of the instruction at idx (see CPIGroup); ok is false when idx
+// names no instruction or the group is empty
+func (tu *TransactionUtils) instructionGroup(idx string) (outer, first, last int, ok bool) {
+	outer, inner := SplitIdx(idx)
+	if outer < 0 {
+		return 0, 0, 0, false
+	}
+	var ix interface{}
+	if inner < 0 {
+		ix = tu.adapter.InstructionAt(outer)
+	} else {
+		ix = tu.adapter.GetInnerInstruction(outer, inner)
+	}
+	if ix == nil {
+		return 0, 0, 0, false
+	}
+	first, last = CPIGroup(tu.adapter, types.ClassifiedInstruction{
+		ProgramId:  tu.adapter.GetInstructionProgramId(ix),
+		OuterIndex: outer,
+		InnerIndex: inner,
+	})
+	return outer, first, last, last >= first
+}
+
 // AttachTokenTransferInfo attaches token transfer info to trade. The input and
 // output transfers are the first transfers, in execution order, whose mint and
-// amount match the trade.
+// amount match the trade: first among the transfers made inside the trade's
+// own instruction (the CPI group of the instruction at trade.Idx, see
+// CPIGroup), then in the whole transaction. In a route, the same amount also
+// moves in the previous hop (its output) or the next one (a Token-2022 net
+// amount), so the whole-transaction search alone can take another hop's
+// transfer.
 func (tu *TransactionUtils) AttachTokenTransferInfo(trade *types.TradeInfo, transferActions map[string][]types.TransferData) *types.TradeInfo {
 	if trade == nil {
 		return nil
@@ -411,17 +441,31 @@ func (tu *TransactionUtils) AttachTokenTransferInfo(trade *types.TradeInfo, tran
 
 	// Find input and output transfers
 	var inputTransfer, outputTransfer *types.TransferData
-	for _, key := range SortedTransferKeys(transferActions) {
-		transfers := transferActions[key]
-		for i := range transfers {
-			t := &transfers[i]
-			if inputTransfer == nil && t.Info.Mint == trade.InputToken.Mint && t.Info.TokenAmount.Amount == trade.InputToken.AmountRaw {
-				inputTransfer = t
-			}
-			if outputTransfer == nil && t.Info.Mint == trade.OutputToken.Mint && t.Info.TokenAmount.Amount == trade.OutputToken.AmountRaw {
-				outputTransfer = t
+	find := func(inGroup func(t *types.TransferData) bool) {
+		for _, key := range SortedTransferKeys(transferActions) {
+			transfers := transferActions[key]
+			for i := range transfers {
+				t := &transfers[i]
+				if !inGroup(t) {
+					continue
+				}
+				if inputTransfer == nil && t.Info.Mint == trade.InputToken.Mint && t.Info.TokenAmount.Amount == trade.InputToken.AmountRaw {
+					inputTransfer = t
+				}
+				if outputTransfer == nil && t.Info.Mint == trade.OutputToken.Mint && t.Info.TokenAmount.Amount == trade.OutputToken.AmountRaw {
+					outputTransfer = t
+				}
 			}
 		}
+	}
+	if outer, first, last, ok := tu.instructionGroup(trade.Idx); ok {
+		find(func(t *types.TransferData) bool {
+			o, i := SplitIdx(t.Idx)
+			return o == outer && i >= first && i <= last
+		})
+	}
+	if inputTransfer == nil || outputTransfer == nil {
+		find(func(*types.TransferData) bool { return true })
 	}
 
 	solChanges := tu.adapter.GetAccountSolBalanceChanges(false)
