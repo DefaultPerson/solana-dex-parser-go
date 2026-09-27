@@ -209,7 +209,7 @@ type TransactionAdapter struct {
 	preTokenByKey  map[string]*types.TokenAmount
 
 	// caches
-	parsedCache      map[uintptr]*UnifiedInstruction
+	parsedCache      map[uintptr]parsedEntry
 	dataCache        map[string][]byte
 	solChanges       [2]map[string]*types.BalanceChange
 	tokenChanges     [2]map[string]map[string]*types.BalanceChange
@@ -228,7 +228,7 @@ func NewTransactionAdapter(tx *SolanaTransaction, config *types.ParseConfig) *Tr
 		SPLTokenMap:          make(map[string]types.TokenInfo, 32),
 		SPLDecimalsMap:       make(map[string]uint8, 16),
 		guessedTokenAccounts: make(map[string]bool),
-		parsedCache:          make(map[uintptr]*UnifiedInstruction, 32),
+		parsedCache:          make(map[uintptr]parsedEntry, 32),
 		dataCache:            make(map[string][]byte, 16),
 	}
 	adapter.instructions = adapter.buildInstructions()
@@ -615,15 +615,23 @@ func (a *TransactionAdapter) GetInstruction(instruction interface{}) *UnifiedIns
 			return nil
 		}
 		key := reflect.ValueOf(ix).Pointer()
-		if ui, ok := a.parsedCache[key]; ok {
-			return ui
+		if e, ok := a.parsedCache[key]; ok {
+			return e.ui
 		}
 		ui := a.getParsedInstructionFromMap(ix)
-		a.parsedCache[key] = ui
+		a.parsedCache[key] = parsedEntry{ix: ix, ui: ui}
 		return ui
 	default:
 		return nil
 	}
+}
+
+// parsedEntry caches the decoded form of an instruction map. It keeps a
+// reference to the map so that the map's address, used as the cache key,
+// cannot be reused by another map while the adapter is alive.
+type parsedEntry struct {
+	ix map[string]interface{}
+	ui *UnifiedInstruction
 }
 
 // UnifiedInstruction represents a unified instruction format
