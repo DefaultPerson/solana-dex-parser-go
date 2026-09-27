@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/propamm"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
+	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
 // Titan and OKX DEX Router V2 routes: Trades stay the venues' hop trades,
@@ -180,3 +182,61 @@ func TestIntegRouteProgramSkipsUnknownDEX(t *testing.T) {
 type noTrades struct{}
 
 func (noTrades) ProcessTrades() []types.TradeInfo { return nil }
+
+// routeTrades returns the route trades of program in the fixture sig
+func routeTrades(t *testing.T, sig string, program constants.DexProgram) []types.TradeInfo {
+	t.Helper()
+	ctx := newParseContext(loadFixture(t, sig), nil)
+	instructions := ctx.Classifier.GetInstructions(program.ID)
+	switch program.ID {
+	case constants.DEX_PROGRAMS.TITAN.ID:
+		return propamm.NewTitanParser(ctx.Adapter, ctx.DexInfo, ctx.TransferActions, instructions).ProcessTrades()
+	case constants.DEX_PROGRAMS.OKX_DEX_V2.ID:
+		return propamm.NewOKXV2Parser(ctx.Adapter, ctx.DexInfo, ctx.TransferActions, instructions).ProcessTrades()
+	}
+	t.Fatalf("no route parser for %s", program.Name)
+	return nil
+}
+
+// A route trade lists its fee in Fee and in Fees. When the aggregate is
+// built from more than one trade (two routes, or a route and a trade outside
+// it), each fee is listed once. Before, utils.FeeComponents dropped only a
+// Fee that was the untyped total of Fees, so every route listed its typed
+// fee twice. The route trades are real (OKX input commission 1275120 USDC
+// in 262n1pEg..., Titan fee_a 2495 USDC in 24FsRUqw...); their combination
+// is not: no fixture has two routes or a route next to another trade.
+func TestIntegRouteFeeListedOnce(t *testing.T) {
+	okx := routeTrades(t, "262n1pEgfLq9G87vRNBsb5xKdmADSQxFGWXXb2qXkxqtsPViu5ifNWC2UsGCFpo1aXaagpsetjxNZKoR2mG6D3xw", constants.DEX_PROGRAMS.OKX_DEX_V2)
+	titan := routeTrades(t, "24FsRUqwK7CSax3qqwhXwgUzQvZ2MZ7MonsYm1RLx92S9pisUTNT6SUEEuuNoqTriZQCuao1Lhgso1bz4wcSQAWb", constants.DEX_PROGRAMS.TITAN)
+	if len(okx) != 1 || len(titan) != 1 || okx[0].Fee == nil || titan[0].Fee == nil {
+		t.Fatalf("want one route trade with a fee each: OKX %+v, Titan %+v", okx, titan)
+	}
+	for _, route := range []types.TradeInfo{okx[0], titan[0]} {
+		if !reflect.DeepEqual(route.Fees, []types.FeeInfo{*route.Fee}) {
+			t.Fatalf("%s route: Fees %+v, want its Fee %+v", route.Route, route.Fees, *route.Fee)
+		}
+		if got := utils.FeeComponents(&route); !reflect.DeepEqual(got, []types.FeeInfo{*route.Fee}) {
+			t.Errorf("%s route: fee components %+v, want its fee once", route.Route, got)
+		}
+	}
+
+	second := titan[0]
+	second.Idx = "9" // after the OKX route
+	outside := okx[0]
+	outside.Idx, outside.Fee, outside.Fees = "9", nil, nil
+	for name, trades := range map[string][]types.TradeInfo{
+		"two routes":        {okx[0], second},
+		"route and a trade": {okx[0], outside},
+	} {
+		agg := utils.GetFinalSwap(trades, nil)
+		var want []types.FeeInfo
+		for _, tr := range trades {
+			if tr.Fee != nil {
+				want = append(want, *tr.Fee)
+			}
+		}
+		if !reflect.DeepEqual(agg.Fees, want) {
+			t.Errorf("%s: aggregate Fees %+v, want %+v", name, agg.Fees, want)
+		}
+	}
+}
