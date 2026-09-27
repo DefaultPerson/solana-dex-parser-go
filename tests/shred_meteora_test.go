@@ -46,10 +46,13 @@ func TestShredDBCSwapDirection(t *testing.T) {
 		sig      string
 		disc     []byte
 		wantType types.TradeType
+		// wantInKind: amount_0 is the exact input, except in partial-fill
+		// mode where the program may take less (shred-4 of the final review)
+		wantInKind types.ShredAmountKind
 	}{
-		{sigDBCSwap2Sell, constants.DISCRIMINATORS.METEORA_DBC.SWAP_V2, types.TradeTypeSell},
-		{sigDBCSwapBuy, constants.DISCRIMINATORS.METEORA_DBC.SWAP, types.TradeTypeBuy},
-		{sigDBCSwap2PartialFill, constants.DISCRIMINATORS.METEORA_DBC.SWAP_V2, types.TradeTypeSell},
+		{sigDBCSwap2Sell, constants.DISCRIMINATORS.METEORA_DBC.SWAP_V2, types.TradeTypeSell, types.ShredAmountExact},
+		{sigDBCSwapBuy, constants.DISCRIMINATORS.METEORA_DBC.SWAP, types.TradeTypeBuy, types.ShredAmountExact},
+		{sigDBCSwap2PartialFill, constants.DISCRIMINATORS.METEORA_DBC.SWAP_V2, types.TradeTypeSell, types.ShredAmountMax},
 	} {
 		tx := loadFixture(t, c.sig)
 		ix := findIx(t, tx, constants.DEX_PROGRAMS.METEORA_DBC.ID, c.disc)
@@ -69,7 +72,7 @@ func TestShredDBCSwapDirection(t *testing.T) {
 		if m.Type != c.wantType || m.InputToken.Mint != inMint || m.OutputToken.Mint != outMint || m.User != payer {
 			t.Errorf("%s: %s %s -> %s by %s, want %s %s -> %s by %s", c.sig[:8], m.Type, m.InputToken.Mint, m.OutputToken.Mint, m.User, c.wantType, inMint, outMint, payer)
 		}
-		if m.InputToken.AmountRaw != u64str(amountIn) || m.OutputToken.AmountRaw != u64str(minOut) || ins.InputAmountKind != types.ShredAmountExact || ins.OutputAmountKind != types.ShredAmountMin {
+		if m.InputToken.AmountRaw != u64str(amountIn) || m.OutputToken.AmountRaw != u64str(minOut) || ins.InputAmountKind != c.wantInKind || ins.OutputAmountKind != types.ShredAmountMin {
 			t.Errorf("%s: amounts %s/%s kinds %s/%s", c.sig[:8], m.InputToken.AmountRaw, m.OutputToken.AmountRaw, ins.InputAmountKind, ins.OutputAmountKind)
 		}
 		if m.InputToken.Decimals != mintDecimals(tx, inMint) || m.OutputToken.Decimals != mintDecimals(tx, outMint) {

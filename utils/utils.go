@@ -73,6 +73,34 @@ func GetShredTradeType(inMint, outMint string) types.TradeType {
 	return GetTradeType(inMint, outMint)
 }
 
+// GetPoolSideTradeType returns the type of a trade in a pool with a base and
+// a quote mint, given the instruction's side (buyBase: the user gets the base
+// token). It is GetTradeType when either mint is SOL or a stablecoin, so a
+// buy in a pool whose base is WSOL (quoted in a token) is a SELL, else (a
+// pool quoted in another token) the side. Before execution a mint may be
+// unknown (""): the known one still decides when it is WSOL, or when it is a
+// base that is neither SOL nor a stablecoin; otherwise the result is SWAP.
+func GetPoolSideTradeType(buyBase bool, baseMint, quoteMint string) types.TradeType {
+	inMint, outMint := quoteMint, baseMint
+	side := types.TradeTypeBuy
+	if !buyBase {
+		inMint, outMint = baseMint, quoteMint
+		side = types.TradeTypeSell
+	}
+	switch {
+	case baseMint != "" && quoteMint != "":
+		if constants.IsQuoteToken(baseMint) || constants.IsQuoteToken(quoteMint) {
+			return GetTradeType(inMint, outMint)
+		}
+		return side
+	case baseMint == constants.TOKENS.SOL || quoteMint == constants.TOKENS.SOL:
+		return GetTradeType(inMint, outMint)
+	case baseMint != "" && !constants.IsQuoteToken(baseMint):
+		return side
+	}
+	return types.TradeTypeSwap
+}
+
 // GetAMMs extracts AMM names from transfer action keys
 func GetAMMs(transferActionKeys []string) []string {
 	var result []string

@@ -147,8 +147,10 @@ type PhotonInstruction struct {
 }
 
 // PhotonSwapData contains Photon PumpSwap swap (pump_amm_swap) instruction
-// data. TradeType is BUY (quote -> base), SELL (base -> quote) or SWAP when
-// the direction cannot be determined.
+// data. TradeType is the pool side: BUY (quote -> base), SELL (base -> quote)
+// or SWAP when the direction cannot be determined. The typed trade's Type is
+// relative to SOL or a stablecoin instead (utils.GetPoolSideTradeType), which
+// differs in pools whose base is WSOL.
 type PhotonSwapData struct {
 	Pool               string `json:"pool"`
 	User               string `json:"user"`
@@ -305,13 +307,17 @@ func (p *PhotonShredParser) swapDirection(swap *PhotonSwapData) types.TradeType 
 }
 
 func (p *PhotonShredParser) swapInstruction(swap *PhotonSwapData) *types.ParsedShredInstruction {
+	// swap.TradeType is the pool side (BUY: quote in); the trade's type is
+	// relative to SOL or a stablecoin, which differs in pools whose base is WSOL
 	var inputMint, outputMint string
 	tradeType := types.TradeType(swap.TradeType)
 	switch tradeType {
 	case types.TradeTypeSell:
 		inputMint, outputMint = swap.BaseMint, swap.QuoteMint
+		tradeType = utils.GetPoolSideTradeType(false, swap.BaseMint, swap.QuoteMint)
 	case types.TradeTypeBuy:
 		inputMint, outputMint = swap.QuoteMint, swap.BaseMint
+		tradeType = utils.GetPoolSideTradeType(true, swap.BaseMint, swap.QuoteMint)
 	}
 
 	return &types.ParsedShredInstruction{

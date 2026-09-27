@@ -188,7 +188,8 @@ type ParseShredResult struct {
 	Signature string `json:"signature"`
 
 	// Instructions contains parsed instructions grouped by AMM/DEX name
-	// (legacy format). Programs without decoded instructions are omitted.
+	// (legacy format), each program's in execution order (numeric idx).
+	// Programs without decoded instructions are omitted.
 	// Like ParsedInstructions, each event sets UnresolvedAccounts when its
 	// instruction uses an unresolved lookup table account.
 	Instructions map[string][]interface{} `json:"instructions"`

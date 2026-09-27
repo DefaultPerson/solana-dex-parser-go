@@ -146,10 +146,13 @@ type DBCShredInstruction struct {
 }
 
 // DBCSwapData contains Meteora DBC swap instruction data. The amounts are
-// instruction arguments: in exact-in and partial-fill mode (swap, and swap2
-// with SwapMode 0 or 1) InputAmount is the input and OutputAmount the minimum
-// output; in exact-out mode (swap2 with SwapMode 2, ExactOut) OutputAmount is
-// the exact output and InputAmount the maximum input.
+// instruction arguments: in exact-in mode (swap, and swap2 with SwapMode 0)
+// InputAmount is the input and OutputAmount the minimum output; in
+// partial-fill mode (SwapMode 1) InputAmount is the maximum input (the
+// program takes less when the pool reaches its migration threshold) and
+// OutputAmount the minimum output; in exact-out mode (swap2 with SwapMode 2,
+// ExactOut) OutputAmount is the exact output and InputAmount the maximum
+// input.
 //
 // TradeType is BUY (quote -> base), SELL (base -> quote) or SWAP when the
 // direction cannot be determined; the input and output mints are then empty.
@@ -281,9 +284,16 @@ func (p *DBCShredParser) swapDirection(swap *DBCSwapData) types.TradeType {
 	return types.TradeTypeSwap
 }
 
+// dbcSwapAmountKinds returns the kinds of a swap's input and output amounts.
+// In partial-fill mode the program may take less than amount_0 when the pool
+// reaches its migration threshold (EvtSwap2's amount_left), so the input is a
+// maximum.
 func dbcSwapAmountKinds(swap *DBCSwapData) (types.ShredAmountKind, types.ShredAmountKind) {
-	if swap.ExactOut {
+	switch {
+	case swap.ExactOut:
 		return types.ShredAmountMax, types.ShredAmountExact
+	case swap.SwapMode == dbcSwapModePartialFill:
+		return types.ShredAmountMax, types.ShredAmountMin
 	}
 	return types.ShredAmountExact, types.ShredAmountMin
 }

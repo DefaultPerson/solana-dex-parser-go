@@ -93,6 +93,18 @@ func (x *ProgramShredParser) ProcessAll() ([]interface{}, []types.ParsedShredIns
 		}
 		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 
+		// A plain Token transfer names no mint: without the account's mint
+		// in the transaction the adapter's SOL default is a guess, so the
+		// mint is unknown ("", decimals 0)
+		if transfer.Type == "transfer" && x.programID != constants.SYSTEM_PROGRAM_ID && transfer.Info.Mint != "" &&
+			p.adapter.KnownTokenAccountMint(transfer.Info.Source) != transfer.Info.Mint &&
+			p.adapter.KnownTokenAccountMint(transfer.Info.Destination) != transfer.Info.Mint {
+			transfer.Info.Mint = ""
+			transfer.Info.TokenAmount.Decimals = 0
+			uiAmount := types.ConvertToUIAmountString(transfer.Info.TokenAmount.Amount, 0)
+			transfer.Info.TokenAmount.UIAmount = &uiAmount
+		}
+
 		// Check if it's a fee transfer (a relay tip is not a fee)
 		if constants.IsTradeFeeAccount(transfer.Info.Destination) ||
 			constants.IsTradeFeeAccount(transfer.Info.DestinationOwner) {

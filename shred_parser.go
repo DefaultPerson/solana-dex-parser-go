@@ -2,6 +2,7 @@ package dexparser
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
@@ -132,6 +133,7 @@ func (p *ShredParser) parseWithClassifier(tx *adapter.SolanaTransaction, config 
 		}
 		events, typed := parser.ProcessAll()
 		if len(events) > 0 {
+			sortByIdx(events, legacyEventIdx)
 			result.Instructions[programName] = events
 		}
 		result.ParsedInstructions = append(result.ParsedInstructions, typed...)
@@ -141,6 +143,22 @@ func (p *ShredParser) parseWithClassifier(tx *adapter.SolanaTransaction, config 
 	sortByIdx(result.ParsedInstructions, func(ins types.ParsedShredInstruction) string { return ins.Idx })
 
 	return result
+}
+
+// legacyEventIdx returns the Idx field of a legacy event (a pointer to a
+// struct of the program's decoder), "" when it has none
+func legacyEventIdx(event interface{}) string {
+	v := reflect.ValueOf(event)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	if f := v.FieldByName("Idx"); f.IsValid() && f.Kind() == reflect.String {
+		return f.String()
+	}
+	return ""
 }
 
 // shredProgramIds lists the programs of the transaction in first-appearance
@@ -814,7 +832,10 @@ func (p *PumpfunInstructionParser) migrateInstruction(m *PumpfunMigrateData) *ty
 	}
 }
 
-// PumpswapInstruction represents a parsed Pumpswap instruction
+// PumpswapInstruction represents a parsed Pumpswap instruction. Type names
+// the instruction (CREATE, ADD, REMOVE, BUY: buy or buy_exact_quote_in of the
+// pool's base token, SELL); the typed trade's Type is relative to SOL or a
+// stablecoin instead, which differs in pools whose base is WSOL.
 type PumpswapInstruction struct {
 	Type      string      `json:"type"`
 	Data      interface{} `json:"data"`
@@ -1024,17 +1045,17 @@ func (p *PumpswapInstructionParser) ProcessAll() ([]interface{}, []types.ParsedS
 		case bytesEqual(d, disc.BUY):
 			if b := p.decodeBuy(accounts, args); b != nil {
 				eventType, eventData = "BUY", b
-				ins = p.tradeInstruction("buy", types.TradeTypeBuy, b.User, b.Pool, b.QuoteMint, b.MaxQuoteAmountIn, b.BaseMint, b.BaseAmountOut, types.ShredAmountMax, types.ShredAmountExact)
+				ins = p.tradeInstruction("buy", utils.GetPoolSideTradeType(true, b.BaseMint, b.QuoteMint), b.User, b.Pool, b.QuoteMint, b.MaxQuoteAmountIn, b.BaseMint, b.BaseAmountOut, types.ShredAmountMax, types.ShredAmountExact)
 			}
 		case bytesEqual(d, disc.BUY_EXACT_QUOTE_IN):
 			if b := p.decodeBuyExactQuoteIn(accounts, args); b != nil {
 				eventType, eventData = "BUY", b
-				ins = p.tradeInstruction("buy_exact_quote_in", types.TradeTypeBuy, b.User, b.Pool, b.QuoteMint, b.SpendableQuoteIn, b.BaseMint, b.MinBaseAmountOut, types.ShredAmountExact, types.ShredAmountMin)
+				ins = p.tradeInstruction("buy_exact_quote_in", utils.GetPoolSideTradeType(true, b.BaseMint, b.QuoteMint), b.User, b.Pool, b.QuoteMint, b.SpendableQuoteIn, b.BaseMint, b.MinBaseAmountOut, types.ShredAmountExact, types.ShredAmountMin)
 			}
 		case bytesEqual(d, disc.SELL):
 			if s := p.decodeSell(accounts, args); s != nil {
 				eventType, eventData = "SELL", s
-				ins = p.tradeInstruction("sell", types.TradeTypeSell, s.User, s.Pool, s.BaseMint, s.BaseAmountIn, s.QuoteMint, s.MinQuoteAmountOut, types.ShredAmountExact, types.ShredAmountMin)
+				ins = p.tradeInstruction("sell", utils.GetPoolSideTradeType(false, s.BaseMint, s.QuoteMint), s.User, s.Pool, s.BaseMint, s.BaseAmountIn, s.QuoteMint, s.MinQuoteAmountOut, types.ShredAmountExact, types.ShredAmountMin)
 			}
 		}
 
