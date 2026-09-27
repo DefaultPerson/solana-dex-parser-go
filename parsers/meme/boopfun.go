@@ -266,7 +266,7 @@ func (p *BoopfunEventParser) decodeCompleteEvent(instruction interface{}) *types
 
 // ProcessEvents implements the EventParser interface
 func (p *BoopfunEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.BOOP_FUN.ID})
+	instructions := utils.ProgramInstructions(p.adapter, constants.DEX_PROGRAMS.BOOP_FUN.ID)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))

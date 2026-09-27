@@ -119,3 +119,44 @@ func SortInstructionsByExecution(instructions []types.ClassifiedInstruction) {
 		return instructions[i].InnerIndex < instructions[j].InnerIndex
 	})
 }
+
+// ProgramInstructions returns the instructions of the given programs that
+// the transaction runs, outer instructions first and then inner ones, like
+// the instruction classifier (with StackHeight set). Event parsers that are
+// not given a classifier use it.
+func ProgramInstructions(a *adapter.TransactionAdapter, programIds ...string) []types.ClassifiedInstruction {
+	wanted := func(programId string) bool {
+		for _, id := range programIds {
+			if id == programId {
+				return true
+			}
+		}
+		return false
+	}
+	var instructions []types.ClassifiedInstruction
+	for i, ix := range a.Instructions() {
+		if programId := a.GetInstructionProgramId(ix); wanted(programId) {
+			instructions = append(instructions, types.ClassifiedInstruction{
+				Instruction: ix,
+				ProgramId:   programId,
+				OuterIndex:  i,
+				InnerIndex:  -1,
+				StackHeight: 1,
+			})
+		}
+	}
+	for _, set := range a.InnerInstructions() {
+		for j, ix := range set.Instructions {
+			if programId := a.GetInstructionProgramId(ix); wanted(programId) {
+				instructions = append(instructions, types.ClassifiedInstruction{
+					Instruction: ix,
+					ProgramId:   programId,
+					OuterIndex:  set.Index,
+					InnerIndex:  j,
+					StackHeight: adapter.InstructionStackHeight(ix),
+				})
+			}
+		}
+	}
+	return instructions
+}

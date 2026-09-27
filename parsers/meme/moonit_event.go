@@ -32,10 +32,10 @@ func NewMoonitEventParser(
 
 // ProcessEvents implements the EventParser interface
 func (p *MoonitEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{
+	instructions := utils.ProgramInstructions(p.adapter,
 		constants.DEX_PROGRAMS.MOONIT.ID,
 		constants.METAPLEX_PROGRAM_ID,
-	})
+	)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -315,45 +315,4 @@ func (p *MoonitEventParser) decodeMigrateEvent(data []byte, ci types.ClassifiedI
 		BaseMint:     baseMint,
 		QuoteMint:    constants.TOKENS.SOL,
 	}
-}
-
-// getAllInstructionsForMultiPrograms gets all instructions for multiple program IDs
-func getAllInstructionsForMultiPrograms(adapter *adapter.TransactionAdapter, programIds []string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Process outer instructions
-	for i, ix := range adapter.Instructions() {
-		programId := adapter.GetInstructionProgramId(ix)
-		for _, pid := range programIds {
-			if programId == pid {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   programId,
-					Instruction: ix,
-					OuterIndex:  i,
-					InnerIndex:  -1,
-				})
-				break
-			}
-		}
-	}
-
-	// Process inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for j, innerIx := range innerSet.Instructions {
-			programId := adapter.GetInstructionProgramId(innerIx)
-			for _, pid := range programIds {
-				if programId == pid {
-					instructions = append(instructions, types.ClassifiedInstruction{
-						ProgramId:   programId,
-						Instruction: innerIx,
-						OuterIndex:  innerSet.Index,
-						InnerIndex:  j,
-					})
-					break
-				}
-			}
-		}
-	}
-
-	return instructions
 }

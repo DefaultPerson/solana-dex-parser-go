@@ -391,7 +391,7 @@ func (p *RaydiumLaunchpadEventParser) decodeCompleteInstruction(data []byte, ins
 
 // ProcessEvents implements the EventParser interface
 func (p *RaydiumLaunchpadEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgramRaydiumLCP(p.adapter, constants.DEX_PROGRAMS.RAYDIUM_LCP.ID)
+	instructions := utils.ProgramInstructions(p.adapter, constants.DEX_PROGRAMS.RAYDIUM_LCP.ID)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -401,39 +401,4 @@ func (p *RaydiumLaunchpadEventParser) ProcessEvents() []types.MemeEvent {
 		}
 	}
 	return result
-}
-
-// getAllInstructionsForProgramRaydiumLCP gets all instructions for Raydium Launchpad program
-func getAllInstructionsForProgramRaydiumLCP(adapter *adapter.TransactionAdapter, programId string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Process outer instructions
-	for i, ix := range adapter.Instructions() {
-		ixProgramId := adapter.GetInstructionProgramId(ix)
-		if ixProgramId == programId {
-			instructions = append(instructions, types.ClassifiedInstruction{
-				ProgramId:   ixProgramId,
-				Instruction: ix,
-				OuterIndex:  i,
-				InnerIndex:  -1,
-			})
-		}
-	}
-
-	// Process inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for j, innerIx := range innerSet.Instructions {
-			ixProgramId := adapter.GetInstructionProgramId(innerIx)
-			if ixProgramId == programId {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   ixProgramId,
-					Instruction: innerIx,
-					OuterIndex:  innerSet.Index,
-					InnerIndex:  j,
-				})
-			}
-		}
-	}
-
-	return instructions
 }

@@ -272,7 +272,7 @@ func (p *SugarEventParser) decodeMigrateEvent(instruction interface{}) *types.Me
 
 // ProcessEvents implements the EventParser interface
 func (p *SugarEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.SUGAR.ID})
+	instructions := utils.ProgramInstructions(p.adapter, constants.DEX_PROGRAMS.SUGAR.ID)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))

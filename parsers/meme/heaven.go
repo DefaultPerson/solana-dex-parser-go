@@ -292,10 +292,10 @@ func (p *HeavenEventParser) decodeCreateEvent(data []byte, ci types.ClassifiedIn
 
 // ProcessEvents implements the EventParser interface
 func (p *HeavenEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{
+	instructions := utils.ProgramInstructions(p.adapter,
 		constants.DEX_PROGRAMS.HEAVEN.ID,
 		constants.METAPLEX_PROGRAM_ID,
-	})
+	)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))

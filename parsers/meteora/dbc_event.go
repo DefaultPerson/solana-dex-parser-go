@@ -419,7 +419,7 @@ func getAccountTradeType(user, baseMint, inputAccount, outputAccount string) typ
 
 // ProcessEvents implements the EventParser interface
 func (p *MeteoraDBCEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgramMeteoraDBC(p.adapter, constants.DEX_PROGRAMS.METEORA_DBC.ID)
+	instructions := utils.ProgramInstructions(p.adapter, constants.DEX_PROGRAMS.METEORA_DBC.ID)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -429,39 +429,4 @@ func (p *MeteoraDBCEventParser) ProcessEvents() []types.MemeEvent {
 		}
 	}
 	return result
-}
-
-// getAllInstructionsForProgramMeteoraDBC gets all instructions for Meteora DBC program
-func getAllInstructionsForProgramMeteoraDBC(adapter *adapter.TransactionAdapter, programId string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Process outer instructions
-	for i, ix := range adapter.Instructions() {
-		ixProgramId := adapter.GetInstructionProgramId(ix)
-		if ixProgramId == programId {
-			instructions = append(instructions, types.ClassifiedInstruction{
-				ProgramId:   ixProgramId,
-				Instruction: ix,
-				OuterIndex:  i,
-				InnerIndex:  -1,
-			})
-		}
-	}
-
-	// Process inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for j, innerIx := range innerSet.Instructions {
-			ixProgramId := adapter.GetInstructionProgramId(innerIx)
-			if ixProgramId == programId {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   ixProgramId,
-					Instruction: innerIx,
-					OuterIndex:  innerSet.Index,
-					InnerIndex:  j,
-				})
-			}
-		}
-	}
-
-	return instructions
 }

@@ -499,7 +499,7 @@ func (p *PumpfunEventParser) decodeMigrateEvent(data []byte) *types.MemeEvent {
 
 // ProcessEvents implements EventParser interface for meme event parsers
 func (p *PumpfunEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgram(p.adapter, constants.DEX_PROGRAMS.PUMP_FUN.ID)
+	instructions := utils.ProgramInstructions(p.adapter, constants.DEX_PROGRAMS.PUMP_FUN.ID)
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -509,39 +509,4 @@ func (p *PumpfunEventParser) ProcessEvents() []types.MemeEvent {
 		}
 	}
 	return result
-}
-
-// getAllInstructionsForProgram gets all instructions for a program ID
-func getAllInstructionsForProgram(adapter *adapter.TransactionAdapter, programId string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Outer instructions
-	for outerIdx, ix := range adapter.Instructions() {
-		programIdFromIx := adapter.GetInstructionProgramId(ix)
-		if programIdFromIx == programId {
-			instructions = append(instructions, types.ClassifiedInstruction{
-				ProgramId:   programIdFromIx,
-				Instruction: ix,
-				OuterIndex:  outerIdx,
-				InnerIndex:  -1,
-			})
-		}
-	}
-
-	// Inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for innerIdx, ix := range innerSet.Instructions {
-			programIdFromIx := adapter.GetInstructionProgramId(ix)
-			if programIdFromIx == programId {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   programIdFromIx,
-					Instruction: ix,
-					OuterIndex:  innerSet.Index,
-					InnerIndex:  innerIdx,
-				})
-			}
-		}
-	}
-
-	return instructions
 }

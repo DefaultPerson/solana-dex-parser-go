@@ -218,7 +218,7 @@ func NewPumpswapEventParser(adapter *adapter.TransactionAdapter, transferActions
 
 // ProcessEvents implements EventParser interface
 func (p *PumpswapEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgram(p.adapter, constants.DEX_PROGRAMS.PUMP_SWAP.ID)
+	instructions := utils.ProgramInstructions(p.adapter, constants.DEX_PROGRAMS.PUMP_SWAP.ID)
 	events := p.ParseInstructions(instructions)
 
 	// Convert to MemeEvent slice
