@@ -27,6 +27,7 @@ type docsCounts struct {
 	liquidityParser int
 	transferParsers int
 	memeParsers     int
+	routeParsers    int // aggregator route parsers (RegisterRouteParser)
 }
 
 // registeredParserPrograms returns, per factory map of DexParser
@@ -124,16 +125,17 @@ func computeDocsCounts(t *testing.T) docsCounts {
 	c.liquidityParser = len(parsers["liquidityParserFactories"])
 	c.transferParsers = len(parsers["transferParserFactories"])
 	c.memeParsers = len(parsers["memeEventParserFactories"])
+	c.routeParsers = len(parsers["routeParserFactories"])
 	return c
 }
 
 // readmeCountsSentence is the README sentence that states the counts
 func readmeCountsSentence(c docsCounts) string {
 	return fmt.Sprintf("It knows **%d DEX program IDs** (%d of them from the Jupiter venue label list and %d trading bot programs), "+
-		"registers default parsers for **%d trade**, **%d liquidity**, **%d transfer** and **%d meme event** programs, "+
+		"registers default parsers for **%d trade**, **%d liquidity**, **%d transfer**, **%d meme event** and **%d aggregator route** programs, "+
 		"attributes trades to **%d trading bots** through %d fee accounts, and reports tips paid to %d accounts of %d transaction-landing providers.",
 		c.dexProgramIDs, c.labelPrograms, c.botPrograms,
-		c.tradeParsers, c.liquidityParser, c.transferParsers, c.memeParsers,
+		c.tradeParsers, c.liquidityParser, c.transferParsers, c.memeParsers, c.routeParsers,
 		c.bots, c.botFeeAccounts, c.tipAccounts, c.tipProviders)
 }
 

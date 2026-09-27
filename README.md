@@ -8,7 +8,7 @@
 A Go library that turns Solana transactions into trades, liquidity events, meme-launchpad events and transfers.
 It started as a port of the TypeScript [solana-dex-parser](https://github.com/cxcx-ai/solana-dex-parser) and has since diverged (see [Differences from the TypeScript library](#differences-from-the-typescript-library)).
 
-It knows **150 DEX program IDs** (63 of them from the Jupiter venue label list and 21 trading bot programs), registers default parsers for **39 trade**, **8 liquidity**, **4 transfer** and **8 meme event** programs, attributes trades to **16 trading bots** through 72 fee accounts, and reports tips paid to 150 accounts of 17 transaction-landing providers.
+It knows **150 DEX program IDs** (63 of them from the Jupiter venue label list and 21 trading bot programs), registers default parsers for **39 trade**, **8 liquidity**, **8 transfer**, **8 meme event** and **2 aggregator route** programs, attributes trades to **16 trading bots** through 72 fee accounts, and reports tips paid to 150 accounts of 17 transaction-landing providers.
 
 These numbers are computed from the code by `TestDocsReadmeCounts` (tests/docs_counts_test.go).
 
