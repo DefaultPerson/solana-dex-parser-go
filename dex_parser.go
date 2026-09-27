@@ -2,6 +2,9 @@ package dexparser
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
@@ -264,22 +267,33 @@ func (dp *DexParser) RegisterMemeEventParser(programId string, factory MemeEvent
 // ParseTrades parses trades from a transaction
 func (dp *DexParser) ParseTrades(tx *adapter.SolanaTransaction, config *types.ParseConfig) []types.TradeInfo {
 	result := dp.parseWithClassifier(tx, config, "trades")
+	if result == nil {
+		return nil
+	}
 	return result.Trades
 }
 
 // ParseLiquidity parses liquidity events from a transaction
 func (dp *DexParser) ParseLiquidity(tx *adapter.SolanaTransaction, config *types.ParseConfig) []types.PoolEvent {
 	result := dp.parseWithClassifier(tx, config, "liquidity")
+	if result == nil {
+		return nil
+	}
 	return result.Liquidities
 }
 
 // ParseTransfers parses transfers from a transaction
 func (dp *DexParser) ParseTransfers(tx *adapter.SolanaTransaction, config *types.ParseConfig) []types.TransferData {
 	result := dp.parseWithClassifier(tx, config, "transfer")
+	if result == nil {
+		return nil
+	}
 	return result.Transfers
 }
 
-// ParseAll parses all data from a transaction
+// ParseAll parses all data from a transaction. It never returns nil: parse
+// errors (including a nil tx) yield State=false and Msg, unless
+// config.ThrowError is set, in which case the panic propagates.
 func (dp *DexParser) ParseAll(tx *adapter.SolanaTransaction, config *types.ParseConfig) *types.ParseResult {
 	return dp.parseWithClassifier(tx, config, "all")
 }
@@ -426,15 +440,40 @@ func (dp *DexParser) parseConcurrentlyWithCallback(
 	return results
 }
 
-// parseWithClassifier is the main parsing logic
-func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *types.ParseConfig, parseType string) *types.ParseResult {
+// jupiterOrderProgramIds lists the Jupiter order programs (DCA/Recurring,
+// Value Average, Limit v2/Trigger). A keeper fills their orders by routing
+// through Jupiter v6 in the same transaction.
+var jupiterOrderProgramIds = []string{
+	constants.DEX_PROGRAMS.JUPITER_DCA.ID,
+	constants.DEX_PROGRAMS.JUPITER_VA.ID,
+	constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID,
+}
+
+// jupiterProgramIds lists the Jupiter programs whose trade parsers are
+// authoritative for the outer instructions they cover: the order programs
+// first, then the v6 aggregator
+var jupiterProgramIds = append(append([]string{}, jupiterOrderProgramIds...), constants.DEX_PROGRAMS.JUPITER.ID)
+
+// parseWithClassifier is the main parsing logic.
+//
+// Trades: Jupiter parsers (v6, DCA, VA, Limit v2) run first whenever their
+// program appears in the transaction; their trades are authoritative for the
+// outer instructions they cover, so the other trade parsers and the
+// unknown-DEX fallback skip those outer instructions. When an order program
+// (DCA, VA, Limit v2) reports a fill, the Jupiter v6 route in the same
+// transaction is the keeper's execution of that fill: its trades are dropped
+// and its outer instructions stay covered. Trades are returned in
+// execution order (numeric idx) with duplicates of the same idx removed (first
+// kept). The aggregate trade is computed in addition to the individual trades.
+// Liquidity, meme, ALT events and transfers are always processed for the whole
+// transaction. ProgramIds/IgnoreProgramIds apply to every program.
+func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *types.ParseConfig, parseType string) (result *types.ParseResult) {
 	if config == nil {
 		defaultConfig := types.DefaultParseConfig()
 		config = &defaultConfig
 	}
 
-	result := types.NewParseResult()
-	result.Slot = tx.Slot
+	result = types.NewParseResult()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -442,9 +481,16 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 				panic(r)
 			}
 			result.State = false
-			result.Msg = fmt.Sprintf("Parse error: %v", r)
+			result.Msg = fmt.Sprintf("Parse error: %s %v", txSignature(tx), r)
 		}
 	}()
+
+	if tx == nil {
+		result.State = false
+		result.Msg = "nil transaction"
+		return result
+	}
+	result.Slot = tx.Slot
 
 	adapt := adapter.NewTransactionAdapter(tx, config)
 	txUtils := utils.NewTransactionUtils(adapt)
@@ -464,13 +510,8 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	if len(config.ProgramIds) > 0 {
 		found := false
 		for _, configProgramId := range config.ProgramIds {
-			for _, programId := range allProgramIds {
-				if configProgramId == programId {
-					found = true
-					break
-				}
-			}
-			if found {
+			if containsString(allProgramIds, configProgramId) {
+				found = true
 				break
 			}
 		}
@@ -485,13 +526,8 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	if len(config.AccountInclude) > 0 {
 		found := false
 		for _, includeAccount := range config.AccountInclude {
-			for _, accountKey := range adapt.AccountKeys {
-				if includeAccount == accountKey {
-					found = true
-					break
-				}
-			}
-			if found {
+			if adapt.GetAccountIndex(includeAccount) >= 0 {
+				found = true
 				break
 			}
 		}
@@ -503,20 +539,13 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	}
 
 	// Check account exclude filter
-	if len(config.AccountExclude) > 0 {
-		for _, excludeAccount := range config.AccountExclude {
-			for _, accountKey := range adapt.AccountKeys {
-				if excludeAccount == accountKey {
-					result.State = false
-					result.Msg = "Account excluded"
-					return result
-				}
-			}
+	for _, excludeAccount := range config.AccountExclude {
+		if adapt.GetAccountIndex(excludeAccount) >= 0 {
+			result.State = false
+			result.Msg = "Account excluded"
+			return result
 		}
 	}
-
-	// Get transfer actions
-	transferActions := txUtils.GetTransferActions([]string{"mintTo", "burn", "mintToChecked", "burnChecked"})
 
 	// Process fee
 	result.Fee = adapt.Fee()
@@ -528,99 +557,129 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		result.TokenBalanceChange = userTokenChanges
 	}
 
+	// A failed transaction reverted everything its instructions did
+	if result.TxStatus == types.TransactionStatusFailed && !config.IncludeFailedTxs {
+		result.Msg = "transaction failed"
+		return result
+	}
+
+	// Get transfer actions
+	transferActions := txUtils.GetTransferActions([]string{"mintTo", "burn", "mintToChecked", "burnChecked"})
+
 	// Determine what to parse based on parseType and config.ParseType
-	// Use GetEffectiveParseType for backward compatibility (defaults to all if not set)
 	effectiveParseType := config.GetEffectiveParseType()
-	shouldParseTrades := parseType == "trades" || (parseType == "all" && effectiveParseType.Trade)
+	returnTrades := parseType == "trades" || (parseType == "all" && effectiveParseType.Trade)
+	shouldAggregate := parseType == "all" && effectiveParseType.AggregateTrade
+	shouldParseTrades := returnTrades || shouldAggregate
 	shouldParseLiquidity := parseType == "liquidity" || (parseType == "all" && effectiveParseType.Liquidity)
 	shouldParseTransfers := parseType == "transfer" || (parseType == "all" && effectiveParseType.Transfer)
 	shouldParseMemeEvents := parseType == "all" && effectiveParseType.MemeEvent
 	shouldParseAltEvents := parseType == "all" && effectiveParseType.AltEvent
 
-	// Try Jupiter-specific parsing first
-	jupiterProgramIds := []string{
-		constants.DEX_PROGRAMS.JUPITER.ID,
-		constants.DEX_PROGRAMS.JUPITER_DCA.ID,
-		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER1.ID,
-		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER2.ID,
-		constants.DEX_PROGRAMS.JUPITER_DCA_KEEPER3.ID,
-		constants.DEX_PROGRAMS.JUPITER_VA.ID,
-		constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID,
+	programAllowed := func(programId string) bool {
+		if len(config.ProgramIds) > 0 && !containsString(config.ProgramIds, programId) {
+			return false
+		}
+		return !containsString(config.IgnoreProgramIds, programId)
+	}
+	dexInfoFor := func(programId string) types.DexInfo {
+		return types.DexInfo{
+			ProgramId: programId,
+			AMM:       constants.GetProgramName(programId),
+			Route:     dexInfo.Route,
+		}
 	}
 
-	if dexInfo.ProgramId != "" && containsString(jupiterProgramIds, dexInfo.ProgramId) {
-		if shouldParseTrades {
-			jupiterInstructions := instrClassifier.GetInstructions(dexInfo.ProgramId)
-			if factory, ok := dp.tradeParserFactories[dexInfo.ProgramId]; ok {
-				dexInfoWithAMM := types.DexInfo{
-					ProgramId: dexInfo.ProgramId,
-					AMM:       constants.GetProgramName(dexInfo.ProgramId),
-					Route:     dexInfo.Route,
+	var trades []types.TradeInfo
+
+	// Jupiter parsers first, order programs before v6. coveredBy maps an
+	// outer instruction index to the Jupiter program whose trades cover it; the
+	// first program to cover an outer instruction keeps it.
+	coveredBy := make(map[int]string)
+	if shouldParseTrades {
+		orderFilled := false
+		for _, programId := range jupiterProgramIds {
+			if !instrClassifier.HasProgram(programId) || !programAllowed(programId) {
+				continue
+			}
+			factory, ok := dp.tradeParserFactories[programId]
+			if !ok {
+				continue
+			}
+			isOrderProgram := containsString(jupiterOrderProgramIds, programId)
+			parser := factory(adapt, dexInfoFor(programId), transferActions, instrClassifier.GetInstructions(programId))
+			for _, trade := range parser.ProcessTrades() {
+				outer := outerIndexOf(trade.Idx)
+				if owner, ok := coveredBy[outer]; ok && owner != programId {
+					continue
 				}
-				parser := factory(adapt, dexInfoWithAMM, transferActions, jupiterInstructions)
-				trades := parser.ProcessTrades()
-				if len(trades) > 0 {
-					shouldAggregate := config.ShouldAggregateTrades() || effectiveParseType.AggregateTrade
-					if shouldAggregate {
-						aggregateTrade := utils.GetFinalSwap(trades, &dexInfo)
-						if aggregateTrade != nil {
-							result.AggregateTrade = txUtils.AttachTradeFee(aggregateTrade)
-						}
-					} else {
-						result.Trades = append(result.Trades, trades...)
-					}
+				coveredBy[outer] = programId
+				if isOrderProgram {
+					orderFilled = true
+				} else if orderFilled {
+					continue // keeper route of an order fill
 				}
+				trades = append(trades, trade)
 			}
 		}
-		if len(result.Trades) > 0 || result.AggregateTrade != nil {
-			return result
-		}
+	}
+	isCovered := func(outer int) bool {
+		_, ok := coveredBy[outer]
+		return ok
 	}
 
 	// Process instructions for each program
 	for _, programId := range allProgramIds {
-		// Check program ID filters
-		if len(config.ProgramIds) > 0 && !containsString(config.ProgramIds, programId) {
-			continue
-		}
-		if len(config.IgnoreProgramIds) > 0 && containsString(config.IgnoreProgramIds, programId) {
+		if !programAllowed(programId) {
 			continue
 		}
 
 		classifiedInstructions := instrClassifier.GetInstructions(programId)
 
 		// Process trades
-		if shouldParseTrades {
+		if shouldParseTrades && !containsString(jupiterProgramIds, programId) {
 			if factory, ok := dp.tradeParserFactories[programId]; ok {
-				dexInfoForProgram := types.DexInfo{
-					ProgramId: programId,
-					AMM:       constants.GetProgramName(programId),
-					Route:     dexInfo.Route,
+				instructions := classifiedInstructions
+				if len(coveredBy) > 0 {
+					instructions = make([]types.ClassifiedInstruction, 0, len(classifiedInstructions))
+					for _, ci := range classifiedInstructions {
+						if !isCovered(ci.OuterIndex) {
+							instructions = append(instructions, ci)
+						}
+					}
 				}
-				parser := factory(adapt, dexInfoForProgram, transferActions, classifiedInstructions)
-				result.Trades = append(result.Trades, parser.ProcessTrades()...)
+				if len(instructions) > 0 {
+					parser := factory(adapt, dexInfoFor(programId), transferActions, instructions)
+					for _, trade := range parser.ProcessTrades() {
+						if !isCovered(outerIndexOf(trade.Idx)) {
+							trades = append(trades, trade)
+						}
+					}
+				}
 			} else if config.TryUnknownDEX {
-				// Try to parse unknown DEX programs
-				for key, transfers := range transferActions {
-					if len(transfers) >= 2 && keyStartsWith(key, programId) {
-						hasSupported := false
-						for _, t := range transfers {
-							if adapt.IsSupportedToken(t.Info.Mint) {
-								hasSupported = true
-								break
-							}
+				// Try to parse unknown DEX programs from their transfer groups
+				prefix := programId + ":"
+				for _, key := range utils.SortedTransferKeys(transferActions) {
+					if !strings.HasPrefix(key, prefix) || isCovered(outerIndexOf(key[len(prefix):])) {
+						continue
+					}
+					transfers := transferActions[key]
+					if len(transfers) < 2 {
+						continue
+					}
+					hasSupported := false
+					for _, t := range transfers {
+						if adapt.IsSupportedToken(t.Info.Mint) {
+							hasSupported = true
+							break
 						}
-						if hasSupported {
-							dexInfoForProgram := types.DexInfo{
-								ProgramId: programId,
-								AMM:       constants.GetProgramName(programId),
-								Route:     dexInfo.Route,
-							}
-							trade := txUtils.ProcessSwapData(transfers, dexInfoForProgram, true)
-							if trade != nil {
-								result.Trades = append(result.Trades, *txUtils.AttachTokenTransferInfo(trade, transferActions))
-							}
-						}
+					}
+					if !hasSupported {
+						continue
+					}
+					trade := txUtils.ProcessSwapData(transfers, dexInfoFor(programId), true)
+					if trade != nil {
+						trades = append(trades, *txUtils.AttachTokenTransferInfo(trade, transferActions))
 					}
 				}
 			}
@@ -643,9 +702,11 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 			}
 		}
 	}
+	sortByIdx(result.Liquidities, func(e types.PoolEvent) string { return e.Idx })
+	sortByIdx(result.MemeEvents, func(e types.MemeEvent) string { return e.Idx })
 
 	// Process ALT events
-	if shouldParseAltEvents {
+	if shouldParseAltEvents && programAllowed(constants.ALT_PROGRAM_ID) {
 		altInstructions := instrClassifier.GetInstructions(constants.ALT_PROGRAM_ID)
 		if len(altInstructions) > 0 {
 			altParser := alt.NewAltEventParser(adapt, altInstructions)
@@ -653,12 +714,18 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		}
 	}
 
-	// Deduplicate trades
-	if len(result.Trades) > 0 {
-		result.Trades = deduplicateTrades(result.Trades)
-		shouldAggregate := config.ShouldAggregateTrades() || effectiveParseType.AggregateTrade
+	// Trades in execution order, duplicates removed
+	if len(trades) > 0 {
+		trades = deduplicateTrades(utils.SortTradesByIdx(trades))
+		allTransfers := utils.SortedTransfers(transferActions)
+		for i := range trades {
+			txUtils.ApplyToken2022TransferFee(&trades[i], allTransfers)
+		}
+		if returnTrades {
+			result.Trades = trades
+		}
 		if shouldAggregate {
-			aggregateTrade := utils.GetFinalSwap(result.Trades, &dexInfo)
+			aggregateTrade := utils.GetFinalSwap(trades, &dexInfo)
 			if aggregateTrade != nil {
 				result.AggregateTrade = txUtils.AttachTradeFee(aggregateTrade)
 			}
@@ -666,21 +733,27 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	}
 
 	// Process transfers if no trades and no liquidity
-	if len(result.Trades) == 0 && len(result.Liquidities) == 0 {
-		if shouldParseTransfers {
-			if dexInfo.ProgramId != "" {
+	if len(trades) == 0 && len(result.Liquidities) == 0 && shouldParseTransfers {
+		if dexInfo.ProgramId != "" && programAllowed(dexInfo.ProgramId) {
+			if factory, ok := dp.transferParserFactories[dexInfo.ProgramId]; ok {
 				classifiedInstructions := instrClassifier.GetInstructions(dexInfo.ProgramId)
-				if factory, ok := dp.transferParserFactories[dexInfo.ProgramId]; ok {
-					parser := factory(adapt, dexInfo, transferActions, classifiedInstructions)
-					result.Transfers = append(result.Transfers, parser.ProcessTransfers()...)
+				parser := factory(adapt, dexInfo, transferActions, classifiedInstructions)
+				result.Transfers = append(result.Transfers, parser.ProcessTransfers()...)
+			}
+		}
+		if len(result.Transfers) == 0 {
+			// Add all transfers, in execution order, except those grouped
+			// under a program excluded by ProgramIds/IgnoreProgramIds
+			allowed := transferActions
+			if len(config.ProgramIds) > 0 || len(config.IgnoreProgramIds) > 0 {
+				allowed = make(map[string][]types.TransferData, len(transferActions))
+				for key, transfers := range transferActions {
+					if i := strings.IndexByte(key, ':'); i < 0 || programAllowed(key[:i]) {
+						allowed[key] = transfers
+					}
 				}
 			}
-			if len(result.Transfers) == 0 {
-				// Add all transfers
-				for _, transfers := range transferActions {
-					result.Transfers = append(result.Transfers, transfers...)
-				}
-			}
+			result.Transfers = append(result.Transfers, utils.SortedTransfers(allowed)...)
 		}
 	}
 
@@ -698,10 +771,36 @@ func containsString(slice []string, val string) bool {
 	return false
 }
 
-func keyStartsWith(key, prefix string) bool {
-	return len(key) >= len(prefix) && key[:len(prefix)] == prefix
+// outerIndexOf returns the outer instruction index of an idx ("5" or "5-3"),
+// or -1 when it cannot be parsed
+func outerIndexOf(idx string) int {
+	if i := strings.IndexByte(idx, '-'); i >= 0 {
+		idx = idx[:i]
+	}
+	n, err := strconv.Atoi(idx)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
+// txSignature returns the first signature of tx for error messages
+func txSignature(tx *adapter.SolanaTransaction) string {
+	if tx == nil || len(tx.Transaction.Signatures) == 0 {
+		return ""
+	}
+	return tx.Transaction.Signatures[0]
+}
+
+// sortByIdx sorts events stably by numeric idx (execution order)
+func sortByIdx[T any](items []T, idx func(T) string) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return utils.CompareIdx(idx(items[i]), idx(items[j])) < 0
+	})
+}
+
+// deduplicateTrades removes trades with the same idx and signature, keeping
+// the first occurrence
 func deduplicateTrades(trades []types.TradeInfo) []types.TradeInfo {
 	seen := make(map[string]bool, len(trades))
 	result := make([]types.TradeInfo, 0, len(trades))
