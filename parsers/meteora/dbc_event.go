@@ -243,7 +243,7 @@ func (p *MeteoraDBCEventParser) decodeTradeEvent(ci types.ClassifiedInstruction,
 	if trade == nil {
 		return nil
 	}
-	event.Type = getAccountTradeType(user, baseMint, accounts[3], accounts[4])
+	event.Type = utils.GetAccountTradeType(user, baseMint, accounts[3], accounts[4])
 	if event.Type == types.TradeTypeSwap {
 		event.Type = trade.Type
 	}
@@ -398,23 +398,6 @@ func (p *MeteoraDBCEventParser) decodeDBCMigrateDammV2Event(instruction interfac
 		Pool:           accounts[4],
 		PoolDex:        constants.DEX_PROGRAMS.METEORA_DAMM_V2.Name,
 	}
-}
-
-// getAccountTradeType determines the trade type from the user's token
-// accounts: selling when the input account is the user's associated token
-// account of the base mint, buying when the output account is
-func getAccountTradeType(user, baseMint, inputAccount, outputAccount string) types.TradeType {
-	standard, token2022, err := utils.FindAssociatedTokenAddress(user, baseMint)
-	if err != nil {
-		return types.TradeTypeSwap
-	}
-	switch {
-	case inputAccount == standard || inputAccount == token2022:
-		return types.TradeTypeSell
-	case outputAccount == standard || outputAccount == token2022:
-		return types.TradeTypeBuy
-	}
-	return types.TradeTypeSwap
 }
 
 // ProcessEvents implements the EventParser interface
