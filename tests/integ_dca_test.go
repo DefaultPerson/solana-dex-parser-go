@@ -67,3 +67,102 @@ func TestIntegDCAWithdrawTransfers(t *testing.T) {
 func uint64String(v uint64) string {
 	return strconv.FormatUint(v, 10)
 }
+
+// A user's own DCA deposit (top-up) and withdraw instructions emit Deposit
+// and Withdraw (user_withdraw true); they are reported as DepositDca and
+// WithdrawDca transfers. Synthetic, as no user deposit or withdraw was found
+// on mainnet (fills pay out automatically): the real open_dca_v2 of
+// 4PvkHqhg... (outer 5, its 500005000 WSOL transfer 5-11 into the DCA) with
+// the instruction and its Opened event rewritten as deposit and Deposit, and
+// the real fill 2TqzmwGq... with its transfer instruction (outer 4) and
+// Withdraw event rewritten as the user's withdraw of the output.
+func TestIntegDCAUserDepositWithdraw(t *testing.T) {
+	d := constants.DISCRIMINATORS.JUPITER_DCA
+	u64 := func(v uint64) []byte { b := make([]byte, 8); binary.LittleEndian.PutUint64(b, v); return b }
+	cat := func(parts ...[]byte) []byte {
+		var out []byte
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+
+	// Deposit
+	tx := cloneTx(t, loadFixture(t, "4PvkHqhgTJa61cChu52gCyPcBK1rXGoKSJk4vRStXteXNTvuw7o9VoH5aqAgoYKGjQWSVdNvpwfEbDvHi7tZQZqw"))
+	keys := rawAccountKeys(tx)
+	open := tx.Transaction.Message.Instructions[5].(map[string]interface{})
+	openData, _ := base58.Decode(open["data"].(string))
+	if !constants.MatchDiscriminator(openData, d.OPEN_DCA_V2) {
+		t.Fatal("outer 5 is not open_dca_v2")
+	}
+	// open_dca_v2: dca 0, user 1, payer 2, input_mint 3, output_mint 4,
+	// user_ata 5, in_ata 6, out_ata 7, ..., token_program 9,
+	// event_authority 11, program 12; deposit: user, dca, in_ata,
+	// user_in_ata, token_program, event_authority, program
+	acc := open["accounts"].([]interface{})
+	const amount = 500005000
+	open["accounts"] = []interface{}{acc[1], acc[0], acc[6], acc[5], acc[9], acc[11], acc[12]}
+	open["data"] = base58.Encode(cat(d.DEPOSIT, u64(amount)))
+	dcaKey, _ := base58.Decode(keys[jsonInt(acc[0])])
+	for _, set := range tx.Meta.InnerInstructions {
+		for _, ix := range set.Instructions {
+			m := ix.(map[string]interface{})
+			if data, _ := base58.Decode(m["data"].(string)); set.Index == 5 && constants.MatchDiscriminator(data, d.OPENED_EVENT) {
+				m["data"] = base58.Encode(cat(d.DEPOSIT_EVENT, dcaKey, u64(amount)))
+			}
+		}
+	}
+	transfers := dexparser.NewDexParser().ParseTransfers(tx, nil)
+	if len(transfers) != 1 {
+		t.Fatalf("deposit: %d transfers %+v, want 1", len(transfers), transfers)
+	}
+	if tr := transfers[0]; tr.Type != "DepositDca" || tr.Idx != "5" || tr.Info.TokenAmount.Amount != "500005000" ||
+		tr.Info.Mint != keys[jsonInt(acc[3])] || tr.Info.Source != keys[jsonInt(acc[5])] || tr.Info.Destination != keys[jsonInt(acc[6])] {
+		t.Errorf("deposit transfer %s %s %s %s %s -> %s", tr.Type, tr.Idx, tr.Info.TokenAmount.Amount, tr.Info.Mint, tr.Info.Source, tr.Info.Destination)
+	}
+
+	// Withdraw
+	tx = cloneTx(t, loadFixture(t, "2TqzmwGqQrb7uHQEKm1TxhyHQJan7YhmaguP7cM9o7KNMX4u1ERWkwjuCzJvLv3BfgwSK3X9AfLNzZmSsEeUd3YF"))
+	keys = rawAccountKeys(tx)
+	transfer := tx.Transaction.Message.Instructions[4].(map[string]interface{})
+	fill := tx.Transaction.Message.Instructions[1].(map[string]interface{})
+	transferData, _ := base58.Decode(transfer["data"].(string))
+	if !constants.MatchDiscriminator(transferData, d.TRANSFER) {
+		t.Fatal("outer 4 is not the DCA transfer")
+	}
+	// transfer: keeper 0, dca 1, user 2, output_mint 3, dca_out_ata 4,
+	// user_out_ata 5, intermediate 6, system 7, token 8, ata 9,
+	// event_authority 10, program 11; the fill's input_mint is its account 2.
+	// withdraw: user 0, dca 1, input_mint 2, output_mint 3, dca_ata 4,
+	// user_in_ata 5, user_out_ata 6, system 7, token 8, ata 9,
+	// event_authority 10, program 11
+	acc = transfer["accounts"].([]interface{})
+	inputMint := fill["accounts"].([]interface{})[2]
+	transfer["accounts"] = []interface{}{acc[2], acc[1], inputMint, acc[3], acc[4], acc[6], acc[5], acc[7], acc[8], acc[9], acc[10], acc[11]}
+	var out uint64
+	for _, set := range tx.Meta.InnerInstructions {
+		for _, ix := range set.Instructions {
+			m := ix.(map[string]interface{})
+			if data, _ := base58.Decode(m["data"].(string)); set.Index == 4 && constants.MatchDiscriminator(data, d.WITHDRAW_EVENT) && len(data) >= 16+49 {
+				out = binary.LittleEndian.Uint64(data[56:64])
+				data[64] = 1 // user_withdraw
+				m["data"] = base58.Encode(data)
+			}
+		}
+	}
+	transfer["data"] = base58.Encode(cat(d.WITHDRAW, u64(out), []byte{1})) // Withdrawal::Out
+	var withdraws []string
+	for _, tr := range dexparser.NewDexParser().ParseTransfers(tx, nil) {
+		if tr.Type != "WithdrawDca" {
+			continue
+		}
+		withdraws = append(withdraws, tr.Idx)
+		if tr.Idx != "4" || tr.Info.TokenAmount.Amount != strconv.FormatUint(out, 10) || tr.Info.Mint != keys[jsonInt(acc[3])] ||
+			tr.Info.Source != keys[jsonInt(acc[4])] || tr.Info.Destination != keys[jsonInt(acc[5])] {
+			t.Errorf("withdraw transfer %s %s %s %s -> %s", tr.Idx, tr.Info.TokenAmount.Amount, tr.Info.Mint, tr.Info.Source, tr.Info.Destination)
+		}
+	}
+	if len(withdraws) != 1 || out == 0 {
+		t.Errorf("withdraw: WithdrawDca at %v (out %d), want one at 4", withdraws, out)
+	}
+}
