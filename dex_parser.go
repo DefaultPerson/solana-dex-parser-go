@@ -171,6 +171,39 @@ func (dp *DexParser) registerDefaultParsers() {
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.HUMIDIFI.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
 		return propamm.NewHumidiFiParser(a, d, t, c)
 	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.SOLFI_V2.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewSolFiV2Parser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.GOONFI_V2.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewGoonFiV2Parser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.BISONFI.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewBisonFiParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.TESSERA_V.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewTesseraVParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.ALPHAQ.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewAlphaQParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.ZERO_FI.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewZeroFiParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.SCORCH.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewScorchParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.QUANTUM.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewQuantumParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.MANIFEST.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewManifestParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.BYREAL.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewByrealParser(a, d, t, c)
+	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.SAROS_DLMM.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return propamm.NewSarosDLMMParser(a, d, t, c)
+	}
 
 	// Aggregator parsers
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.DFLOW.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
