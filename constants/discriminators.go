@@ -32,6 +32,24 @@ var DISCRIMINATORS = struct {
 
 	// Added 2026-09 (audit): Jupiter Z (order_engine RFQ)
 	JUPITER_Z JupiterZDiscriminators
+
+	// Added 2026-09 (venues): swap instructions of prop AMMs, orderbooks and
+	// CLMM/DLMM venues, checked against mainnet transactions. The 1-byte tags
+	// collide across programs, so they only identify a swap together with the
+	// program ID.
+	SOLFI_V2   SolFiV2Discriminators
+	GOONFI_V2  GoonFiV2Discriminators
+	BISONFI    BisonFiDiscriminators
+	TESSERA_V  TesseraVDiscriminators
+	ALPHAQ     AlphaQDiscriminators
+	ZERO_FI    ZeroFiDiscriminators
+	SCORCH     ScorchDiscriminators
+	QUANTUM    QuantumDiscriminators
+	MANIFEST   ManifestDiscriminators
+	BYREAL     ByrealDiscriminators
+	SAROS_DLMM SarosDLMMDiscriminators
+	TITAN      TitanDiscriminators
+	OKX_DEX_V2 OKXDexV2Discriminators
 }{
 	JUPITER: JupiterDiscriminators{
 		ROUTE_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 64, 198, 205, 232, 38, 8, 113, 226},
@@ -431,6 +449,10 @@ var DISCRIMINATORS = struct {
 		// SWAP_Y_TO_X matches no known name. Kept for compatibility.
 		SWAP_X_TO_Y: []byte{143, 190, 90, 218, 196, 30, 51, 222},
 		SWAP_Y_TO_X: []byte{220, 117, 232, 239, 48, 247, 211, 180},
+
+		// Added 2026-09 (venues): Anchor swap2, same accounts and args as swap
+		// (seen in 33VnDBtr... inner 4-7)
+		SWAP2: []byte{65, 75, 63, 76, 235, 91, 91, 136},
 	},
 	DFLOW: DFlowDiscriminators{
 		SWAP:           []byte{248, 198, 158, 145, 225, 117, 135, 200},
@@ -452,6 +474,67 @@ var DISCRIMINATORS = struct {
 
 	JUPITER_Z: JupiterZDiscriminators{
 		FILL: []byte{168, 96, 183, 163, 92, 10, 40, 160}, // order_engine IDL: fill
+	},
+
+	// Added 2026-09 (venues)
+	SOLFI_V2: SolFiV2Discriminators{
+		SWAP: []byte{0x07},
+	},
+	GOONFI_V2: GoonFiV2Discriminators{
+		SWAP: []byte{0x01}, // GoonFi V1 used 0x02
+	},
+	BISONFI: BisonFiDiscriminators{
+		SWAP:          []byte{0x02}, // 18 bytes
+		SWAP_V2:       []byte{0x07}, // 19 bytes
+		SWAP_WITH_SIG: []byte{0x13}, // 153 bytes, signed quote
+	},
+	TESSERA_V: TesseraVDiscriminators{
+		SWAP: []byte{0x10},
+	},
+	ALPHAQ: AlphaQDiscriminators{
+		SWAP: []byte{0x0c},
+	},
+	ZERO_FI: ZeroFiDiscriminators{
+		SWAP: []byte{0x10}, // logs "Instruction: swap_v4"
+	},
+	SCORCH: ScorchDiscriminators{
+		SWAP:         []byte{0x02}, // 34 bytes, 17 accounts
+		SWAP_COMPACT: []byte{0x01}, // 34 bytes, 13-14 accounts, no mint accounts
+	},
+	QUANTUM: QuantumDiscriminators{
+		SWAP: []byte{0x07},
+	},
+	MANIFEST: ManifestDiscriminators{
+		// CKS-Systems/manifest programs/manifest/src/program/instruction.rs
+		SWAP:    []byte{4},
+		SWAP_V2: []byte{13},
+	},
+	BYREAL: ByrealDiscriminators{
+		// On-chain Anchor IDL byreal_clmm 0.1.0 (Raydium CLMM fork)
+		SWAP:        []byte{248, 198, 158, 145, 225, 117, 135, 200}, // global:swap
+		SWAP_V2:     []byte{43, 4, 237, 11, 26, 201, 30, 98},        // global:swap_v2
+		SWAP_V3_DYN: []byte{229, 46, 213, 132, 105, 40, 40, 228},    // global:swap_v3_dyn
+	},
+	SAROS_DLMM: SarosDLMMDiscriminators{
+		// saros-xyz/saros-dlmm-sdk-rs idls/liquidity_book.json
+		SWAP: []byte{248, 198, 158, 145, 225, 117, 135, 200}, // global:swap
+	},
+	TITAN: TitanDiscriminators{
+		// No IDL; log "Instruction: SwapRouteV3"
+		SWAP_ROUTE_V3: []byte{0x2a},
+		// "Program data" event emitted once per SwapRouteV3: u64 in_amount, u64
+		// out_amount, u64 quoted_out, u64 fee_a, u64 fee_b, u64 fee_c
+		SWAP_EVENT: []byte{79, 62, 249, 87, 62, 217, 136, 30},
+	},
+	OKX_DEX_V2: OKXDexV2Discriminators{
+		// emit_cpi events of the on-chain IDL "OKX: DEX Router" 0.1.0, one per
+		// swap instruction, with the event-instruction prefix
+		SWAP_CPI_EVENT2:                    []byte{228, 69, 165, 46, 81, 203, 154, 29, 21, 94, 224, 53, 220, 232, 193, 94},
+		SWAP_WITH_FEES_CPI_EVENT2:          []byte{228, 69, 165, 46, 81, 203, 154, 29, 12, 134, 38, 93, 167, 151, 42, 69},
+		SWAP_WITH_FEES_CPI_EVENT_ENHANCED2: []byte{228, 69, 165, 46, 81, 203, 154, 29, 84, 79, 219, 247, 218, 156, 219, 177},
+		SWAP_TOB_V2_CPI_EVENT2:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 244, 105, 184, 90, 60, 165, 36, 33},
+		SWAP_TOC_V2_CPI_EVENT2:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 102, 16, 181, 62, 201, 71, 212, 41},
+		SWAP_WITH_FEE_CPI_EVENT_V3:         []byte{228, 69, 165, 46, 81, 203, 154, 29, 45, 53, 167, 19, 180, 196, 96, 150},
 	},
 }
 
@@ -795,6 +878,9 @@ type ObricDiscriminators struct {
 	SWAP        []byte
 	SWAP_X_TO_Y []byte
 	SWAP_Y_TO_X []byte
+
+	// Added 2026-09 (venues)
+	SWAP2 []byte
 }
 
 type DFlowDiscriminators struct {
@@ -832,6 +918,71 @@ type RaydiumCLOtherDiscriminators struct {
 	COLLECT_REMAINING_REWARDS []byte
 	INITIALIZE_REWARD         []byte
 	SET_REWARD_PARAMS         []byte
+}
+
+// Added 2026-09 (venues)
+type SolFiV2Discriminators struct {
+	SWAP []byte
+}
+
+type GoonFiV2Discriminators struct {
+	SWAP []byte
+}
+
+type BisonFiDiscriminators struct {
+	SWAP          []byte
+	SWAP_V2       []byte
+	SWAP_WITH_SIG []byte
+}
+
+type TesseraVDiscriminators struct {
+	SWAP []byte
+}
+
+type AlphaQDiscriminators struct {
+	SWAP []byte
+}
+
+type ZeroFiDiscriminators struct {
+	SWAP []byte
+}
+
+type ScorchDiscriminators struct {
+	SWAP         []byte
+	SWAP_COMPACT []byte
+}
+
+type QuantumDiscriminators struct {
+	SWAP []byte
+}
+
+type ManifestDiscriminators struct {
+	SWAP    []byte
+	SWAP_V2 []byte
+}
+
+type ByrealDiscriminators struct {
+	SWAP        []byte
+	SWAP_V2     []byte
+	SWAP_V3_DYN []byte
+}
+
+type SarosDLMMDiscriminators struct {
+	SWAP []byte
+}
+
+type TitanDiscriminators struct {
+	SWAP_ROUTE_V3 []byte
+	SWAP_EVENT    []byte
+}
+
+type OKXDexV2Discriminators struct {
+	SWAP_CPI_EVENT2                    []byte
+	SWAP_WITH_FEES_CPI_EVENT2          []byte
+	SWAP_WITH_FEES_CPI_EVENT_ENHANCED2 []byte
+	SWAP_TOB_V2_CPI_EVENT2             []byte
+	SWAP_TOC_V2_CPI_EVENT2             []byte
+	SWAP_WITH_FEE_CPI_EVENT_V3         []byte
 }
 
 // MatchDiscriminator checks if data starts with the given discriminator.
