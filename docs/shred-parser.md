@@ -63,7 +63,8 @@ status: unknown
 5 Pumpfun buy: BUY 2020000000 (max) -> 67062499999999 (exact)
 ```
 
-The buy asks for exactly 67062499999999 tokens and allows at most 2020000000 lamports; `DexParser` reports the executed 2000000000 for the same transaction.
+The buy asks for exactly 67062499999999 tokens and allows at most 2020000000 lamports.
+`DexParser` reports what the buyer paid in the same transaction: 2020000000, that is 2000000000 into the bonding curve plus the 1% fee of 20000000 transferred to the fee recipient `CebN5WGQ…`, which is the trade's `Fee`.
 `loadTransaction` stands for the file reading of the [Quick Start](getting-started.md#quick-start); `tx` is the Pump.fun create + buy `4Cod1cNG…`.
 
 ## Result

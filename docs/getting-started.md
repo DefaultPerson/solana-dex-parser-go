@@ -68,7 +68,7 @@ Output:
 
 ```text
 status: success fee: 80285
-trade: Pumpfun BUY 2000000000 So11111111111111111111111111111111111111112 -> 67062499999999 B9Z9mKUoVy5k8KuL2HauUD1mhmfF3PPNnJoK83S1pump
+trade: Pumpfun BUY 2020000000 So11111111111111111111111111111111111111112 -> 67062499999999 B9Z9mKUoVy5k8KuL2HauUD1mhmfF3PPNnJoK83S1pump
 meme: Pumpfun CREATE B9Z9mKUoVy5k8KuL2HauUD1mhmfF3PPNnJoK83S1pump
 meme: Pumpfun BUY B9Z9mKUoVy5k8KuL2HauUD1mhmfF3PPNnJoK83S1pump
 tip: 4000000
@@ -212,7 +212,7 @@ Output:
 
 ```text
 trades: 1 meme events: 0
-aggregate: BUY 2000000000 -> 67062499999999
+aggregate: BUY 2020000000 -> 67062499999999
 ```
 
 `loadTransaction` stands for the file reading of the Quick Start.

@@ -77,6 +77,7 @@ type pumpfunTradeIx struct {
 	quoteIndex   int // -1: SOL only (legacy layouts)
 	programIndex int // base token program, -1 when not in the layout
 	buybackIndex int // buyback fee recipient, -1 when not in the layout
+	feeIndex     int // fee_recipient of the legacy layouts, -1 for the v2 ones
 }
 
 // pumpfunTradeIxs maps the trade instruction discriminators to their layouts
@@ -86,12 +87,12 @@ var pumpfunTradeIxs = []struct {
 	disc []byte
 	ix   pumpfunTradeIx
 }{
-	{constants.DISCRIMINATORS.PUMPFUN.BUY, pumpfunTradeIx{"buy", 2, 3, -1, -1, -1}},
-	{constants.DISCRIMINATORS.PUMPFUN.SELL, pumpfunTradeIx{"sell", 2, 3, -1, -1, -1}},
-	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_SOL_IN, pumpfunTradeIx{"buy_exact_sol_in", 2, 3, -1, -1, -1}},
-	{constants.DISCRIMINATORS.PUMPFUN.BUY_V2, pumpfunTradeIx{"buy_v2", 1, 10, 2, 3, 8}},
-	{constants.DISCRIMINATORS.PUMPFUN.SELL_V2, pumpfunTradeIx{"sell_v2", 1, 10, 2, 3, 8}},
-	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_QUOTE_IN_V2, pumpfunTradeIx{"buy_exact_quote_in_v2", 1, 10, 2, 3, 8}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY, pumpfunTradeIx{"buy", 2, 3, -1, -1, -1, 1}},
+	{constants.DISCRIMINATORS.PUMPFUN.SELL, pumpfunTradeIx{"sell", 2, 3, -1, -1, -1, 1}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_SOL_IN, pumpfunTradeIx{"buy_exact_sol_in", 2, 3, -1, -1, -1, 1}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY_V2, pumpfunTradeIx{"buy_v2", 1, 10, 2, 3, 8, -1}},
+	{constants.DISCRIMINATORS.PUMPFUN.SELL_V2, pumpfunTradeIx{"sell_v2", 1, 10, 2, 3, 8, -1}},
+	{constants.DISCRIMINATORS.PUMPFUN.BUY_EXACT_QUOTE_IN_V2, pumpfunTradeIx{"buy_exact_quote_in_v2", 1, 10, 2, 3, 8, -1}},
 }
 
 func pumpfunTradeIxLayout(data []byte) *pumpfunTradeIx {
@@ -162,6 +163,20 @@ func (p *PumpfunEventParser) ParseInstructions(instructions []types.ClassifiedIn
 
 	// ordered is in execution order already
 	return events
+}
+
+// legacyBuyFee returns the lamports that user transferred to recipient inside
+// the buy instruction ci, or nil if there is no such transfer
+func (p *PumpfunEventParser) legacyBuyFee(ci types.ClassifiedInstruction, user, recipient string) *big.Int {
+	for _, t := range utils.NewTransactionUtils(p.adapter).CPIGroupTransfers(p.transferActions, ci, true) {
+		if t.ProgramId != constants.SYSTEM_PROGRAM_ID || t.Info.Source != user || t.Info.Destination != recipient {
+			continue
+		}
+		if amount, ok := new(big.Int).SetString(t.Info.TokenAmount.Amount, 10); ok {
+			return amount
+		}
+	}
+	return nil
 }
 
 // decodePumpfunTradeEvent decodes a TradeEvent field by field in IDL order
@@ -282,6 +297,18 @@ func (p *PumpfunEventParser) tradeEventToMeme(evt *pumpfunTradeEvent, ordered []
 	}
 	if evt.Cashback > 0 {
 		fees = append(fees, feeInfo(quoteMint, u64(evt.Cashback), quoteDecimals, dex, "cashback", evt.User))
+	}
+	// Events of the program version before the fee fields (121 bytes) carry
+	// no fee. Its buys paid the protocol fee by a System transfer from the
+	// user to the instruction's fee_recipient: that transfer is the fee. Its
+	// sells moved the fee out of the bonding curve's lamports without a
+	// transfer, so their fee stays unknown.
+	if !evt.HasFees && evt.IsBuy && parent != nil && parentLayout != nil &&
+		parentLayout.feeIndex >= 0 && parentLayout.feeIndex < len(parentAccounts) {
+		recipient := parentAccounts[parentLayout.feeIndex]
+		if amount := p.legacyBuyFee(*parent, evt.User, recipient); amount != nil {
+			fees = append(fees, feeInfo(quoteMint, amount, quoteDecimals, dex, "protocol", recipient))
+		}
 	}
 	totalFee := utils.SumFeeAmounts(fees)
 
