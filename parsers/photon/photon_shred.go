@@ -2,7 +2,7 @@ package photon
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
@@ -10,6 +10,14 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
+
+// Photon (BSfD6SHZ...) has no published IDL. The pump_buy_v2, pump_sell_v2,
+// collect_fee and moonshot_sell layouts below were verified against real
+// transactions (arguments forwarded unchanged to the inner Pump.fun /
+// Moonshot instruction). pump_buy, pump_sell and pump_amm_swap are no longer
+// in the deployed program; their decoders, and the moonshot_buy and
+// two_hop_swap decoders, are kept for historical transactions but their
+// layouts could not be checked against a real transaction.
 
 // PhotonShredParser parses Photon instructions from shred-stream
 type PhotonShredParser struct {
@@ -27,133 +35,99 @@ func NewPhotonShredParser(adapter *adapter.TransactionAdapter, classifier *class
 
 // ProcessInstructions processes Photon instructions and returns parsed results
 func (p *PhotonShredParser) ProcessInstructions() []interface{} {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.PHOTON.ID)
-	return p.parseInstructions(instructions)
+	events, _ := p.ProcessAll()
+	return events
 }
 
 // ProcessTypedInstructions returns typed ParsedShredInstruction results
 func (p *PhotonShredParser) ProcessTypedInstructions() []types.ParsedShredInstruction {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.PHOTON.ID)
-	return p.parseTypedInstructions(instructions)
+	_, typed := p.ProcessAll()
+	return typed
 }
 
-func (p *PhotonShredParser) parseInstructions(instructions []types.ClassifiedInstruction) []interface{} {
+// ProcessAll decodes the Photon instructions into legacy events and typed
+// trades in a single pass
+func (p *PhotonShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
 	var events []interface{}
+	var typed []types.ParsedShredInstruction
+	d := constants.DISCRIMINATORS.PHOTON
 
-	for _, ci := range instructions {
+	for _, ci := range p.classifier.GetInstructions(constants.DEX_PROGRAMS.PHOTON.ID) {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 8 {
 			continue
 		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
+		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+		disc, payload := data[:8], data[8:]
 
 		var eventType string
 		var eventData interface{}
-
-		payload := data[8:]
+		var ins *types.ParsedShredInstruction
 
 		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.PUMPSWAP_TRADE):
-			eventType = "pumpswap_swap"
-			eventData = p.decodePhotonSwapData(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.PUMPFUN_BUY):
-			eventType = "pumpfun_buy"
-			eventData = p.decodePhotonPumpfunBuyData(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.PUMPFUN_SELL):
-			eventType = "pumpfun_sell"
-			eventData = p.decodePhotonPumpfunSellData(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.MOONIT_BUY):
-			eventType = "moonit_buy"
-			eventData = p.decodePhotonMoonitBuyData(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.MOONIT_SELL):
-			eventType = "moonit_sell"
-			eventData = p.decodePhotonMoonitSellData(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.HOP_TWO_SWAP):
-			eventType = "hop_two_swap"
-			eventData = p.decodePhotonHopTwoSwapData(ci.Instruction, payload)
+		case bytes.Equal(disc, d.PUMPSWAP_TRADE):
+			if swap := p.decodePhotonSwapData(accounts, payload); swap != nil {
+				eventType, eventData, ins = "pumpswap_swap", swap, p.swapInstruction(swap)
+			}
+		case bytes.Equal(disc, d.PUMPFUN_BUY):
+			if buy := p.decodePhotonPumpfunBuyData(accounts, payload); buy != nil {
+				eventType, eventData, ins = "pumpfun_buy", buy, p.pumpfunInstruction(buy, types.ShredAmountUnknown, types.ShredAmountUnknown)
+			}
+		case bytes.Equal(disc, d.PUMPFUN_SELL):
+			if sell := p.decodePhotonPumpfunSellData(accounts, payload); sell != nil {
+				eventType, eventData, ins = "pumpfun_sell", sell, p.pumpfunInstruction(sell, types.ShredAmountUnknown, types.ShredAmountUnknown)
+			}
+		case bytes.Equal(disc, d.PUMPFUN_BUY_V2):
+			if buy := p.decodePhotonPumpBuyV2Data(accounts, payload); buy != nil {
+				eventType, eventData, ins = "pumpfun_buy_v2", buy, p.pumpfunInstruction(buy, types.ShredAmountExact, types.ShredAmountMin)
+			}
+		case bytes.Equal(disc, d.PUMPFUN_SELL_V2):
+			if sell := p.decodePhotonPumpSellV2Data(accounts, payload); sell != nil {
+				eventType, eventData, ins = "pumpfun_sell_v2", sell, p.pumpfunInstruction(sell, types.ShredAmountExact, types.ShredAmountMin)
+			}
+		case bytes.Equal(disc, d.MOONIT_BUY):
+			if buy := p.decodePhotonMoonitData(accounts, payload, "buy"); buy != nil {
+				// [unverified layout] both amounts are Moonshot trade parameters
+				eventType, eventData, ins = "moonit_buy", buy, p.moonitInstruction(buy, types.ShredAmountQuote, types.ShredAmountQuote)
+			}
+		case bytes.Equal(disc, d.MOONIT_SELL):
+			if sell := p.decodePhotonMoonitData(accounts, payload, "sell"); sell != nil {
+				eventType, eventData, ins = "moonit_sell", sell, p.moonitInstruction(sell, types.ShredAmountExact, types.ShredAmountQuote)
+			}
+		case bytes.Equal(disc, d.HOP_TWO_SWAP):
+			if hop := p.decodePhotonHopTwoSwapData(accounts, payload); hop != nil {
+				eventType, eventData, ins = "hop_two_swap", hop, p.hopTwoSwapInstruction(hop)
+			}
+		case bytes.Equal(disc, d.COLLECT_FEE):
+			if fee := p.decodePhotonCollectFeeData(accounts, payload); fee != nil {
+				eventType, eventData = "collect_fee", fee
+				ins = &types.ParsedShredInstruction{Action: eventType, Data: fee}
+			}
 		default:
 			continue
 		}
 
-		if eventData != nil {
-			event := &PhotonInstruction{
-				Type:      eventType,
-				Data:      eventData,
-				Slot:      p.adapter.Slot(),
-				Timestamp: p.adapter.BlockTime(),
-				Signature: p.adapter.Signature(),
-				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
-				Signer:    p.adapter.Signers(),
-			}
-			events = append(events, event)
-		}
-	}
-
-	return events
-}
-
-func (p *PhotonShredParser) parseTypedInstructions(instructions []types.ClassifiedInstruction) []types.ParsedShredInstruction {
-	var events []types.ParsedShredInstruction
-
-	for _, ci := range instructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 8 {
+		if eventData == nil {
 			continue
 		}
-
-		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
-		var eventType string
-		var trade *types.TradeInfo
-
-		payload := data[8:]
-
-		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.PUMPSWAP_TRADE):
-			eventType = "pumpswap_swap"
-			trade = p.decodePhotonSwapTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.PUMPFUN_BUY):
-			eventType = "pumpfun_buy"
-			trade = p.decodePhotonPumpfunBuyTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.PUMPFUN_SELL):
-			eventType = "pumpfun_sell"
-			trade = p.decodePhotonPumpfunSellTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.MOONIT_BUY):
-			eventType = "moonit_buy"
-			trade = p.decodePhotonMoonitBuyTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.MOONIT_SELL):
-			eventType = "moonit_sell"
-			trade = p.decodePhotonMoonitSellTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.PHOTON.HOP_TWO_SWAP):
-			eventType = "hop_two_swap"
-			trade = p.decodePhotonHopTwoSwapTrade(ci.Instruction, payload)
-		default:
-			continue
-		}
-
-		if trade != nil {
-			event := types.ParsedShredInstruction{
-				ProgramID:   constants.DEX_PROGRAMS.PHOTON.ID,
-				ProgramName: constants.DEX_PROGRAMS.PHOTON.Name,
-				Action:      eventType,
-				Trade:       trade,
-				Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
-				Idx:         utils.FormatIdx(ci.OuterIndex, innerIdx),
-			}
-			events = append(events, event)
-		}
+		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+		events = append(events, &PhotonInstruction{
+			Type:      eventType,
+			Data:      eventData,
+			Slot:      p.adapter.Slot(),
+			Timestamp: p.adapter.BlockTime(),
+			Signature: p.adapter.Signature(),
+			Idx:       idx,
+			Signer:    p.adapter.Signers(),
+		})
+		ins.ProgramID = constants.DEX_PROGRAMS.PHOTON.ID
+		ins.ProgramName = constants.DEX_PROGRAMS.PHOTON.Name
+		ins.Accounts = accounts
+		ins.Idx = idx
+		typed = append(typed, *ins)
 	}
 
-	return events
+	return events, typed
 }
 
 // PhotonInstruction represents a parsed Photon instruction
@@ -167,7 +141,9 @@ type PhotonInstruction struct {
 	Signer    []string    `json:"signer"`
 }
 
-// PhotonSwapData contains Photon swap instruction data
+// PhotonSwapData contains Photon PumpSwap swap (pump_amm_swap) instruction
+// data. TradeType is BUY (quote -> base), SELL (base -> quote) or SWAP when
+// the direction cannot be determined.
 type PhotonSwapData struct {
 	Pool               string `json:"pool"`
 	User               string `json:"user"`
@@ -181,7 +157,14 @@ type PhotonSwapData struct {
 	TargetProgram      string `json:"targetProgram"`
 }
 
-// PhotonPumpfunData contains Photon Pumpfun instruction data
+// PhotonPumpfunData contains Photon Pump.fun instruction data.
+//
+// pump_buy_v2: InputAmount is the exact quote amount sent to Pump.fun
+// (spendable_quote_in, excluding the Photon fee), OutputAmount the minimum
+// tokens out, PhotonFee the Photon fee in lamports. pump_sell_v2:
+// InputAmount is the exact token amount sold, OutputAmount the minimum quote
+// output, PhotonFeeBps the Photon fee rate. The legacy pump_buy / pump_sell
+// layout (timestamp first) is unverified.
 type PhotonPumpfunData struct {
 	Pool          string `json:"pool"`
 	User          string `json:"user"`
@@ -191,19 +174,38 @@ type PhotonPumpfunData struct {
 	OutputAmount  uint64 `json:"outputAmount"`
 	TradeType     string `json:"tradeType"`
 	TargetProgram string `json:"targetProgram"`
+	// QuoteMint is the curve's quote mint (WSOL for the legacy instructions)
+	QuoteMint string `json:"quoteMint,omitempty"`
+	// PhotonFee is the Photon fee in lamports (pump_buy_v2)
+	PhotonFee uint64 `json:"photonFee,omitempty"`
+	// PhotonFeeBps is the Photon fee rate (pump_sell_v2)
+	PhotonFeeBps uint64 `json:"photonFeeBps,omitempty"`
+	// FeeVault is the Photon fee vault receiving the fee
+	FeeVault string `json:"feeVault,omitempty"`
 }
 
-// PhotonMoonitData contains Photon Moonit instruction data
+// PhotonMoonitData contains Photon Moonshot (Moonit) instruction data:
+// timestamp, token_amount, collateral_amount (SOL), slippage_bps and
+// photon_fee_bps. For moonshot_sell (verified) TokenAmount is the exact
+// token input and CollateralAmount the quoted SOL output; the moonshot_buy
+// layout is assumed to be the same (unverified).
 type PhotonMoonitData struct {
-	Pool          string `json:"pool"`
-	User          string `json:"user"`
-	BaseMint      string `json:"baseMint"`
-	Timestamp     int64  `json:"timestamp"`
+	Pool      string `json:"pool"`
+	User      string `json:"user"`
+	BaseMint  string `json:"baseMint"`
+	Timestamp int64  `json:"timestamp"`
+	// InputAmount and OutputAmount are the trade's input and output amounts:
+	// TokenAmount and CollateralAmount in trade direction
 	InputAmount   uint64 `json:"inputAmount"`
 	OutputAmount  uint64 `json:"outputAmount"`
 	SlippageBps   uint64 `json:"slippageBps"`
 	TradeType     string `json:"tradeType"`
 	TargetProgram string `json:"targetProgram"`
+	// TokenAmount and CollateralAmount are the Moonshot trade parameters
+	TokenAmount      uint64 `json:"tokenAmount"`
+	CollateralAmount uint64 `json:"collateralAmount"`
+	// PhotonFeeBps is the Photon fee rate
+	PhotonFeeBps uint64 `json:"photonFeeBps,omitempty"`
 }
 
 // PhotonHopTwoSwapData contains Photon hop two swap instruction data
@@ -218,102 +220,150 @@ type PhotonHopTwoSwapData struct {
 	Programs     []string `json:"programs"`
 }
 
-func (p *PhotonShredParser) decodePhotonSwapData(instruction interface{}, data []byte) *PhotonSwapData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// PhotonCollectFeeData contains Photon collect_fee instruction data. The
+// trade itself is a separate venue instruction of the same transaction.
+// Mode 0: Amount is the fee in lamports; mode 1: Amount is a fee rate in bps
+// of the SOL in the temporary WSOL account.
+type PhotonCollectFeeData struct {
+	User      string `json:"user"`
+	FeeVault  string `json:"feeVault"`
+	Timestamp int64  `json:"timestamp"`
+	Amount    uint64 `json:"amount"`
+	Mode      uint8  `json:"mode"`
+}
+
+// tokenAccountMint returns the mint of a token account when the transaction
+// reveals it, "" otherwise (never a guess)
+func (p *PhotonShredParser) tokenAccountMint(account string) string {
+	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
+		return ""
+	}
+	return p.adapter.GetSplTokenMint(account)
+}
+
+// decimals returns the decimals of mint when the transaction reveals them or
+// TOKEN_DECIMALS lists them, else fallback (a protocol-guaranteed value, or 0
+// meaning unknown)
+func (p *PhotonShredParser) decimals(mint string, fallback uint8) uint8 {
+	if mint == "" {
+		return fallback
+	}
+	if d, ok := p.adapter.SPLDecimalsMap[mint]; ok {
+		return d
+	}
+	if d, ok := constants.TOKEN_DECIMALS[mint]; ok {
+		return d
+	}
+	return fallback
+}
+
+// pumpBaseDecimals is the decimals of every Pump.fun bonding-curve mint
+const pumpBaseDecimals = 6
+
+func tokenInfo(mint string, amount uint64, decimals uint8) types.TokenInfo {
+	return types.TokenInfo{
+		Mint:      mint,
+		Amount:    types.ConvertToUIAmountUint64(amount, decimals),
+		AmountRaw: strconv.FormatUint(amount, 10),
+		Decimals:  decimals,
+	}
+}
+
+// decodePhotonSwapData decodes pump_amm_swap (input_amount, output_amount):
+// accounts 0 pool, 1 user, 3 base_mint, 4 quote_mint, 5 input token account,
+// 6 output token account, 16 PumpSwap program
+func (p *PhotonShredParser) decodePhotonSwapData(accounts []string, data []byte) *PhotonSwapData {
 	if len(accounts) < 17 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
 	inputAmount, _ := reader.ReadU64()
 	outputAmount, _ := reader.ReadU64()
-
 	if reader.HasError() {
 		return nil
 	}
 
-	userAccount := accounts[1]
-	baseMint := accounts[3]
-	quoteMint := accounts[4]
-	inputTokenAccount := accounts[5]
-	outputTokenAccount := accounts[6]
-
-	tradeType := utils.GetAccountTradeType(userAccount, baseMint, inputTokenAccount, outputTokenAccount)
-
-	return &PhotonSwapData{
+	swap := &PhotonSwapData{
 		Pool:               accounts[0],
-		User:               userAccount,
-		BaseMint:           baseMint,
-		QuoteMint:          quoteMint,
-		InputTokenAccount:  inputTokenAccount,
-		OutputTokenAccount: outputTokenAccount,
+		User:               accounts[1],
+		BaseMint:           accounts[3],
+		QuoteMint:          accounts[4],
+		InputTokenAccount:  accounts[5],
+		OutputTokenAccount: accounts[6],
 		InputAmount:        inputAmount,
 		OutputAmount:       outputAmount,
-		TradeType:          string(tradeType),
 		TargetProgram:      accounts[16],
 	}
+	swap.TradeType = string(p.swapDirection(swap))
+	return swap
 }
 
-func (p *PhotonShredParser) decodePhotonSwapTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	swapData := p.decodePhotonSwapData(instruction, data)
-	if swapData == nil {
-		return nil
+// swapDirection determines BUY (quote in) or SELL (base in) from the mints
+// of the token accounts, then from the user's associated token account of
+// the base mint; SWAP when neither decides
+func (p *PhotonShredParser) swapDirection(swap *PhotonSwapData) types.TradeType {
+	switch p.tokenAccountMint(swap.InputTokenAccount) {
+	case "":
+	case swap.BaseMint:
+		return types.TradeTypeSell
+	case swap.QuoteMint:
+		return types.TradeTypeBuy
 	}
+	switch p.tokenAccountMint(swap.OutputTokenAccount) {
+	case "":
+	case swap.BaseMint:
+		return types.TradeTypeBuy
+	case swap.QuoteMint:
+		return types.TradeTypeSell
+	}
+	if swap.User == "" || swap.BaseMint == "" {
+		return types.TradeTypeSwap
+	}
+	return utils.GetAccountTradeType(swap.User, swap.BaseMint, swap.InputTokenAccount, swap.OutputTokenAccount)
+}
 
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-
+func (p *PhotonShredParser) swapInstruction(swap *PhotonSwapData) *types.ParsedShredInstruction {
 	var inputMint, outputMint string
-	var inputDecimal, outputDecimal uint8 = 6, 9
-	var tradeType types.TradeType
-
-	if swapData.TradeType == "sell" {
-		inputMint = swapData.BaseMint
-		outputMint = swapData.QuoteMint
-		tradeType = types.TradeTypeSell
-	} else {
-		inputMint = swapData.QuoteMint
-		outputMint = swapData.BaseMint
-		inputDecimal, outputDecimal = 9, 6
-		tradeType = types.TradeTypeBuy
+	tradeType := types.TradeType(swap.TradeType)
+	switch tradeType {
+	case types.TradeTypeSell:
+		inputMint, outputMint = swap.BaseMint, swap.QuoteMint
+	case types.TradeTypeBuy:
+		inputMint, outputMint = swap.QuoteMint, swap.BaseMint
 	}
 
-	return &types.TradeInfo{
-		Type: tradeType,
-		Pool: []string{swapData.Pool},
-		User: swapData.User,
-		InputToken: types.TokenInfo{
-			Mint:      inputMint,
-			Amount:    types.ConvertToUIAmountUint64(swapData.InputAmount, inputDecimal),
-			AmountRaw: fmt.Sprintf("%d", swapData.InputAmount),
-			Decimals:  inputDecimal,
+	return &types.ParsedShredInstruction{
+		Action: "pumpswap_swap",
+		Trade: &types.TradeInfo{
+			Type:        tradeType,
+			Pool:        []string{swap.Pool},
+			User:        swap.User,
+			InputToken:  tokenInfo(inputMint, swap.InputAmount, p.decimals(inputMint, 0)),
+			OutputToken: tokenInfo(outputMint, swap.OutputAmount, p.decimals(outputMint, 0)),
+			ProgramId:   swap.TargetProgram,
+			AMM:         utils.GetProgramName(swap.TargetProgram),
+			AMMs:        []string{utils.GetProgramName(swap.TargetProgram)},
+			Route:       constants.DEX_PROGRAMS.PHOTON.Name,
 		},
-		OutputToken: types.TokenInfo{
-			Mint:      outputMint,
-			Amount:    types.ConvertToUIAmountUint64(swapData.OutputAmount, outputDecimal),
-			AmountRaw: fmt.Sprintf("%d", swapData.OutputAmount),
-			Decimals:  outputDecimal,
-		},
-		ProgramId: accounts[16],
-		AMMs:      []string{utils.GetProgramName(accounts[16])},
-		Route:     constants.DEX_PROGRAMS.PHOTON.Name,
+		InputAmountKind:  types.ShredAmountUnknown,
+		OutputAmountKind: types.ShredAmountUnknown,
 	}
 }
 
-func (p *PhotonShredParser) decodePhotonPumpfunSellData(instruction interface{}, data []byte) *PhotonPumpfunData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodePhotonPumpfunSellData decodes the legacy pump_sell (timestamp i64,
+// input, output): accounts 2 mint, 3 bonding curve, 6 user, 9 Pump.fun
+func (p *PhotonShredParser) decodePhotonPumpfunSellData(accounts []string, data []byte) *PhotonPumpfunData {
 	if len(accounts) < 12 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
 	timestamp, _ := reader.ReadI64()
 	inputAmount, _ := reader.ReadU64()
 	outputAmount, _ := reader.ReadU64()
-
 	if reader.HasError() {
 		return nil
 	}
@@ -322,6 +372,7 @@ func (p *PhotonShredParser) decodePhotonPumpfunSellData(instruction interface{},
 		Pool:          accounts[3],
 		User:          accounts[6],
 		BaseMint:      accounts[2],
+		QuoteMint:     constants.TOKENS.SOL,
 		Timestamp:     timestamp,
 		InputAmount:   inputAmount,
 		OutputAmount:  outputAmount,
@@ -330,48 +381,18 @@ func (p *PhotonShredParser) decodePhotonPumpfunSellData(instruction interface{},
 	}
 }
 
-func (p *PhotonShredParser) decodePhotonPumpfunSellTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	sellData := p.decodePhotonPumpfunSellData(instruction, data)
-	if sellData == nil {
-		return nil
-	}
-
-	return &types.TradeInfo{
-		Type: types.TradeTypeSell,
-		Pool: []string{sellData.Pool},
-		User: sellData.User,
-		InputToken: types.TokenInfo{
-			Mint:      sellData.BaseMint,
-			Amount:    types.ConvertToUIAmountUint64(sellData.InputAmount, 6),
-			AmountRaw: fmt.Sprintf("%d", sellData.InputAmount),
-			Decimals:  6,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      constants.TOKENS.SOL,
-			Amount:    types.ConvertToUIAmountUint64(sellData.OutputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", sellData.OutputAmount),
-			Decimals:  9,
-		},
-		ProgramId: sellData.TargetProgram,
-		AMMs:      []string{utils.GetProgramName(sellData.TargetProgram)},
-		Route:     constants.DEX_PROGRAMS.PHOTON.Name,
-		Timestamp: sellData.Timestamp,
-	}
-}
-
-func (p *PhotonShredParser) decodePhotonPumpfunBuyData(instruction interface{}, data []byte) *PhotonPumpfunData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodePhotonPumpfunBuyData decodes the legacy pump_buy (timestamp i64,
+// input, output): accounts 3 mint, 4 bonding curve, 7 user, 9 Pump.fun
+func (p *PhotonShredParser) decodePhotonPumpfunBuyData(accounts []string, data []byte) *PhotonPumpfunData {
 	if len(accounts) < 12 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
 	timestamp, _ := reader.ReadI64()
 	inputAmount, _ := reader.ReadU64()
 	outputAmount, _ := reader.ReadU64()
-
 	if reader.HasError() {
 		return nil
 	}
@@ -380,6 +401,7 @@ func (p *PhotonShredParser) decodePhotonPumpfunBuyData(instruction interface{}, 
 		Pool:          accounts[4],
 		User:          accounts[7],
 		BaseMint:      accounts[3],
+		QuoteMint:     constants.TOKENS.SOL,
 		Timestamp:     timestamp,
 		InputAmount:   inputAmount,
 		OutputAmount:  outputAmount,
@@ -388,173 +410,219 @@ func (p *PhotonShredParser) decodePhotonPumpfunBuyData(instruction interface{}, 
 	}
 }
 
-func (p *PhotonShredParser) decodePhotonPumpfunBuyTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	buyData := p.decodePhotonPumpfunBuyData(instruction, data)
-	if buyData == nil {
-		return nil
-	}
-
-	return &types.TradeInfo{
-		Type: types.TradeTypeBuy,
-		Pool: []string{buyData.Pool},
-		User: buyData.User,
-		InputToken: types.TokenInfo{
-			Mint:      constants.TOKENS.SOL,
-			Amount:    types.ConvertToUIAmountUint64(buyData.InputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", buyData.InputAmount),
-			Decimals:  9,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      buyData.BaseMint,
-			Amount:    types.ConvertToUIAmountUint64(buyData.OutputAmount, 6),
-			AmountRaw: fmt.Sprintf("%d", buyData.OutputAmount),
-			Decimals:  6,
-		},
-		ProgramId: buyData.TargetProgram,
-		AMMs:      []string{utils.GetProgramName(buyData.TargetProgram)},
-		Route:     constants.DEX_PROGRAMS.PHOTON.Name,
-		Timestamp: buyData.Timestamp,
-	}
-}
-
-func (p *PhotonShredParser) decodePhotonMoonitBuyData(instruction interface{}, data []byte) *PhotonMoonitData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 12 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	timestamp, _ := reader.ReadI64()
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU64()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &PhotonMoonitData{
-		Pool:          accounts[2],
-		User:          accounts[0],
-		BaseMint:      accounts[7],
-		Timestamp:     timestamp,
-		InputAmount:   inputAmount,
-		OutputAmount:  outputAmount,
-		SlippageBps:   slippageBps,
-		TradeType:     "buy",
-		TargetProgram: accounts[9],
-	}
-}
-
-func (p *PhotonShredParser) decodePhotonMoonitBuyTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	buyData := p.decodePhotonMoonitBuyData(instruction, data)
-	if buyData == nil {
-		return nil
-	}
-
-	slippageBps := int(buyData.SlippageBps)
-
-	return &types.TradeInfo{
-		Type: types.TradeTypeBuy,
-		Pool: []string{buyData.Pool},
-		User: buyData.User,
-		InputToken: types.TokenInfo{
-			Mint:      buyData.BaseMint,
-			Amount:    types.ConvertToUIAmountUint64(buyData.InputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", buyData.InputAmount),
-			Decimals:  9,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      constants.TOKENS.SOL,
-			Amount:    types.ConvertToUIAmountUint64(buyData.OutputAmount, 6),
-			AmountRaw: fmt.Sprintf("%d", buyData.OutputAmount),
-			Decimals:  6,
-		},
-		ProgramId:   buyData.TargetProgram,
-		AMMs:        []string{utils.GetProgramName(buyData.TargetProgram)},
-		Route:       constants.DEX_PROGRAMS.PHOTON.Name,
-		Timestamp:   buyData.Timestamp,
-		SlippageBps: &slippageBps,
-	}
-}
-
-func (p *PhotonShredParser) decodePhotonMoonitSellData(instruction interface{}, data []byte) *PhotonMoonitData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 12 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	timestamp, _ := reader.ReadI64()
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-	slippageBps, _ := reader.ReadU64()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	return &PhotonMoonitData{
-		Pool:          accounts[2],
-		User:          accounts[0],
-		BaseMint:      accounts[7],
-		Timestamp:     timestamp,
-		InputAmount:   inputAmount,
-		OutputAmount:  outputAmount,
-		SlippageBps:   slippageBps,
-		TradeType:     "sell",
-		TargetProgram: accounts[9],
-	}
-}
-
-func (p *PhotonShredParser) decodePhotonMoonitSellTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	sellData := p.decodePhotonMoonitSellData(instruction, data)
-	if sellData == nil {
-		return nil
-	}
-
-	slippageBps := int(sellData.SlippageBps)
-
-	return &types.TradeInfo{
-		Type: types.TradeTypeSell,
-		Pool: []string{sellData.Pool},
-		User: sellData.User,
-		InputToken: types.TokenInfo{
-			Mint:      sellData.BaseMint,
-			Amount:    types.ConvertToUIAmountUint64(sellData.InputAmount, 6),
-			AmountRaw: fmt.Sprintf("%d", sellData.InputAmount),
-			Decimals:  6,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      constants.TOKENS.SOL,
-			Amount:    types.ConvertToUIAmountUint64(sellData.OutputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", sellData.OutputAmount),
-			Decimals:  9,
-		},
-		ProgramId:   sellData.TargetProgram,
-		AMMs:        []string{utils.GetProgramName(sellData.TargetProgram)},
-		Route:       constants.DEX_PROGRAMS.PHOTON.Name,
-		Timestamp:   sellData.Timestamp,
-		SlippageBps: &slippageBps,
-	}
-}
-
-func (p *PhotonShredParser) decodePhotonHopTwoSwapData(instruction interface{}, data []byte) *PhotonHopTwoSwapData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodePhotonPumpBuyV2Data decodes pump_buy_v2 (spendable_quote_in,
+// min_tokens_out, photon_fee_lamports, flag u8): accounts 0 user, 6 Photon
+// fee vault, 7 Pump.fun, 9 base_mint, 10 quote_mint, 16 bonding_curve
+func (p *PhotonShredParser) decodePhotonPumpBuyV2Data(accounts []string, data []byte) *PhotonPumpfunData {
 	if len(accounts) < 17 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
+	spendableQuoteIn, _ := reader.ReadU64()
+	minTokensOut, _ := reader.ReadU64()
+	photonFee, _ := reader.ReadU64()
+	if reader.HasError() {
+		return nil
+	}
 
+	return &PhotonPumpfunData{
+		Pool:          accounts[16],
+		User:          accounts[0],
+		BaseMint:      accounts[9],
+		QuoteMint:     accounts[10],
+		InputAmount:   spendableQuoteIn,
+		OutputAmount:  minTokensOut,
+		TradeType:     "buy",
+		TargetProgram: accounts[7],
+		PhotonFee:     photonFee,
+		FeeVault:      accounts[6],
+	}
+}
+
+// decodePhotonPumpSellV2Data decodes pump_sell_v2 (amount, min_sol_output,
+// photon_fee_bps, flag u8) with the pump_buy_v2 account layout
+func (p *PhotonShredParser) decodePhotonPumpSellV2Data(accounts []string, data []byte) *PhotonPumpfunData {
+	if len(accounts) < 17 {
+		return nil
+	}
+
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+	amount, _ := reader.ReadU64()
+	minSolOutput, _ := reader.ReadU64()
+	photonFeeBps, _ := reader.ReadU64()
+	if reader.HasError() {
+		return nil
+	}
+
+	return &PhotonPumpfunData{
+		Pool:          accounts[16],
+		User:          accounts[0],
+		BaseMint:      accounts[9],
+		QuoteMint:     accounts[10],
+		InputAmount:   amount,
+		OutputAmount:  minSolOutput,
+		TradeType:     "sell",
+		TargetProgram: accounts[7],
+		PhotonFeeBps:  photonFeeBps,
+		FeeVault:      accounts[6],
+	}
+}
+
+func (p *PhotonShredParser) pumpfunInstruction(d *PhotonPumpfunData, inKind, outKind types.ShredAmountKind) *types.ParsedShredInstruction {
+	quote := tokenInfo(d.QuoteMint, 0, p.decimals(d.QuoteMint, 0))
+	base := tokenInfo(d.BaseMint, 0, p.decimals(d.BaseMint, pumpBaseDecimals))
+	tradeType := types.TradeTypeBuy
+	input, output := quote, base
+	if d.TradeType == "sell" {
+		tradeType = types.TradeTypeSell
+		input, output = base, quote
+	}
+	input = tokenInfo(input.Mint, d.InputAmount, input.Decimals)
+	output = tokenInfo(output.Mint, d.OutputAmount, output.Decimals)
+
+	trade := &types.TradeInfo{
+		Type:        tradeType,
+		Pool:        []string{d.Pool},
+		User:        d.User,
+		InputToken:  input,
+		OutputToken: output,
+		ProgramId:   d.TargetProgram,
+		AMM:         utils.GetProgramName(d.TargetProgram),
+		AMMs:        []string{utils.GetProgramName(d.TargetProgram)},
+		Route:       constants.DEX_PROGRAMS.PHOTON.Name,
+		Timestamp:   d.Timestamp,
+	}
+	if d.PhotonFee > 0 {
+		trade.Fee = &types.FeeInfo{
+			Mint:      constants.TOKENS.SOL,
+			Amount:    types.ConvertToUIAmountUint64(d.PhotonFee, 9),
+			AmountRaw: strconv.FormatUint(d.PhotonFee, 10),
+			Decimals:  9,
+			Dex:       constants.DEX_PROGRAMS.PHOTON.Name,
+			Type:      "platform",
+			Recipient: d.FeeVault,
+		}
+	}
+
+	return &types.ParsedShredInstruction{
+		Action:           "pumpfun_" + d.TradeType,
+		Trade:            trade,
+		InputAmountKind:  inKind,
+		OutputAmountKind: outKind,
+	}
+}
+
+// decodePhotonMoonitData decodes moonshot_buy / moonshot_sell (timestamp i64,
+// token_amount, collateral_amount, slippage_bps, photon_fee_bps): accounts
+// 0 user, 2 curve, 7 mint, 9 Moonshot program
+func (p *PhotonShredParser) decodePhotonMoonitData(accounts []string, data []byte, tradeType string) *PhotonMoonitData {
+	if len(accounts) < 12 {
+		return nil
+	}
+
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+	timestamp, _ := reader.ReadI64()
+	tokenAmount, _ := reader.ReadU64()
+	collateralAmount, _ := reader.ReadU64()
+	slippageBps, _ := reader.ReadU64()
+	if reader.HasError() {
+		return nil
+	}
+	photonFeeBps, _ := reader.ReadU64()
+
+	moonit := &PhotonMoonitData{
+		Pool:             accounts[2],
+		User:             accounts[0],
+		BaseMint:         accounts[7],
+		Timestamp:        timestamp,
+		SlippageBps:      slippageBps,
+		TradeType:        tradeType,
+		TargetProgram:    accounts[9],
+		TokenAmount:      tokenAmount,
+		CollateralAmount: collateralAmount,
+		PhotonFeeBps:     photonFeeBps,
+	}
+	if tradeType == "buy" {
+		moonit.InputAmount, moonit.OutputAmount = collateralAmount, tokenAmount
+	} else {
+		moonit.InputAmount, moonit.OutputAmount = tokenAmount, collateralAmount
+	}
+	return moonit
+}
+
+func (p *PhotonShredParser) moonitInstruction(d *PhotonMoonitData, inKind, outKind types.ShredAmountKind) *types.ParsedShredInstruction {
+	sol := constants.TOKENS.SOL
+	tradeType := types.TradeTypeBuy
+	input := tokenInfo(sol, d.InputAmount, 9)
+	output := tokenInfo(d.BaseMint, d.OutputAmount, p.decimals(d.BaseMint, 0))
+	if d.TradeType == "sell" {
+		tradeType = types.TradeTypeSell
+		input = tokenInfo(d.BaseMint, d.InputAmount, p.decimals(d.BaseMint, 0))
+		output = tokenInfo(sol, d.OutputAmount, 9)
+	}
+	slippageBps := int(d.SlippageBps)
+
+	return &types.ParsedShredInstruction{
+		Action: "moonit_" + d.TradeType,
+		Trade: &types.TradeInfo{
+			Type:        tradeType,
+			Pool:        []string{d.Pool},
+			User:        d.User,
+			InputToken:  input,
+			OutputToken: output,
+			ProgramId:   d.TargetProgram,
+			AMM:         utils.GetProgramName(d.TargetProgram),
+			AMMs:        []string{utils.GetProgramName(d.TargetProgram)},
+			Route:       constants.DEX_PROGRAMS.PHOTON.Name,
+			Timestamp:   d.Timestamp,
+			SlippageBps: &slippageBps,
+		},
+		InputAmountKind:  inKind,
+		OutputAmountKind: outKind,
+	}
+}
+
+// decodePhotonCollectFeeData decodes collect_fee (timestamp i64, amount u64,
+// mode u8): accounts 0 user, 1 temporary WSOL account, 2 Photon fee vault
+func (p *PhotonShredParser) decodePhotonCollectFeeData(accounts []string, data []byte) *PhotonCollectFeeData {
+	if len(accounts) < 3 {
+		return nil
+	}
+
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
+	timestamp, _ := reader.ReadI64()
+	amount, _ := reader.ReadU64()
+	mode, _ := reader.ReadU8()
+	if reader.HasError() {
+		return nil
+	}
+
+	return &PhotonCollectFeeData{
+		User:      accounts[0],
+		FeeVault:  accounts[2],
+		Timestamp: timestamp,
+		Amount:    amount,
+		Mode:      mode,
+	}
+}
+
+// decodePhotonHopTwoSwapData decodes two_hop_swap (input, output) for the
+// Raydium V4 -> Meteora and Meteora DBC -> Raydium V4 routes (unverified
+// account layout)
+func (p *PhotonShredParser) decodePhotonHopTwoSwapData(accounts []string, data []byte) *PhotonHopTwoSwapData {
+	if len(accounts) < 12 {
+		return nil
+	}
+
+	reader := utils.GetBinaryReader(data)
+	defer reader.Release()
 	inputAmount, _ := reader.ReadU64()
 	outputAmount, _ := reader.ReadU64()
-
 	if reader.HasError() {
 		return nil
 	}
@@ -567,37 +635,50 @@ func (p *PhotonShredParser) decodePhotonHopTwoSwapData(instruction interface{}, 
 	var programs []string
 	var tradeType string
 
-	// Raydium V4 -> Meteora (Buy)
-	if program1 == constants.DEX_PROGRAMS.RAYDIUM_V4.ID {
+	switch program1 {
+	case constants.DEX_PROGRAMS.RAYDIUM_V4.ID:
+		// Raydium V4 -> Meteora (Buy)
 		tradeType = "buy"
 		program2 := accounts[11]
 		programs = []string{utils.GetProgramName(program1), utils.GetProgramName(program2)}
 
 		switch program2 {
 		case constants.DEX_PROGRAMS.METEORA_DBC.ID:
+			if len(accounts) < 18 {
+				return nil
+			}
 			pools = []string{accounts[7], accounts[14]}
 			inputMint = constants.TOKENS.SOL
 			outputMint = accounts[17]
 		case constants.DEX_PROGRAMS.METEORA_DAMM_V2.ID:
+			if len(accounts) < 17 {
+				return nil
+			}
 			pools = []string{accounts[7], accounts[13]}
 			inputMint = constants.TOKENS.SOL
 			outputMint = accounts[16]
 		case constants.DEX_PROGRAMS.METEORA.ID:
+			if len(accounts) < 17 {
+				return nil
+			}
 			pools = []string{accounts[7], accounts[12]}
 			inputMint = constants.TOKENS.SOL
 			outputMint = accounts[16]
 		default:
 			return nil
 		}
-	} else if program1 == constants.DEX_PROGRAMS.METEORA_DBC.ID {
+	case constants.DEX_PROGRAMS.METEORA_DBC.ID:
 		// Meteora DBC -> Raydium V4 (Sell)
+		if len(accounts) < 18 {
+			return nil
+		}
 		tradeType = "sell"
 		pools = []string{accounts[9], accounts[17]}
 		inputMint = accounts[12]
 		outputMint = constants.TOKENS.SOL
 		program2 := accounts[16]
 		programs = []string{utils.GetProgramName(program1), utils.GetProgramName(program2)}
-	} else {
+	default:
 		return nil
 	}
 
@@ -613,40 +694,25 @@ func (p *PhotonShredParser) decodePhotonHopTwoSwapData(instruction interface{}, 
 	}
 }
 
-func (p *PhotonShredParser) decodePhotonHopTwoSwapTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	swapData := p.decodePhotonHopTwoSwapData(instruction, data)
-	if swapData == nil {
-		return nil
-	}
-
-	var inputDecimal, outputDecimal uint8
-	var tradeType types.TradeType
-	if swapData.TradeType == "buy" {
-		inputDecimal, outputDecimal = 9, 6
-		tradeType = types.TradeTypeBuy
-	} else {
-		inputDecimal, outputDecimal = 6, 9
+func (p *PhotonShredParser) hopTwoSwapInstruction(swapData *PhotonHopTwoSwapData) *types.ParsedShredInstruction {
+	tradeType := types.TradeTypeBuy
+	if swapData.TradeType == "sell" {
 		tradeType = types.TradeTypeSell
 	}
 
-	return &types.TradeInfo{
-		Type: tradeType,
-		Pool: swapData.Pools,
-		User: swapData.User,
-		InputToken: types.TokenInfo{
-			Mint:      swapData.InputMint,
-			Amount:    types.ConvertToUIAmountUint64(swapData.InputAmount, inputDecimal),
-			AmountRaw: fmt.Sprintf("%d", swapData.InputAmount),
-			Decimals:  inputDecimal,
+	return &types.ParsedShredInstruction{
+		Action: "hop_two_swap",
+		Trade: &types.TradeInfo{
+			Type:        tradeType,
+			Pool:        swapData.Pools,
+			User:        swapData.User,
+			InputToken:  tokenInfo(swapData.InputMint, swapData.InputAmount, p.decimals(swapData.InputMint, 0)),
+			OutputToken: tokenInfo(swapData.OutputMint, swapData.OutputAmount, p.decimals(swapData.OutputMint, 0)),
+			ProgramId:   constants.DEX_PROGRAMS.PHOTON.ID,
+			AMMs:        swapData.Programs,
+			Route:       constants.DEX_PROGRAMS.PHOTON.Name,
 		},
-		OutputToken: types.TokenInfo{
-			Mint:      swapData.OutputMint,
-			Amount:    types.ConvertToUIAmountUint64(swapData.OutputAmount, outputDecimal),
-			AmountRaw: fmt.Sprintf("%d", swapData.OutputAmount),
-			Decimals:  outputDecimal,
-		},
-		ProgramId: constants.DEX_PROGRAMS.PHOTON.ID,
-		AMMs:      swapData.Programs,
-		Route:     constants.DEX_PROGRAMS.PHOTON.Name,
+		InputAmountKind:  types.ShredAmountUnknown,
+		OutputAmountKind: types.ShredAmountUnknown,
 	}
 }
