@@ -297,8 +297,13 @@ func (p *JupiterShredParser) decimals(mint string) uint8 {
 }
 
 // shredTradeType is utils.GetTradeType for mints that may be unknown (""):
-// the direction is SWAP unless a known side is SOL or a stablecoin
+// the direction is SWAP unless a known side is SOL or a stablecoin. A trade
+// that ends in the mint it starts with (a circular arbitrage route) is a
+// SWAP too.
 func shredTradeType(inMint, outMint string) types.TradeType {
+	if inMint != "" && inMint == outMint {
+		return types.TradeTypeSwap
+	}
 	if inMint != "" && outMint != "" {
 		return utils.GetTradeType(inMint, outMint)
 	}

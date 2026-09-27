@@ -237,6 +237,36 @@ func TestShredJupiterUnknownSwapVariant(t *testing.T) {
 	}
 }
 
+// TestShredCircularRouteIsSwap: an arbitrage route that starts and ends in
+// the same mint was reported as BUY (USDC -> USDC on 22VFxreH, SOL -> SOL on
+// 2ZeNbKRU). G2 of the shred verifier.
+func TestShredCircularRouteIsSwap(t *testing.T) {
+	for _, c := range []struct{ sig, idx, mint string }{
+		{jupiterTrailingByteRoutes[0].sig, "2", constants.TOKENS.USDC},
+		{"2ZeNbKRUUQPfiZzNu1kgfAxMyXZYgvhhyS6n2nwXaj5LhrtJEqu7Ei7i9RjNudZQev6qvnp6cVFv69TvQQSFw84k", "8", constants.TOKENS.SOL},
+	} {
+		tx := loadFixture(t, c.sig)
+		ix := findIx(t, tx, constants.DEX_PROGRAMS.JUPITER.ID, constants.DISCRIMINATORS.JUPITER.ROUTE)
+		// Independent: the source token account (by its token balance or a
+		// TransferChecked out of it) and the destination mint (account 5)
+		// are both c.mint
+		srcMint := tokenBalanceMint(tx, ix.accounts[2])
+		for _, in := range fixtureIxs(t, tx) {
+			if srcMint == "" && in.outer == ix.outer && in.inner >= 0 && in.programId == constants.TOKEN_PROGRAM_ID &&
+				len(in.data) > 0 && in.data[0] == 12 && len(in.accounts) > 1 && in.accounts[0] == ix.accounts[2] {
+				srcMint = in.accounts[1]
+			}
+		}
+		if srcMint != c.mint || ix.accounts[5] != c.mint {
+			t.Fatalf("%s: route is not %s -> %s", c.sig[:8], c.mint, c.mint)
+		}
+		_, trade := jupTrade(t, parseShred(t, tx, nil), c.idx)
+		if trade.InputToken.Mint != c.mint || trade.OutputToken.Mint != c.mint || trade.Type != types.TradeTypeSwap {
+			t.Errorf("%s: trade %s %s -> %s, want SWAP %s -> %s", c.sig[:8], trade.Type, trade.InputToken.Mint, trade.OutputToken.Mint, c.mint, c.mint)
+		}
+	}
+}
+
 // TestShredJupiterTokenLedger: token-ledger routes end with 11 bytes; the
 // decoder read the last 10. The input amount is only known at execution.
 // shred-1.

@@ -363,6 +363,8 @@ func (p *DFlowShredParser) buildTradeInfo(swap *DFlowSwapData) *types.TradeInfo 
 
 	tradeType := types.TradeTypeSwap
 	switch {
+	case swap.InputMint != "" && swap.InputMint == swap.OutputMint:
+		// a circular (arbitrage) route buys nothing: SWAP
 	case swap.InputMint != "" && swap.OutputMint != "":
 		tradeType = utils.GetTradeType(swap.InputMint, swap.OutputMint)
 	case constants.IsQuoteToken(swap.InputMint):
