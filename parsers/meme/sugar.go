@@ -2,8 +2,6 @@ package meme
 
 import (
 	"bytes"
-	"fmt"
-	"sort"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -101,11 +99,15 @@ func NewSugarEventParser(
 	}
 }
 
-// ParseInstructions parses classified instructions into meme events
+// ParseInstructions parses classified instructions into meme events, in
+// execution order
 func (p *SugarEventParser) ParseInstructions(instructions []types.ClassifiedInstruction) []*types.MemeEvent {
 	var events []*types.MemeEvent
 
-	for _, ci := range instructions {
+	ordered := append([]types.ClassifiedInstruction(nil), instructions...)
+	sortExecutionOrder(ordered)
+
+	for _, ci := range ordered {
 		if ci.ProgramId != constants.DEX_PROGRAMS.SUGAR.ID {
 			continue
 		}
@@ -116,28 +118,17 @@ func (p *SugarEventParser) ParseInstructions(instructions []types.ClassifiedInst
 		}
 
 		disc := data[:8]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
 		var event *types.MemeEvent
 
-		// Buy discriminators
-		if bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.BUY_EXACT_IN) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.BUY_EXACT_OUT) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.BUY_MAX_OUT) {
-			event = p.decodeBuyEvent(data[8:], ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)
-		}
-
-		// Sell discriminators
-		if bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.SELL_EXACT_IN) ||
-			bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.SELL_EXACT_OUT) {
-			event = p.decodeSellEvent(data[8:], ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx)
-		}
-
-		// Create discriminator
-		if bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.CREATE) {
+		switch {
+		case bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.BUY_EXACT_IN),
+			bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.BUY_EXACT_OUT),
+			bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.BUY_MAX_OUT):
+			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeBuy)
+		case bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.SELL_EXACT_IN),
+			bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.SELL_EXACT_OUT):
+			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeSell)
+		case bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.CREATE):
 			event = p.decodeCreateEvent(data[8:], ci.Instruction)
 		}
 
@@ -145,109 +136,61 @@ func (p *SugarEventParser) ParseInstructions(instructions []types.ClassifiedInst
 			event.Signature = p.adapter.Signature()
 			event.Slot = p.adapter.Slot()
 			event.Timestamp = p.adapter.BlockTime()
-			event.Idx = fmt.Sprintf("%d-%d", ci.OuterIndex, innerIdx)
+			event.Idx = formatIdx(ci.OuterIndex, ci.InnerIndex)
 			events = append(events, event)
 		}
 	}
 
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].Idx < events[j].Idx
-	})
-
 	return events
 }
 
-func (p *SugarEventParser) decodeBuyEvent(data []byte, instruction interface{}, programId string, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 8 {
+// decodeTradeEvent decodes the buy and sell instructions. Accounts (checked
+// on mainnet sell_exact_in, as in upstream): 1 base mint, 2 pool, 6 user;
+// the quote is native SOL. Amounts are the user's transfers in the
+// instruction (the SOL fee goes to a separate recipient); without them the
+// args (u16, amount in, minimum out) are used.
+func (p *SugarEventParser) decodeTradeEvent(data []byte, ci types.ClassifiedInstruction, tradeType types.TradeType) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+	if len(accounts) < 7 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	inputAmount := reader.ReadU64AsBigInt()
-	outputAmount := reader.ReadU64AsBigInt()
-
+	reader.Skip(2)
+	argIn := reader.ReadU64AsBigInt()
+	argOut := reader.ReadU64AsBigInt()
 	if reader.HasError() {
 		return nil
 	}
 
-	bondingCurve := accounts[1]
-	userAccount := accounts[0]
-	inputMint := accounts[7]  // quoteMint (SOL)
-	outputMint := accounts[6] // baseMint
+	baseMint := accounts[1]
+	pool := accounts[2]
+	user := accounts[6]
+	quoteMint := constants.TOKENS.SOL
+	inMint, outMint := quoteMint, baseMint
+	if tradeType == types.TradeTypeSell {
+		inMint, outMint = baseMint, quoteMint
+	}
 
-	inputUIAmount := types.ConvertToUIAmountUint64(inputAmount.Uint64(), 9)
-	outputUIAmount := types.ConvertToUIAmountUint64(outputAmount.Uint64(), 6)
+	in, out := userLegs(p.adapter, instructionTransfers(p.transferActions, ci), user, inMint, outMint)
+	if in == nil {
+		in = tokenInfoFromRaw(p.adapter, inMint, argIn)
+	}
+	if out == nil {
+		out = tokenInfoFromRaw(p.adapter, outMint, argOut)
+	}
 
 	return &types.MemeEvent{
 		Protocol:     constants.DEX_PROGRAMS.SUGAR.Name,
-		Type:         types.TradeTypeBuy,
-		BaseMint:     outputMint,
-		QuoteMint:    inputMint,
-		BondingCurve: bondingCurve,
-		Pool:         bondingCurve,
-		User:         userAccount,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: inputAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  9,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: outputAmount.String(),
-			Amount:    outputUIAmount,
-			Decimals:  6,
-		},
-	}
-}
-
-func (p *SugarEventParser) decodeSellEvent(data []byte, instruction interface{}, programId string, outerIndex int, innerIndex int) *types.MemeEvent {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 8 {
-		return nil
-	}
-
-	reader := utils.GetBinaryReader(data)
-	defer reader.Release()
-
-	inputAmount := reader.ReadU64AsBigInt()
-	outputAmount := reader.ReadU64AsBigInt()
-
-	if reader.HasError() {
-		return nil
-	}
-
-	bondingCurve := accounts[1]
-	userAccount := accounts[0]
-	inputMint := accounts[6]  // baseMint
-	outputMint := accounts[7] // quoteMint (SOL)
-
-	inputUIAmount := types.ConvertToUIAmountUint64(inputAmount.Uint64(), 6)
-	outputUIAmount := types.ConvertToUIAmountUint64(outputAmount.Uint64(), 9)
-
-	return &types.MemeEvent{
-		Protocol:     constants.DEX_PROGRAMS.SUGAR.Name,
-		Type:         types.TradeTypeSell,
-		BaseMint:     inputMint,
-		QuoteMint:    outputMint,
-		BondingCurve: bondingCurve,
-		Pool:         bondingCurve,
-		User:         userAccount,
-		InputToken: &types.TokenInfo{
-			Mint:      inputMint,
-			AmountRaw: inputAmount.String(),
-			Amount:    inputUIAmount,
-			Decimals:  6,
-		},
-		OutputToken: &types.TokenInfo{
-			Mint:      outputMint,
-			AmountRaw: outputAmount.String(),
-			Amount:    outputUIAmount,
-			Decimals:  9,
-		},
+		Type:         tradeType,
+		BaseMint:     baseMint,
+		QuoteMint:    quoteMint,
+		BondingCurve: pool,
+		Pool:         pool,
+		User:         user,
+		InputToken:   in,
+		OutputToken:  out,
 	}
 }
 
@@ -290,7 +233,7 @@ func (p *SugarEventParser) decodeCreateEvent(data []byte, instruction interface{
 
 // ProcessEvents implements the EventParser interface
 func (p *SugarEventParser) ProcessEvents() []types.MemeEvent {
-	instructions := getAllInstructionsForProgramSugar(p.adapter, constants.DEX_PROGRAMS.SUGAR.ID)
+	instructions := getAllInstructionsForMultiPrograms(p.adapter, []string{constants.DEX_PROGRAMS.SUGAR.ID})
 	events := p.ParseInstructions(instructions)
 
 	result := make([]types.MemeEvent, 0, len(events))
@@ -300,39 +243,4 @@ func (p *SugarEventParser) ProcessEvents() []types.MemeEvent {
 		}
 	}
 	return result
-}
-
-// getAllInstructionsForProgramSugar gets all instructions for Sugar program
-func getAllInstructionsForProgramSugar(adapter *adapter.TransactionAdapter, programId string) []types.ClassifiedInstruction {
-	var instructions []types.ClassifiedInstruction
-
-	// Process outer instructions
-	for i, ix := range adapter.Instructions() {
-		ixProgramId := adapter.GetInstructionProgramId(ix)
-		if ixProgramId == programId {
-			instructions = append(instructions, types.ClassifiedInstruction{
-				ProgramId:   ixProgramId,
-				Instruction: ix,
-				OuterIndex:  i,
-				InnerIndex:  -1,
-			})
-		}
-	}
-
-	// Process inner instructions
-	for _, innerSet := range adapter.InnerInstructions() {
-		for j, innerIx := range innerSet.Instructions {
-			ixProgramId := adapter.GetInstructionProgramId(innerIx)
-			if ixProgramId == programId {
-				instructions = append(instructions, types.ClassifiedInstruction{
-					ProgramId:   ixProgramId,
-					Instruction: innerIx,
-					OuterIndex:  innerSet.Index,
-					InnerIndex:  j,
-				})
-			}
-		}
-	}
-
-	return instructions
 }
