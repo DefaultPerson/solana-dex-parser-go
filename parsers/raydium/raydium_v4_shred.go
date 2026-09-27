@@ -2,7 +2,7 @@ package raydium
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/classifier"
@@ -27,123 +27,99 @@ func NewRaydiumV4ShredParser(adapter *adapter.TransactionAdapter, classifier *cl
 
 // ProcessInstructions processes Raydium V4 instructions and returns parsed results
 func (p *RaydiumV4ShredParser) ProcessInstructions() []interface{} {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.RAYDIUM_V4.ID)
-	return p.parseInstructions(instructions)
+	events, _ := p.ProcessAll()
+	return events
 }
 
 // ProcessTypedInstructions returns typed ParsedShredInstruction results
 func (p *RaydiumV4ShredParser) ProcessTypedInstructions() []types.ParsedShredInstruction {
-	instructions := p.classifier.GetInstructions(constants.DEX_PROGRAMS.RAYDIUM_V4.ID)
-	return p.parseTypedInstructions(instructions)
+	_, typed := p.ProcessAll()
+	return typed
 }
 
-func (p *RaydiumV4ShredParser) parseInstructions(instructions []types.ClassifiedInstruction) []interface{} {
+// ProcessAll decodes the Raydium V4 instructions into legacy events and typed
+// instructions in a single pass
+func (p *RaydiumV4ShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruction) {
 	var events []interface{}
+	var typed []types.ParsedShredInstruction
+	d := constants.DISCRIMINATORS.RAYDIUM
 
-	for _, ci := range instructions {
+	for _, ci := range p.classifier.GetInstructions(constants.DEX_PROGRAMS.RAYDIUM_V4.ID) {
 		data := p.adapter.GetInstructionData(ci.Instruction)
 		if len(data) < 1 {
 			continue
 		}
-
-		disc := data[:1]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
+		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
+		disc, payload := data[:1], data[1:]
 
 		var eventType string
 		var eventData interface{}
-
-		payload := data[1:]
+		var ins *types.ParsedShredInstruction
 
 		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.SWAP):
-			eventType = "swap"
-			eventData = p.decodeSwapInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.CREATE):
-			eventType = "create"
-			eventData = p.decodeCreateInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.ADD_LIQUIDITY):
-			eventType = "add_liquidity"
-			eventData = p.decodeAddLiquidityInstruction(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.REMOVE_LIQUIDITY):
-			eventType = "remove_liquidity"
-			eventData = p.decodeRemoveLiquidityInstruction(ci.Instruction, payload)
+		case bytes.Equal(disc, d.SWAP), bytes.Equal(disc, d.SWAP_EXACT_OUT), bytes.Equal(disc, d.SWAP_V2), bytes.Equal(disc, d.SWAP_EXACT_OUT_V2):
+			exactOut := bytes.Equal(disc, d.SWAP_EXACT_OUT) || bytes.Equal(disc, d.SWAP_EXACT_OUT_V2)
+			v2 := bytes.Equal(disc, d.SWAP_V2) || bytes.Equal(disc, d.SWAP_EXACT_OUT_V2)
+			if swap := p.decodeSwap(accounts, payload, v2, exactOut); swap != nil {
+				eventType, eventData = swapEventType(v2, exactOut), swap
+				ins = p.swapInstruction(eventType, swap)
+			}
+		case bytes.Equal(disc, d.CREATE):
+			if create := p.decodeCreate(accounts, payload); create != nil {
+				eventType, eventData = "create", create
+				ins = p.liquidityInstruction(eventType, types.PoolEventTypeCreate, create, types.ShredAmountExact, types.ShredAmountUnknown)
+			}
+		case bytes.Equal(disc, d.ADD_LIQUIDITY):
+			if add := p.decodeAddLiquidity(accounts, payload); add != nil {
+				eventType, eventData = "add_liquidity", add
+				ins = p.liquidityInstruction(eventType, types.PoolEventTypeAdd, add, types.ShredAmountMax, types.ShredAmountUnknown)
+			}
+		case bytes.Equal(disc, d.REMOVE_LIQUIDITY):
+			if remove := p.decodeRemoveLiquidity(accounts, payload); remove != nil {
+				eventType, eventData = "remove_liquidity", remove
+				outKind := types.ShredAmountMin
+				if !remove.HasMinAmounts {
+					outKind = types.ShredAmountUnknown
+				}
+				ins = p.liquidityInstruction(eventType, types.PoolEventTypeRemove, remove, types.ShredAmountExact, outKind)
+			}
 		default:
 			continue
 		}
 
-		if eventData != nil {
-			event := &RaydiumV4ShredInstruction{
-				Type:      eventType,
-				Data:      eventData,
-				Slot:      p.adapter.Slot(),
-				Timestamp: p.adapter.BlockTime(),
-				Signature: p.adapter.Signature(),
-				Idx:       utils.FormatIdx(ci.OuterIndex, innerIdx),
-				Signer:    p.adapter.Signers(),
-			}
-			events = append(events, event)
+		if eventData == nil {
+			continue
 		}
+		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
+		events = append(events, &RaydiumV4ShredInstruction{
+			Type:      eventType,
+			Data:      eventData,
+			Slot:      p.adapter.Slot(),
+			Timestamp: p.adapter.BlockTime(),
+			Signature: p.adapter.Signature(),
+			Idx:       idx,
+			Signer:    p.adapter.Signers(),
+		})
+		ins.ProgramID = constants.DEX_PROGRAMS.RAYDIUM_V4.ID
+		ins.ProgramName = constants.DEX_PROGRAMS.RAYDIUM_V4.Name
+		ins.Accounts = accounts
+		ins.Idx = idx
+		typed = append(typed, *ins)
 	}
 
-	return events
+	return events, typed
 }
 
-func (p *RaydiumV4ShredParser) parseTypedInstructions(instructions []types.ClassifiedInstruction) []types.ParsedShredInstruction {
-	var events []types.ParsedShredInstruction
-
-	for _, ci := range instructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) < 1 {
-			continue
-		}
-
-		disc := data[:1]
-		innerIdx := ci.InnerIndex
-		if innerIdx < 0 {
-			innerIdx = 0
-		}
-
-		var eventType string
-		var trade *types.TradeInfo
-		var liquidity *types.PoolEvent
-
-		payload := data[1:]
-
-		switch {
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.SWAP):
-			eventType = "swap"
-			trade = p.decodeSwapTrade(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.CREATE):
-			eventType = "create"
-			liquidity = p.decodeCreatePoolEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.ADD_LIQUIDITY):
-			eventType = "add_liquidity"
-			liquidity = p.decodeAddLiquidityPoolEvent(ci.Instruction, payload)
-		case bytes.Equal(disc, constants.DISCRIMINATORS.RAYDIUM.REMOVE_LIQUIDITY):
-			eventType = "remove_liquidity"
-			liquidity = p.decodeRemoveLiquidityPoolEvent(ci.Instruction, payload)
-		default:
-			continue
-		}
-
-		if trade != nil || liquidity != nil {
-			event := types.ParsedShredInstruction{
-				ProgramID:   constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
-				ProgramName: constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
-				Action:      eventType,
-				Trade:       trade,
-				Liquidity:   liquidity,
-				Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
-				Idx:         utils.FormatIdx(ci.OuterIndex, innerIdx),
-			}
-			events = append(events, event)
-		}
+func swapEventType(v2, exactOut bool) string {
+	switch {
+	case v2 && exactOut:
+		return "swap_base_out_v2"
+	case v2:
+		return "swap_v2"
+	case exactOut:
+		return "swap_base_out"
 	}
-
-	return events
+	return "swap"
 }
 
 // RaydiumV4ShredInstruction represents a parsed Raydium V4 instruction
@@ -157,7 +133,12 @@ type RaydiumV4ShredInstruction struct {
 	Signer    []string    `json:"signer"`
 }
 
-// RaydiumV4SwapData contains Raydium V4 swap instruction data
+// RaydiumV4SwapData contains Raydium V4 swap instruction data. The amounts
+// are instruction arguments: for swap_base_in (tags 9, 16) InputAmount is the
+// exact input and OutputAmount the minimum output; for swap_base_out (tags
+// 11, 17, ExactOut) InputAmount is the maximum input and OutputAmount the
+// exact output. InputMint and OutputMint are empty when the transaction does
+// not reveal the mints of the user's token accounts.
 type RaydiumV4SwapData struct {
 	Pool               string `json:"pool"`
 	User               string `json:"user"`
@@ -165,9 +146,19 @@ type RaydiumV4SwapData struct {
 	OutputTokenAccount string `json:"outputTokenAccount"`
 	InputAmount        uint64 `json:"inputAmount"`
 	OutputAmount       uint64 `json:"outputAmount"`
+	InputMint          string `json:"inputMint,omitempty"`
+	OutputMint         string `json:"outputMint,omitempty"`
+	CoinVault          string `json:"coinVault,omitempty"`
+	PcVault            string `json:"pcVault,omitempty"`
+	ExactOut           bool   `json:"exactOut,omitempty"`
 }
 
-// RaydiumV4LiquidityData contains Raydium V4 liquidity instruction data
+// RaydiumV4LiquidityData contains Raydium V4 liquidity instruction data.
+// Base is the pool's coin side, quote its pc side. Amounts are arguments:
+// initialize2 amounts are the exact initial reserves, deposit amounts are
+// maximums and withdraw amounts minimums (absent in old withdraw
+// instructions: HasMinAmounts false). BaseMint and QuoteMint are empty when
+// the transaction does not reveal the mints of the pool vaults.
 type RaydiumV4LiquidityData struct {
 	Pool        string `json:"pool"`
 	User        string `json:"user"`
@@ -177,88 +168,172 @@ type RaydiumV4LiquidityData struct {
 	BaseAmount  uint64 `json:"baseAmount"`
 	QuoteAmount uint64 `json:"quoteAmount"`
 	LpAmount    uint64 `json:"lpAmount,omitempty"`
+	// BaseVault and QuoteVault are the pool's coin and pc token accounts
+	BaseVault  string `json:"baseVault,omitempty"`
+	QuoteVault string `json:"quoteVault,omitempty"`
+	// HasMinAmounts is true when a withdraw carries min_coin/min_pc amounts
+	HasMinAmounts bool `json:"hasMinAmounts,omitempty"`
 }
 
-func (p *RaydiumV4ShredParser) decodeSwapInstruction(instruction interface{}, data []byte) *RaydiumV4SwapData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 18 {
+// tokenAccountMint returns the mint of a token account when the transaction
+// reveals it, "" otherwise (never a guess)
+func (p *RaydiumV4ShredParser) tokenAccountMint(account string) string {
+	if account == "" || p.adapter.IsGuessedTokenAccount(account) {
+		return ""
+	}
+	return p.adapter.GetSplTokenMint(account)
+}
+
+// decimals returns the decimals of mint when known, 0 (unknown) otherwise
+func (p *RaydiumV4ShredParser) decimals(mint string) uint8 {
+	return shredKnownDecimals(p.adapter, mint)
+}
+
+// shredKnownDecimals returns the decimals of mint when the transaction reveals
+// them or TOKEN_DECIMALS lists them, 0 (unknown) otherwise
+func shredKnownDecimals(a *adapter.TransactionAdapter, mint string) uint8 {
+	if mint == "" {
+		return 0
+	}
+	if d, ok := a.SPLDecimalsMap[mint]; ok {
+		return d
+	}
+	return constants.TOKEN_DECIMALS[mint]
+}
+
+// decodeSwap decodes swap_base_in / swap_base_out. Accounts: 0 token_program,
+// 1 amm, then either the v1 layout with (18 accounts) or without (17, current
+// SDK) amm_target_orders at 4, whose last three accounts are the user source,
+// destination and owner, or the v2 layout (8 accounts): 3 coin vault, 4 pc
+// vault, 5 source, 6 destination, 7 owner.
+func (p *RaydiumV4ShredParser) decodeSwap(accounts []string, data []byte, v2, exactOut bool) *RaydiumV4SwapData {
+	var coinVault, pcVault, source, destination, owner int
+	switch {
+	case v2 && len(accounts) >= 8:
+		coinVault, pcVault, source, destination, owner = 3, 4, 5, 6, 7
+	case !v2 && len(accounts) >= 18:
+		coinVault, pcVault, source, destination, owner = 5, 6, 15, 16, 17
+	case !v2 && len(accounts) == 17:
+		coinVault, pcVault, source, destination, owner = 4, 5, 14, 15, 16
+	default:
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	inputAmount, _ := reader.ReadU64()
-	outputAmount, _ := reader.ReadU64()
-
+	first, _ := reader.ReadU64()
+	second, _ := reader.ReadU64()
 	if reader.HasError() {
 		return nil
 	}
 
-	return &RaydiumV4SwapData{
+	swap := &RaydiumV4SwapData{
 		Pool:               accounts[1],
-		User:               accounts[17],
-		InputTokenAccount:  accounts[15],
-		OutputTokenAccount: accounts[16],
-		InputAmount:        inputAmount,
-		OutputAmount:       outputAmount,
+		User:               accounts[owner],
+		InputTokenAccount:  accounts[source],
+		OutputTokenAccount: accounts[destination],
+		InputAmount:        first,
+		OutputAmount:       second,
+		CoinVault:          accounts[coinVault],
+		PcVault:            accounts[pcVault],
+		ExactOut:           exactOut,
+	}
+
+	// Mints of the user's accounts; when one side is unknown but both vault
+	// mints are, it is the vault mint the other side does not use
+	swap.InputMint = p.tokenAccountMint(swap.InputTokenAccount)
+	swap.OutputMint = p.tokenAccountMint(swap.OutputTokenAccount)
+	coinMint, pcMint := p.tokenAccountMint(swap.CoinVault), p.tokenAccountMint(swap.PcVault)
+	if coinMint != "" && pcMint != "" {
+		other := func(m string) string {
+			switch m {
+			case coinMint:
+				return pcMint
+			case pcMint:
+				return coinMint
+			}
+			return ""
+		}
+		if swap.InputMint == "" {
+			swap.InputMint = other(swap.OutputMint)
+		}
+		if swap.OutputMint == "" {
+			swap.OutputMint = other(swap.InputMint)
+		}
+	}
+	return swap
+}
+
+// shredTradeType is utils.GetTradeType for mints that may be unknown (""):
+// the direction is SWAP unless a known side is SOL or a stablecoin
+func shredTradeType(inMint, outMint string) types.TradeType {
+	if inMint != "" && outMint != "" {
+		return utils.GetTradeType(inMint, outMint)
+	}
+	if constants.IsQuoteToken(inMint) {
+		return types.TradeTypeBuy
+	}
+	if constants.IsQuoteToken(outMint) {
+		return types.TradeTypeSell
+	}
+	return types.TradeTypeSwap
+}
+
+func (p *RaydiumV4ShredParser) swapInstruction(action string, swap *RaydiumV4SwapData) *types.ParsedShredInstruction {
+	inDecimals, outDecimals := p.decimals(swap.InputMint), p.decimals(swap.OutputMint)
+	inKind, outKind := types.ShredAmountExact, types.ShredAmountMin
+	if swap.ExactOut {
+		inKind, outKind = types.ShredAmountMax, types.ShredAmountExact
+	}
+
+	return &types.ParsedShredInstruction{
+		Action: action,
+		Trade: &types.TradeInfo{
+			Type: shredTradeType(swap.InputMint, swap.OutputMint),
+			Pool: []string{swap.Pool},
+			User: swap.User,
+			InputToken: types.TokenInfo{
+				Mint:      swap.InputMint,
+				Amount:    types.ConvertToUIAmountUint64(swap.InputAmount, inDecimals),
+				AmountRaw: strconv.FormatUint(swap.InputAmount, 10),
+				Decimals:  inDecimals,
+				Source:    swap.InputTokenAccount,
+			},
+			OutputToken: types.TokenInfo{
+				Mint:        swap.OutputMint,
+				Amount:      types.ConvertToUIAmountUint64(swap.OutputAmount, outDecimals),
+				AmountRaw:   strconv.FormatUint(swap.OutputAmount, 10),
+				Decimals:    outDecimals,
+				Destination: swap.OutputTokenAccount,
+			},
+			ProgramId: constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
+			AMM:       constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
+			AMMs:      []string{constants.DEX_PROGRAMS.RAYDIUM_V4.Name},
+			Extras: map[string]interface{}{
+				"amm":       swap.Pool,
+				"coinVault": swap.CoinVault,
+				"pcVault":   swap.PcVault,
+			},
+		},
+		InputAmountKind:  inKind,
+		OutputAmountKind: outKind,
 	}
 }
 
-func (p *RaydiumV4ShredParser) decodeSwapTrade(instruction interface{}, data []byte) *types.TradeInfo {
-	swapData := p.decodeSwapInstruction(instruction, data)
-	if swapData == nil {
-		return nil
-	}
-
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-
-	// For Raydium V4 swap, we need to determine direction from accounts
-	// Input/output token accounts are at positions 15 and 16
-	// We use default decimals since we don't have mint info from instruction
-
-	return &types.TradeInfo{
-		Type: types.TradeTypeSwap,
-		Pool: []string{swapData.Pool},
-		User: swapData.User,
-		InputToken: types.TokenInfo{
-			Mint:      swapData.InputTokenAccount,
-			Amount:    types.ConvertToUIAmountUint64(swapData.InputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", swapData.InputAmount),
-			Decimals:  9,
-		},
-		OutputToken: types.TokenInfo{
-			Mint:      swapData.OutputTokenAccount,
-			Amount:    types.ConvertToUIAmountUint64(swapData.OutputAmount, 9),
-			AmountRaw: fmt.Sprintf("%d", swapData.OutputAmount),
-			Decimals:  9,
-		},
-		ProgramId: constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
-		AMMs:      []string{constants.DEX_PROGRAMS.RAYDIUM_V4.Name},
-		Extras: map[string]interface{}{
-			"amm":          accounts[1],
-			"ammAuthority": accounts[2],
-			"coinVault":    accounts[5],
-			"pcVault":      accounts[6],
-		},
-	}
-}
-
-func (p *RaydiumV4ShredParser) decodeCreateInstruction(instruction interface{}, data []byte) *RaydiumV4LiquidityData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
+// decodeCreate decodes initialize2 (nonce u8, open_time u64, init_pc_amount
+// u64, init_coin_amount u64): accounts 4 amm, 7 lp_mint, 8 coin_mint,
+// 9 pc_mint, 10 coin vault, 11 pc vault, 17 user_wallet
+func (p *RaydiumV4ShredParser) decodeCreate(accounts []string, data []byte) *RaydiumV4LiquidityData {
 	if len(accounts) < 18 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	reader.ReadU8()  // Skip nonce
-	reader.ReadU64() // Skip init pc amount
-	reader.ReadU64() // Skip init coin amount
-	quoteAmount, _ := reader.ReadU64()
-	baseAmount, _ := reader.ReadU64()
-
+	reader.ReadU8()  // nonce
+	reader.ReadU64() // open_time
+	pcAmount, _ := reader.ReadU64()
+	coinAmount, _ := reader.ReadU64()
 	if reader.HasError() {
 		return nil
 	}
@@ -269,56 +344,25 @@ func (p *RaydiumV4ShredParser) decodeCreateInstruction(instruction interface{}, 
 		BaseMint:    accounts[8],
 		QuoteMint:   accounts[9],
 		LpMint:      accounts[7],
-		BaseAmount:  baseAmount,
-		QuoteAmount: quoteAmount,
+		BaseVault:   accounts[10],
+		QuoteVault:  accounts[11],
+		BaseAmount:  coinAmount,
+		QuoteAmount: pcAmount,
 	}
 }
 
-func (p *RaydiumV4ShredParser) decodeCreatePoolEvent(instruction interface{}, data []byte) *types.PoolEvent {
-	createData := p.decodeCreateInstruction(instruction, data)
-	if createData == nil {
-		return nil
-	}
-
-	baseAmount := types.ConvertToUIAmountUint64(createData.BaseAmount, 9)
-	quoteAmount := types.ConvertToUIAmountUint64(createData.QuoteAmount, 9)
-	decimals := uint8(9)
-
-	return &types.PoolEvent{
-		PoolEventBase: types.PoolEventBase{
-			Type:      types.PoolEventTypeCreate,
-			ProgramId: constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
-			AMM:       constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
-			User:      createData.User,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-		},
-		PoolId:          createData.Pool,
-		PoolLpMint:      createData.LpMint,
-		Token0Mint:      createData.BaseMint,
-		Token0Amount:    &baseAmount,
-		Token0AmountRaw: fmt.Sprintf("%d", createData.BaseAmount),
-		Token0Decimals:  &decimals,
-		Token1Mint:      createData.QuoteMint,
-		Token1Amount:    &quoteAmount,
-		Token1AmountRaw: fmt.Sprintf("%d", createData.QuoteAmount),
-		Token1Decimals:  &decimals,
-	}
-}
-
-func (p *RaydiumV4ShredParser) decodeAddLiquidityInstruction(instruction interface{}, data []byte) *RaydiumV4LiquidityData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 14 {
+// decodeAddLiquidity decodes deposit (max_coin_amount, max_pc_amount,
+// base_side, [other_amount_min]): accounts 1 amm, 5 lp_mint, 6 coin vault,
+// 7 pc vault, 12 user_owner
+func (p *RaydiumV4ShredParser) decodeAddLiquidity(accounts []string, data []byte) *RaydiumV4LiquidityData {
+	if len(accounts) < 13 {
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
-	baseAmount, _ := reader.ReadU64()
-	quoteAmount, _ := reader.ReadU64()
-
+	maxCoinAmount, _ := reader.ReadU64()
+	maxPcAmount, _ := reader.ReadU64()
 	if reader.HasError() {
 		return nil
 	}
@@ -326,97 +370,91 @@ func (p *RaydiumV4ShredParser) decodeAddLiquidityInstruction(instruction interfa
 	return &RaydiumV4LiquidityData{
 		Pool:        accounts[1],
 		User:        accounts[12],
-		BaseMint:    accounts[6],
-		QuoteMint:   accounts[7],
+		BaseMint:    p.tokenAccountMint(accounts[6]),
+		QuoteMint:   p.tokenAccountMint(accounts[7]),
 		LpMint:      accounts[5],
-		BaseAmount:  baseAmount,
-		QuoteAmount: quoteAmount,
+		BaseVault:   accounts[6],
+		QuoteVault:  accounts[7],
+		BaseAmount:  maxCoinAmount,
+		QuoteAmount: maxPcAmount,
 	}
 }
 
-func (p *RaydiumV4ShredParser) decodeAddLiquidityPoolEvent(instruction interface{}, data []byte) *types.PoolEvent {
-	addData := p.decodeAddLiquidityInstruction(instruction, data)
-	if addData == nil {
-		return nil
-	}
-
-	baseAmount := types.ConvertToUIAmountUint64(addData.BaseAmount, 9)
-	quoteAmount := types.ConvertToUIAmountUint64(addData.QuoteAmount, 9)
-	decimals := uint8(9)
-
-	return &types.PoolEvent{
-		PoolEventBase: types.PoolEventBase{
-			Type:      types.PoolEventTypeAdd,
-			ProgramId: constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
-			AMM:       constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
-			User:      addData.User,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-		},
-		PoolId:          addData.Pool,
-		PoolLpMint:      addData.LpMint,
-		Token0Mint:      addData.BaseMint,
-		Token0Amount:    &baseAmount,
-		Token0AmountRaw: fmt.Sprintf("%d", addData.BaseAmount),
-		Token0Decimals:  &decimals,
-		Token1Mint:      addData.QuoteMint,
-		Token1Amount:    &quoteAmount,
-		Token1AmountRaw: fmt.Sprintf("%d", addData.QuoteAmount),
-		Token1Decimals:  &decimals,
-	}
-}
-
-func (p *RaydiumV4ShredParser) decodeRemoveLiquidityInstruction(instruction interface{}, data []byte) *RaydiumV4LiquidityData {
-	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 18 {
+// decodeRemoveLiquidity decodes withdraw (amount, [min_coin_amount,
+// min_pc_amount]): accounts 1 amm, 5 lp_mint, 6 coin vault, 7 pc vault and
+// the owner at 18 (22-account layout with the withdraw queue and temp LP
+// accounts) or 16 (current 20/21-account layout)
+func (p *RaydiumV4ShredParser) decodeRemoveLiquidity(accounts []string, data []byte) *RaydiumV4LiquidityData {
+	owner := 16
+	switch {
+	case len(accounts) >= 22:
+		owner = 18
+	case len(accounts) < 17:
 		return nil
 	}
 
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
-
 	lpAmount, err := reader.ReadU64()
-	if err != nil || reader.HasError() {
+	if err != nil {
 		return nil
 	}
 
-	return &RaydiumV4LiquidityData{
-		Pool:      accounts[1],
-		User:      accounts[16],
-		BaseMint:  accounts[6],
-		QuoteMint: accounts[7],
-		LpMint:    accounts[5],
-		LpAmount:  lpAmount,
+	remove := &RaydiumV4LiquidityData{
+		Pool:       accounts[1],
+		User:       accounts[owner],
+		BaseMint:   p.tokenAccountMint(accounts[6]),
+		QuoteMint:  p.tokenAccountMint(accounts[7]),
+		LpMint:     accounts[5],
+		BaseVault:  accounts[6],
+		QuoteVault: accounts[7],
+		LpAmount:   lpAmount,
 	}
+	if reader.Remaining() >= 16 {
+		remove.BaseAmount, _ = reader.ReadU64()
+		remove.QuoteAmount, _ = reader.ReadU64()
+		remove.HasMinAmounts = true
+	}
+	return remove
 }
 
-func (p *RaydiumV4ShredParser) decodeRemoveLiquidityPoolEvent(instruction interface{}, data []byte) *types.PoolEvent {
-	removeData := p.decodeRemoveLiquidityInstruction(instruction, data)
-	if removeData == nil {
-		return nil
-	}
+// liquidityInstruction builds a PoolEvent; for liquidity the input side is
+// what the user deposits (token amounts for CREATE and ADD, LP for REMOVE)
+func (p *RaydiumV4ShredParser) liquidityInstruction(action string, eventType types.PoolEventType, l *RaydiumV4LiquidityData, inKind, outKind types.ShredAmountKind) *types.ParsedShredInstruction {
+	baseDecimals, quoteDecimals := p.decimals(l.BaseMint), p.decimals(l.QuoteMint)
+	baseAmount := types.ConvertToUIAmountUint64(l.BaseAmount, baseDecimals)
+	quoteAmount := types.ConvertToUIAmountUint64(l.QuoteAmount, quoteDecimals)
 
-	lpAmount := types.ConvertToUIAmountUint64(removeData.LpAmount, 6)
-	decimals := uint8(9)
-
-	return &types.PoolEvent{
+	event := &types.PoolEvent{
 		PoolEventBase: types.PoolEventBase{
-			Type:      types.PoolEventTypeRemove,
+			Type:      eventType,
 			ProgramId: constants.DEX_PROGRAMS.RAYDIUM_V4.ID,
 			AMM:       constants.DEX_PROGRAMS.RAYDIUM_V4.Name,
-			User:      removeData.User,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
+			User:      l.User,
 		},
-		PoolId:         removeData.Pool,
-		PoolLpMint:     removeData.LpMint,
-		Token0Mint:     removeData.BaseMint,
-		Token0Decimals: &decimals,
-		Token1Mint:     removeData.QuoteMint,
-		Token1Decimals: &decimals,
-		LpAmount:       &lpAmount,
-		LpAmountRaw:    fmt.Sprintf("%d", removeData.LpAmount),
+		PoolId:         l.Pool,
+		PoolLpMint:     l.LpMint,
+		Token0Mint:     l.BaseMint,
+		Token0Decimals: &baseDecimals,
+		Token1Mint:     l.QuoteMint,
+		Token1Decimals: &quoteDecimals,
+	}
+	if eventType != types.PoolEventTypeRemove || l.HasMinAmounts {
+		event.Token0Amount = &baseAmount
+		event.Token0AmountRaw = strconv.FormatUint(l.BaseAmount, 10)
+		event.Token1Amount = &quoteAmount
+		event.Token1AmountRaw = strconv.FormatUint(l.QuoteAmount, 10)
+	}
+	if eventType == types.PoolEventTypeRemove {
+		lpAmount := types.ConvertToUIAmountUint64(l.LpAmount, p.decimals(l.LpMint))
+		event.LpAmount = &lpAmount
+		event.LpAmountRaw = strconv.FormatUint(l.LpAmount, 10)
+	}
+
+	return &types.ParsedShredInstruction{
+		Action:           action,
+		Liquidity:        event,
+		InputAmountKind:  inKind,
+		OutputAmountKind: outKind,
 	}
 }
