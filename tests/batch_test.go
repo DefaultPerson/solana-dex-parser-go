@@ -1,7 +1,7 @@
 package tests
 
 import (
-	"os"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -11,26 +11,17 @@ import (
 )
 
 func TestParseBatch(t *testing.T) {
-	apiKey := os.Getenv("HELIUS_API_KEY")
-	if apiKey == "" {
-		t.Skip("HELIUS_API_KEY not set, skipping batch tests")
-	}
-
 	parser := dexparser.NewDexParser()
 
-	// Fetch multiple transactions - using known working signatures
+	// Load multiple transactions from the fixtures
 	signatures := []string{
 		"4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz", // Pumpfun
-		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",  // Pumpfun sell
+		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",  // Pumpfun buy
 	}
 
 	var txs []*adapter.SolanaTransaction
 	for _, sig := range signatures {
-		tx, err := fetchTransaction(sig)
-		if err != nil {
-			t.Fatalf("Failed to fetch transaction %s: %v", sig, err)
-		}
-		txs = append(txs, tx)
+		txs = append(txs, loadFixture(t, sig))
 	}
 
 	config := types.DefaultParseConfig()
@@ -46,26 +37,28 @@ func TestParseBatch(t *testing.T) {
 			t.Errorf("Result %d is nil", i)
 			continue
 		}
-		t.Logf("Result %d: signature=%s, trades=%d, memeEvents=%d",
-			i, result.Signature, len(result.Trades), len(result.MemeEvents))
+		if result.Signature != signatures[i] || len(result.Trades) != 1 || len(result.MemeEvents) == 0 {
+			t.Errorf("Result %d: signature=%s, trades=%d, memeEvents=%d", i, result.Signature, len(result.Trades), len(result.MemeEvents))
+		}
+		if single := parser.ParseAll(txs[i], &config); !reflect.DeepEqual(single, result) {
+			t.Errorf("Result %d differs from ParseAll", i)
+		}
 	}
 
 	// Test concurrent processing
-	results = parser.ParseBatch(txs, &config, 4)
-	if len(results) != len(txs) {
-		t.Errorf("Expected %d results with concurrent processing, got %d", len(txs), len(results))
+	concurrent := parser.ParseBatch(txs, &config, 4)
+	if len(concurrent) != len(txs) {
+		t.Fatalf("Expected %d results with concurrent processing, got %d", len(txs), len(concurrent))
+	}
+	if !reflect.DeepEqual(concurrent, results) {
+		t.Error("concurrent results differ from sequential results")
 	}
 }
 
 func TestParseBatchWithCallback(t *testing.T) {
-	apiKey := os.Getenv("HELIUS_API_KEY")
-	if apiKey == "" {
-		t.Skip("HELIUS_API_KEY not set, skipping batch callback tests")
-	}
-
 	parser := dexparser.NewDexParser()
 
-	// Fetch multiple transactions - using known working signatures
+	// Load multiple transactions from the fixtures
 	signatures := []string{
 		"4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz",
 		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",
@@ -73,11 +66,7 @@ func TestParseBatchWithCallback(t *testing.T) {
 
 	var txs []*adapter.SolanaTransaction
 	for _, sig := range signatures {
-		tx, err := fetchTransaction(sig)
-		if err != nil {
-			t.Fatalf("Failed to fetch transaction %s: %v", sig, err)
-		}
-		txs = append(txs, tx)
+		txs = append(txs, loadFixture(t, sig))
 	}
 
 	config := types.DefaultParseConfig()
@@ -85,7 +74,9 @@ func TestParseBatchWithCallback(t *testing.T) {
 
 	callback := func(index int, tx *adapter.SolanaTransaction, result *types.ParseResult, err error) bool {
 		atomic.AddInt32(&callbackCount, 1)
-		t.Logf("Callback %d: index=%d, signature=%s", callbackCount, index, result.Signature)
+		if result == nil || err != nil || result.Signature != signatures[index] {
+			t.Errorf("Callback index=%d: result=%v err=%v", index, result, err)
+		}
 		return true // continue processing
 	}
 
@@ -101,14 +92,9 @@ func TestParseBatchWithCallback(t *testing.T) {
 }
 
 func TestParseBatchEarlyTermination(t *testing.T) {
-	apiKey := os.Getenv("HELIUS_API_KEY")
-	if apiKey == "" {
-		t.Skip("HELIUS_API_KEY not set, skipping batch early termination tests")
-	}
-
 	parser := dexparser.NewDexParser()
 
-	// Fetch multiple transactions - using known working signatures
+	// Load multiple transactions from the fixtures
 	signatures := []string{
 		"4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz",
 		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",
@@ -117,11 +103,7 @@ func TestParseBatchEarlyTermination(t *testing.T) {
 
 	var txs []*adapter.SolanaTransaction
 	for _, sig := range signatures {
-		tx, err := fetchTransaction(sig)
-		if err != nil {
-			t.Fatalf("Failed to fetch transaction %s: %v", sig, err)
-		}
-		txs = append(txs, tx)
+		txs = append(txs, loadFixture(t, sig))
 	}
 
 	config := types.DefaultParseConfig()

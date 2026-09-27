@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"os"
 	"testing"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
@@ -13,27 +12,19 @@ import (
 var benchmarkTxs []*adapter.SolanaTransaction
 
 func setupBenchmarkTxs(b *testing.B) []*adapter.SolanaTransaction {
-	apiKey := os.Getenv("HELIUS_API_KEY")
-	if apiKey == "" {
-		b.Skip("HELIUS_API_KEY not set, skipping benchmarks")
-	}
-
 	if benchmarkTxs != nil {
 		return benchmarkTxs
 	}
 
 	signatures := []string{
-		"4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz", // Pumpfun
-		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",  // Pumpfun sell
+		"4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz", // Pumpfun create + buy
+		"v8s37Srj6QPMtRC1HfJcrSenCHvYebHiGkHVuFFiQ6UviqHnoVx4U77M3TZhQQXewXadHYh5t35LkesJi3ztPZZ",  // Pumpfun buy
+		"NeF1UiWXKUbuswNNw14gJ2uup7yrV6KyXijQ7dsjLYanj9dnsBSeqGPDVZ3wP3NfhXQ84rJncRo5XwbrbSdWVWW",  // Jupiter 3-hop route
 	}
 
 	txs := make([]*adapter.SolanaTransaction, 0, len(signatures))
 	for _, sig := range signatures {
-		tx, err := fetchTransaction(sig)
-		if err != nil {
-			b.Fatalf("Failed to fetch transaction %s: %v", sig, err)
-		}
-		txs = append(txs, tx)
+		txs = append(txs, loadFixture(b, sig))
 	}
 
 	benchmarkTxs = txs

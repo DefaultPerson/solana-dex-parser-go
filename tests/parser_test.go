@@ -3,49 +3,12 @@ package tests
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"testing"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
-	"github.com/goccy/go-json"
 )
-
-// TestCase represents a test case for trade parsing
-type TestCase struct {
-	Signature   string        `json:"signature"`
-	Type        string        `json:"type"`
-	AMM         string        `json:"amm"`
-	Route       string        `json:"route"`
-	ProgramId   string        `json:"programId"`
-	User        string        `json:"user"`
-	Slot        uint64        `json:"slot"`
-	Timestamp   int64         `json:"timestamp"`
-	InputToken  TokenTestCase `json:"inputToken"`
-	OutputToken TokenTestCase `json:"outputToken"`
-}
-
-type TokenTestCase struct {
-	Mint     string  `json:"mint"`
-	Amount   float64 `json:"amount"`
-	Decimals uint8   `json:"decimals"`
-}
-
-// LoadTestTransaction loads a transaction from a JSON file
-func LoadTestTransaction(filename string) (*adapter.SolanaTransaction, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	var tx adapter.SolanaTransaction
-	if err := json.Unmarshal(data, &tx); err != nil {
-		return nil, err
-	}
-
-	return &tx, nil
-}
 
 func TestDexParserBasic(t *testing.T) {
 	// Test that the parser can be created
@@ -60,43 +23,6 @@ func TestShredParserBasic(t *testing.T) {
 	parser := dexparser.NewShredParser()
 	if parser == nil {
 		t.Fatal("Failed to create ShredParser")
-	}
-}
-
-func TestParseTrades(t *testing.T) {
-	// Skip if no test data available
-	if _, err := os.Stat("testdata/trades"); os.IsNotExist(err) {
-		t.Skip("No test data available at testdata/trades")
-	}
-
-	parser := dexparser.NewDexParser()
-
-	entries, err := os.ReadDir("testdata/trades")
-	if err != nil {
-		t.Skipf("Cannot read test data directory: %v", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		t.Run(entry.Name(), func(t *testing.T) {
-			tx, err := LoadTestTransaction("testdata/trades/" + entry.Name())
-			if err != nil {
-				t.Fatalf("Failed to load transaction: %v", err)
-			}
-
-			trades := parser.ParseTrades(tx, nil)
-			if len(trades) == 0 {
-				t.Log("No trades found in transaction")
-			} else {
-				t.Logf("Found %d trades", len(trades))
-				for i, trade := range trades {
-					t.Logf("Trade %d: %s %s -> %s", i, trade.Type, trade.InputToken.Mint, trade.OutputToken.Mint)
-				}
-			}
-		})
 	}
 }
 

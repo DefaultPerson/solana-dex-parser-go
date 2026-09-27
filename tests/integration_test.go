@@ -1,131 +1,15 @@
 package tests
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
+	"math/big"
 	"testing"
-	"time"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
-	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
-	"github.com/goccy/go-json"
-	"github.com/joho/godotenv"
 )
 
-func init() {
-	// Load .env from project root
-	_ = godotenv.Load("../.env")
-}
-
-// getHeliusRPCURL returns the Helius RPC URL from environment
-func getHeliusRPCURL() string {
-	apiKey := os.Getenv("HELIUS_API_KEY")
-	if apiKey == "" {
-		return ""
-	}
-	return fmt.Sprintf("https://mainnet.helius-rpc.com/?api-key=%s", apiKey)
-}
-
-// RPCRequest represents a JSON-RPC request
-type RPCRequest struct {
-	JSONRPC string        `json:"jsonrpc"`
-	ID      int           `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
-}
-
-// RPCResponse represents a JSON-RPC response
-type RPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *RPCError       `json:"error"`
-}
-
-// RPCError represents a JSON-RPC error
-type RPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// fetchTransaction fetches a transaction from Helius RPC
-func fetchTransaction(signature string) (*adapter.SolanaTransaction, error) {
-	rpcURL := getHeliusRPCURL()
-	if rpcURL == "" {
-		return nil, fmt.Errorf("HELIUS_API_KEY not set")
-	}
-
-	req := RPCRequest{
-		JSONRPC: "2.0",
-		ID:      1,
-		Method:  "getTransaction",
-		Params: []interface{}{
-			signature,
-			map[string]interface{}{
-				"encoding":                       "json",
-				"commitment":                     "confirmed",
-				"maxSupportedTransactionVersion": 0,
-			},
-		},
-	}
-
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Post(rpcURL, "application/json", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var rpcResp RPCResponse
-	if err := json.Unmarshal(body, &rpcResp); err != nil {
-		return nil, err
-	}
-
-	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("RPC error: %s", rpcResp.Error.Message)
-	}
-
-	if rpcResp.Result == nil || string(rpcResp.Result) == "null" {
-		return nil, fmt.Errorf("transaction not found")
-	}
-
-	var tx adapter.SolanaTransaction
-	if err := json.Unmarshal(rpcResp.Result, &tx); err != nil {
-		return nil, fmt.Errorf("unmarshal error: %v, body: %s", err, string(rpcResp.Result)[:min(500, len(rpcResp.Result))])
-	}
-
-	return &tx, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// getMapKeys returns keys from a map
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
+// Integration tests run offline on the mainnet fixtures in testdata/tx (see
+// fixture_helper_test.go).
 
 // IntegrationTestCase defines a test case
 type IntegrationTestCase struct {
@@ -136,6 +20,9 @@ type IntegrationTestCase struct {
 	ExpectedInputMint  string
 	ExpectedOutputMint string
 	ExpectedRoute      string
+	// AmountCheckSkip, when set, says why the matched trade's token-side
+	// amount is not compared with the user's token balance delta
+	AmountCheckSkip string
 }
 
 var integrationTestCases = []IntegrationTestCase{
@@ -192,6 +79,7 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:       "MeteoraDamm",
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		AmountCheckSkip:   "the user pays 171348057 of the output token to BONKbot (ZG98FU) in a later outer instruction",
 	},
 	// Raydium CPMM trades
 	{
@@ -218,15 +106,14 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
 	},
 	// Jupiter-related trades (via Jupiter DCA)
-	// TODO: DCA tests temporarily disabled - transaction structure changes
-	// {
-	// 	Name:              "Jupiter DCA BUY via MeteoraDLMM",
-	// 	Signature:         "2euJJaq2LCagFjjENTUdn7n6LgobDvBdsfPLovCXnZ9pknMnKtcHo1Vfw8c8kghGzzHRcYuWoEyQFAtuCm9TXGr1",
-	// 	ExpectedAMM:       "MeteoraDLMM",
-	// 	ExpectedType:      "BUY",
-	// 	ExpectedInputMint: "So11111111111111111111111111111111111111112",
-	// 	ExpectedRoute:     "JupiterDCA",
-	// },
+	{
+		Name:              "Jupiter DCA BUY via MeteoraDLMM",
+		Signature:         "2euJJaq2LCagFjjENTUdn7n6LgobDvBdsfPLovCXnZ9pknMnKtcHo1Vfw8c8kghGzzHRcYuWoEyQFAtuCm9TXGr1",
+		ExpectedAMM:       "MeteoraDLMM",
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "JupiterDCA",
+	},
 	// Moonit trades
 	{
 		Name:              "Moonit BUY",
@@ -264,6 +151,7 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:       "Boopfun",
 		ExpectedType:      "BUY",
 		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		AmountCheckSkip:   "the Boopfun parser reports output 0 for this buy (the user received 74720036786781967); owned by the meme package",
 	},
 	{
 		Name:               "Boopfun SELL",
@@ -273,15 +161,14 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
 	},
 	// Jupiter V6 trades (JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4)
-	// TODO: Jupiter V6 via Moonit disabled - transaction structure changes
-	// {
-	// 	Name:              "Jupiter V6 via Moonit",
-	// 	Signature:         "3TZKJLxy4H2wQiYenuSVoQ2ox7xveRoG5bxr7yfmEdtMPqKmdHWcf5Q9B8uUBi6ystp2gQsZdP5qxiYK4JnUpm7",
-	// 	ExpectedAMM:       "Moonit", // Jupiter routes through Moonit
-	// 	ExpectedType:      "BUY",
-	// 	ExpectedInputMint: "So11111111111111111111111111111111111111112",
-	// 	ExpectedRoute:     "Jupiter",
-	// },
+	{
+		Name:              "Jupiter V6 via Moonit",
+		Signature:         "3TZKJLxy4H2wQiYenuSVoQ2ox7xveRoG5bxr7yfmEdtMPqKmdHWcf5Q9B8uUBi6ystp2gQsZdP5qxiYK4JnUpm7",
+		ExpectedAMM:       "Moonit", // Jupiter routes through Moonit
+		ExpectedType:      "BUY",
+		ExpectedInputMint: "So11111111111111111111111111111111111111112",
+		ExpectedRoute:     "Jupiter",
+	},
 	// OKX trades (6m2CDdhRgxpH4WjvdzxAYbGxwdGUz5MziiL5jek2kBma)
 	{
 		Name:          "OKX via RaydiumV4",
@@ -325,15 +212,15 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedAMM:        "MeteoraDLMM",
 		ExpectedType:       "SELL",
 		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
+		AmountCheckSkip:    "the same transaction also removes liquidity (outer 10, 11) and buys back (outer 17)",
 	},
-	// TODO: DCA tests temporarily disabled - transaction structure changes
-	// {
-	// 	Name:          "Jupiter DCA SELL via RaydiumV4",
-	// 	Signature:     "4mxr44yo5Qi7Rabwbknkh8MNUEWAMKmzFQEmqUVdx5JpHEEuh59TrqiMCjZ7mgZMozRK1zW8me34w8Myi8Qi1tWP",
-	// 	ExpectedAMM:   "RaydiumV4",
-	// 	ExpectedType:  "SELL",
-	// 	ExpectedRoute: "JupiterDCA",
-	// },
+	{
+		Name:          "Jupiter DCA SELL via RaydiumV4",
+		Signature:     "4mxr44yo5Qi7Rabwbknkh8MNUEWAMKmzFQEmqUVdx5JpHEEuh59TrqiMCjZ7mgZMozRK1zW8me34w8Myi8Qi1tWP",
+		ExpectedAMM:   "RaydiumV4",
+		ExpectedType:  "SELL",
+		ExpectedRoute: "JupiterDCA",
+	},
 	// Additional coverage tests - BUY operations
 	{
 		Name:              "Maestro BUY via RaydiumV4",
@@ -397,78 +284,19 @@ var integrationTestCases = []IntegrationTestCase{
 		ExpectedType:       "SELL",
 		ExpectedOutputMint: "So11111111111111111111111111111111111111112",
 	},
-	// Prop AMM / Dark Pool tests
-	// TODO: Add real transaction signatures when available
-	// {
-	// 	Name:        "SolFi swap",
-	// 	Signature:   "", // Need real signature
-	// 	ExpectedAMM: "SolFi",
-	// },
-	// {
-	// 	Name:        "GoonFi swap",
-	// 	Signature:   "", // Need real signature
-	// 	ExpectedAMM: "GoonFi",
-	// },
-	// {
-	// 	Name:        "Obric V2 swap",
-	// 	Signature:   "", // Need real signature
-	// 	ExpectedAMM: "ObricV2",
-	// },
-	// {
-	// 	Name:        "DFlow swap",
-	// 	Signature:   "", // Need real signature
-	// 	ExpectedAMM: "DFlow",
-	// },
-	// {
-	// 	Name:        "HumidiFi swap",
-	// 	Signature:   "", // Need real signature
-	// 	ExpectedAMM: "HumidiFi",
-	// },
 }
 
 func TestIntegrationParseTrades(t *testing.T) {
-	if os.Getenv("HELIUS_API_KEY") == "" {
-		t.Skip("HELIUS_API_KEY not set, skipping integration tests")
-	}
-
 	parser := dexparser.NewDexParser()
 
 	for _, tc := range integrationTestCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			tx, err := fetchTransaction(tc.Signature)
-			if err != nil {
-				t.Fatalf("Failed to fetch transaction: %v", err)
-			}
+			tx := loadFixture(t, tc.Signature)
 
 			config := &types.ParseConfig{TryUnknownDEX: true}
 			trades := parser.ParseTrades(tx, config)
-
 			if len(trades) == 0 {
-				t.Logf("Account keys for debugging:")
-				for i, key := range tx.Transaction.Message.AccountKeys {
-					t.Logf("  [%d] %s", i, key.Pubkey)
-				}
-				t.Logf("Outer instructions:")
-				for i, ix := range tx.Transaction.Message.Instructions {
-					ixMap, ok := ix.(map[string]interface{})
-					if ok {
-						t.Logf("  [%d] programIdIndex=%v", i, ixMap["programIdIndex"])
-					}
-				}
-				t.Logf("Inner instructions:")
-				for _, set := range tx.Meta.InnerInstructions {
-					t.Logf("  OuterIndex=%d, count=%d", set.Index, len(set.Instructions))
-				}
-
-				// Debug: Use ParseAll to see what's happening
-				result := parser.ParseAll(tx, config)
-				t.Logf("ParseAll result: trades=%d, liquidities=%d, transfers=%d", len(result.Trades), len(result.Liquidities), len(result.Transfers))
-				for i, tr := range result.Transfers {
-					t.Logf("  Transfer[%d]: %s %s -> %s, type=%s", i, tr.Info.Mint, tr.Info.Source, tr.Info.Destination, tr.Type)
-				}
-
-				t.Errorf("Expected at least 1 trade, got 0")
-				return
+				t.Fatalf("Expected at least 1 trade, got 0")
 			}
 
 			// Find the best matching trade
@@ -477,11 +305,6 @@ func TestIntegrationParseTrades(t *testing.T) {
 			var ammOnlyMatch *types.TradeInfo
 			for i := range trades {
 				trade := &trades[i]
-				t.Logf("Trade[%d]: Type=%s, AMM=%s, Route=%s, Input=%s (%.6f), Output=%s (%.6f)",
-					i, trade.Type, trade.AMM, trade.Route,
-					trade.InputToken.Mint, trade.InputToken.Amount,
-					trade.OutputToken.Mint, trade.OutputToken.Amount)
-
 				ammMatches := tc.ExpectedAMM == "" || trade.AMM == tc.ExpectedAMM
 				typeMatches := tc.ExpectedType == "" || string(trade.Type) == tc.ExpectedType
 
@@ -495,7 +318,6 @@ func TestIntegrationParseTrades(t *testing.T) {
 			if matchingTrade == nil {
 				matchingTrade = ammOnlyMatch
 			}
-
 			if matchingTrade == nil {
 				matchingTrade = &trades[0]
 			}
@@ -521,44 +343,35 @@ func TestIntegrationParseTrades(t *testing.T) {
 			if tc.ExpectedRoute != "" && trade.Route != tc.ExpectedRoute {
 				t.Errorf("Expected route %s, got %s", tc.ExpectedRoute, trade.Route)
 			}
+
+			// The token side of the trade must match the user's token balance
+			// change (independent of the parser) whenever the user's balance of
+			// that mint changed
+			if tc.AmountCheckSkip != "" {
+				return
+			}
+			if trade.OutputToken.Mint != solMint {
+				delta := ownerTokenDelta(tx, trade.User, trade.OutputToken.Mint)
+				if delta.Sign() != 0 && bigStr(trade.OutputToken.AmountRaw).Cmp(delta) != 0 {
+					t.Errorf("output %s %s, user's balance change %s", trade.OutputToken.Mint, trade.OutputToken.AmountRaw, delta)
+				}
+			}
+			if trade.InputToken.Mint != solMint {
+				delta := ownerTokenDelta(tx, trade.User, trade.InputToken.Mint)
+				if delta.Sign() != 0 && bigStr(trade.InputToken.AmountRaw).Cmp(new(big.Int).Neg(delta)) != 0 {
+					t.Errorf("input %s %s, user's balance change %s", trade.InputToken.Mint, trade.InputToken.AmountRaw, delta)
+				}
+			}
 		})
 	}
 }
 
 func TestIntegrationParseAll(t *testing.T) {
-	if os.Getenv("HELIUS_API_KEY") == "" {
-		t.Skip("HELIUS_API_KEY not set, skipping integration tests")
-	}
-
 	parser := dexparser.NewDexParser()
 
-	// Test a Pumpfun transaction
+	// Pump.fun create + buy
 	signature := "4Cod1cNGv6RboJ7rSB79yeVCR4Lfd25rFgLY3eiPJfTJjTGyYP1r2i1upAYZHQsWDqUbGd1bhTRm1bpSQcpWMnEz"
-	tx, err := fetchTransaction(signature)
-	if err != nil {
-		t.Fatalf("Failed to fetch transaction: %v", err)
-	}
-
-	// Debug: print account keys and instructions
-	t.Logf("Account keys count: %d", len(tx.Transaction.Message.AccountKeys))
-	for i, key := range tx.Transaction.Message.AccountKeys {
-		t.Logf("  [%d] %s", i, key.Pubkey)
-	}
-	t.Logf("Instructions count: %d", len(tx.Transaction.Message.Instructions))
-	for i, ix := range tx.Transaction.Message.Instructions {
-		ixMap, ok := ix.(map[string]interface{})
-		if ok {
-			t.Logf("  [%d] map keys: %v", i, getMapKeys(ixMap))
-			t.Logf("      programIdIndex: %v, accounts type: %T", ixMap["programIdIndex"], ixMap["accounts"])
-		} else {
-			t.Logf("  [%d] not a map: %T", i, ix)
-		}
-	}
-	t.Logf("Inner instructions count: %d", len(tx.Meta.InnerInstructions))
-	t.Logf("Meta present: %v", tx.Meta != nil)
-	if tx.Meta != nil {
-		t.Logf("PreTokenBalances: %d, PostTokenBalances: %d", len(tx.Meta.PreTokenBalances), len(tx.Meta.PostTokenBalances))
-	}
+	tx := loadFixture(t, signature)
 
 	config := &types.ParseConfig{TryUnknownDEX: true}
 	result := parser.ParseAll(tx, config)
@@ -566,26 +379,26 @@ func TestIntegrationParseAll(t *testing.T) {
 	if result == nil {
 		t.Fatal("ParseAll returned nil")
 	}
-
-	t.Logf("Parse state: %v", result.State)
-	t.Logf("Signature: %s", result.Signature)
-	t.Logf("Trades: %d", len(result.Trades))
-	t.Logf("Liquidities: %d", len(result.Liquidities))
-	t.Logf("Transfers: %d", len(result.Transfers))
-	t.Logf("MemeEvents: %d", len(result.MemeEvents))
-
 	if !result.State {
-		t.Errorf("Parse failed: %s", result.Msg)
+		t.Fatalf("Parse failed: %s", result.Msg)
+	}
+	if result.Signature != signature {
+		t.Errorf("Signature = %s", result.Signature)
 	}
 
-	// Should have at least one trade for a Pumpfun BUY
-	if len(result.Trades) == 0 && len(result.MemeEvents) == 0 {
-		t.Error("Expected trades or meme events")
+	// one Pump.fun buy, and the create + buy meme events
+	if len(result.Trades) != 1 || result.Trades[0].AMM != "Pumpfun" || result.Trades[0].Type != types.TradeTypeBuy {
+		t.Fatalf("Trades = %v, want one Pump.fun BUY", result.Trades)
 	}
-
-	// Log detailed trade info
-	for i, trade := range result.Trades {
-		t.Logf("Trade[%d]: %s %s -> %s, AMM=%s, User=%s",
-			i, trade.Type, trade.InputToken.Mint, trade.OutputToken.Mint, trade.AMM, trade.User)
+	user := tx.Transaction.Message.AccountKeys[0].Pubkey
+	trade := result.Trades[0]
+	if trade.User != user || bigStr(trade.OutputToken.AmountRaw).Cmp(ownerTokenDelta(tx, user, trade.OutputToken.Mint)) != 0 {
+		t.Errorf("trade %s, want output = user's balance change %s", tradeKey(trade), ownerTokenDelta(tx, user, trade.OutputToken.Mint))
+	}
+	if len(result.MemeEvents) != 2 || result.MemeEvents[0].Type != types.TradeTypeCreate || result.MemeEvents[1].Type != types.TradeTypeBuy {
+		t.Errorf("MemeEvents = %+v, want CREATE then BUY", result.MemeEvents)
+	}
+	if result.Fee.Amount != "80285" {
+		t.Errorf("Fee = %s, want 80285 (meta.fee)", result.Fee.Amount)
 	}
 }
