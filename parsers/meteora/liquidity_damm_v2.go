@@ -2,7 +2,7 @@ package meteora
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -55,11 +55,7 @@ func (p *MeteoraDAMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId == constants.DEX_PROGRAMS.METEORA_DAMM_V2.ID {
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			event := p.ParseInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx, p)
+			event := p.ParseInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
 			if event != nil {
 				events = append(events, *event)
 			}
@@ -69,28 +65,24 @@ func (p *MeteoraDAMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 	return events
 }
 
-// ParseCreateLiquidityEvent parses create pool event
+// ParseCreateLiquidityEvent parses create pool event. The initial deposit is
+// transferred after the EvtCreatePosition self-CPI, so the transfers are
+// grouped under that event instruction (see InstructionTransfers). Accounts
+// (cp_amm IDL): initialize_pool pool 6, token mints 8/9;
+// initialize_customizable_pool pool 5, mints 7/8;
+// initialize_pool_with_dynamic_config pool 7, mints 9/10.
 func (p *MeteoraDAMMPoolParser) ParseCreateLiquidityEvent(
 	instruction interface{},
 	index int,
 	data []byte,
 	transfers []types.TransferData,
 ) *types.PoolEvent {
-	disc := data[:8]
-
-	// Get event instruction for transfers
-	eventInstruction := p.getInstructionByDiscriminator(constants.DISCRIMINATORS.METEORA_DAMM_V2.CREATE_POSITION_EVENT, 16)
-	if eventInstruction != nil {
-		eventTransfers := p.GetTransfersForInstruction(
-			eventInstruction.ProgramId,
-			eventInstruction.OuterIndex,
-			eventInstruction.InnerIndex,
-			nil,
-		)
-		if len(eventTransfers) > 0 {
-			transfers = eventTransfers
-		}
+	if len(data) < 8 {
+		return nil
 	}
+	disc := data[:8]
+	isCustom := bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DAMM_V2.INITIALIZE_CUSTOM_POOL)
+	isDynamicConfig := bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DAMM_V2.INITIALIZE_POOL_WITH_DYNAMIC_CONFIG)
 
 	lpTransfers := p.Utils.GetLPTransfers(transfers)
 	var token0, token1, lpToken *types.TransferData
@@ -111,24 +103,29 @@ func (p *MeteoraDAMMPoolParser) ParseCreateLiquidityEvent(
 
 	accounts := p.Adapter.GetInstructionAccounts(instruction)
 
+	poolIndex, mintAIndex := 6, 8
+	if isCustom {
+		poolIndex, mintAIndex = 5, 7
+	} else if isDynamicConfig {
+		poolIndex, mintAIndex = 7, 9
+	}
+	accountAt := func(i int) string {
+		if i < len(accounts) {
+			return accounts[i]
+		}
+		return ""
+	}
+
 	var token0Mint, token1Mint string
 	if token0 != nil {
 		token0Mint = token0.Info.Mint
 	} else {
-		if bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DAMM_V2.INITIALIZE_CUSTOM_POOL) && len(accounts) > 7 {
-			token0Mint = accounts[7]
-		} else if len(accounts) > 8 {
-			token0Mint = accounts[8]
-		}
+		token0Mint = accountAt(mintAIndex)
 	}
 	if token1 != nil {
 		token1Mint = token1.Info.Mint
 	} else {
-		if bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DAMM_V2.INITIALIZE_CUSTOM_POOL) && len(accounts) > 8 {
-			token1Mint = accounts[8]
-		} else if len(accounts) > 9 {
-			token1Mint = accounts[9]
-		}
+		token1Mint = accountAt(mintAIndex + 1)
 	}
 
 	programId := p.Adapter.GetInstructionProgramId(instruction)
@@ -144,16 +141,8 @@ func (p *MeteoraDAMMPoolParser) ParseCreateLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = fmt.Sprintf("%d", index)
-
-	// Determine pool ID based on discriminator
-	if bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DAMM_V2.INITIALIZE_CUSTOM_POOL) && len(accounts) > 5 {
-		event.PoolId = accounts[5]
-	} else if bytes.Equal(disc, constants.DISCRIMINATORS.METEORA_DAMM_V2.INITIALIZE_POOL_WITH_DYNAMIC_CONFIG) && len(accounts) > 7 {
-		event.PoolId = accounts[7]
-	} else if len(accounts) > 6 {
-		event.PoolId = accounts[6]
-	}
+	event.Idx = strconv.Itoa(index)
+	event.PoolId = accountAt(poolIndex)
 
 	if lpToken != nil {
 		event.PoolLpMint = lpToken.Info.Mint
@@ -213,7 +202,7 @@ func (p *MeteoraDAMMPoolParser) ParseAddLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = fmt.Sprintf("%d", index)
+	event.Idx = strconv.Itoa(index)
 
 	if len(accounts) > 0 {
 		event.PoolId = accounts[0]
@@ -278,7 +267,7 @@ func (p *MeteoraDAMMPoolParser) ParseRemoveLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = fmt.Sprintf("%d", index)
+	event.Idx = strconv.Itoa(index)
 
 	if len(accounts) > 1 {
 		event.PoolId = accounts[1]
@@ -317,15 +306,4 @@ func (p *MeteoraDAMMPoolParser) normalizeTokens(transfers []types.TransferData) 
 	}
 
 	return token0, token1
-}
-
-// getInstructionByDiscriminator finds instruction by discriminator
-func (p *MeteoraDAMMPoolParser) getInstructionByDiscriminator(discriminator []byte, length int) *types.ClassifiedInstruction {
-	for _, ci := range p.ClassifiedInstructions {
-		data := p.Adapter.GetInstructionData(ci.Instruction)
-		if len(data) >= length && bytes.Equal(data[:length], discriminator) {
-			return &ci
-		}
-	}
-	return nil
 }

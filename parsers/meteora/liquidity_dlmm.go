@@ -2,6 +2,7 @@ package meteora
 
 import (
 	"bytes"
+	"strconv"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
@@ -54,11 +55,7 @@ func (p *MeteoraDLMMPoolParser) ProcessLiquidity() []types.PoolEvent {
 
 	for _, ci := range p.ClassifiedInstructions {
 		if ci.ProgramId == constants.DEX_PROGRAMS.METEORA.ID {
-			innerIdx := ci.InnerIndex
-			if innerIdx < 0 {
-				innerIdx = 0
-			}
-			event := p.ParseInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, innerIdx, p)
+			event := p.ParseInstruction(ci.Instruction, ci.ProgramId, ci.OuterIndex, ci.InnerIndex, p)
 			if event != nil {
 				events = append(events, *event)
 			}
@@ -99,7 +96,7 @@ func (p *MeteoraDLMMPoolParser) ParseAddLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = intToString(index)
+	event.Idx = strconv.Itoa(index)
 
 	if len(accounts) > 1 {
 		event.PoolId = accounts[1]
@@ -118,7 +115,27 @@ func (p *MeteoraDLMMPoolParser) ParseAddLiquidityEvent(
 	return event
 }
 
-// ParseRemoveLiquidityEvent parses remove liquidity event
+// dlmmRemoveLayout gives the lb_pair and token_x/y_mint account indices of a
+// DLMM instruction that pays tokens out of the pool (lb_clmm IDL 0.12.0)
+func dlmmRemoveLayout(data []byte) (poolIndex, mintXIndex, mintYIndex int) {
+	dlmm := constants.DISCRIMINATORS.METEORA_DLMM.REMOVE_LIQUIDITY
+	switch {
+	case constants.MatchDiscriminator(data, dlmm["claimFee"]):
+		// claim_fee: lb_pair 0, position 1, ..., token_x_mint 9, token_y_mint 10
+		return 0, 9, 10
+	case constants.MatchDiscriminator(data, dlmm["claimFeeV2"]):
+		// claim_fee2: lb_pair 0, position 1, sender 2, reserves 3-4, user tokens 5-6, mints 7-8
+		return 0, 7, 8
+	}
+	// remove_liquidity*, remove_all_liquidity: position 0, lb_pair 1, ..., mints 7-8
+	return 1, 7, 8
+}
+
+// ParseRemoveLiquidityEvent parses remove liquidity event. Fee claims
+// (claim_fee, claim_fee2) pay the position's fees out of the pool reserves
+// and are reported as REMOVE events, as upstream does (DAMM v2
+// claim_position_fee likewise); their LpAmount stays empty. Reward claims
+// are not liquidity events.
 func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 	instruction interface{},
 	index int,
@@ -126,13 +143,20 @@ func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 	transfers []types.TransferData,
 ) *types.PoolEvent {
 	accounts := p.Adapter.GetInstructionAccounts(instruction)
+	poolIndex, mintXIndex, mintYIndex := dlmmRemoveLayout(data)
+	accountAt := func(i int) string {
+		if i < len(accounts) {
+			return accounts[i]
+		}
+		return ""
+	}
 	token0, token1 := p.normalizeTokens(transfers)
 
 	// Normalize tokens based on account positions
-	if token1 == nil && token0 != nil && len(accounts) > 8 && token0.Info.Mint == accounts[8] {
+	if token1 == nil && token0 != nil && token0.Info.Mint == accountAt(mintYIndex) {
 		token1 = token0
 		token0 = nil
-	} else if token0 == nil && token1 != nil && len(accounts) > 7 && token1.Info.Mint == accounts[7] {
+	} else if token0 == nil && token1 != nil && token1.Info.Mint == accountAt(mintXIndex) {
 		token0 = token1
 		token1 = nil
 	}
@@ -140,13 +164,13 @@ func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 	var token0Mint, token1Mint string
 	if token0 != nil {
 		token0Mint = token0.Info.Mint
-	} else if len(accounts) > 7 {
-		token0Mint = accounts[7]
+	} else {
+		token0Mint = accountAt(mintXIndex)
 	}
 	if token1 != nil {
 		token1Mint = token1.Info.Mint
-	} else if len(accounts) > 8 {
-		token1Mint = accounts[8]
+	} else {
+		token1Mint = accountAt(mintYIndex)
 	}
 
 	programId := p.Adapter.GetInstructionProgramId(instruction)
@@ -162,12 +186,9 @@ func (p *MeteoraDLMMPoolParser) ParseRemoveLiquidityEvent(
 		Token0Decimals: &token0Decimals,
 		Token1Decimals: &token1Decimals,
 	}
-	event.Idx = intToString(index)
-
-	if len(accounts) > 1 {
-		event.PoolId = accounts[1]
-		event.PoolLpMint = accounts[1]
-	}
+	event.Idx = strconv.Itoa(index)
+	event.PoolId = accountAt(poolIndex)
+	event.PoolLpMint = event.PoolId
 
 	if token0 != nil && token0.Info.TokenAmount.UIAmount != nil {
 		event.Token0Amount = token0.Info.TokenAmount.UIAmount
@@ -209,8 +230,4 @@ func (p *MeteoraDLMMPoolParser) normalizeTokens(transfers []types.TransferData) 
 	}
 
 	return token0, token1
-}
-
-func intToString(i int) string {
-	return string(rune('0' + i%10))
 }
