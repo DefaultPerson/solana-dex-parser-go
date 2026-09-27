@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"math/big"
 	"sort"
 	"strconv"
@@ -287,32 +288,99 @@ func FindAssociatedTokenAddress(wallet, mint string) (standard, token2022 string
 	return standardPDA, token2022PDA, nil
 }
 
-// findProgramAddress finds a program derived address
-func findProgramAddress(seeds [][]byte, programId string) (string, error) {
+// ed25519 field constants used by IsOnCurve: p = 2^255 - 19 and the curve
+// constant d = -121665/121666 mod p.
+var (
+	ed25519P        = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
+	ed25519PMinus2  = new(big.Int).Sub(ed25519P, big.NewInt(2))
+	ed25519HalfPMin = new(big.Int).Rsh(new(big.Int).Sub(ed25519P, big.NewInt(1)), 1)
+	ed25519D        = func() *big.Int {
+		inv := new(big.Int).ModInverse(big.NewInt(121666), ed25519P)
+		d := new(big.Int).Mul(big.NewInt(-121665), inv)
+		return d.Mod(d, ed25519P)
+	}()
+)
+
+// IsOnCurve reports whether b is the compressed encoding of an ed25519 point,
+// with the same rule as curve25519-dalek's CompressedEdwardsY::decompress that
+// Solana uses to reject program addresses: y is read little-endian without the
+// sign bit (reduced mod p), and the point exists when (y^2-1)/(d*y^2+1) is a
+// square in GF(p).
+func IsOnCurve(b []byte) bool {
+	if len(b) != 32 {
+		return false
+	}
+	be := make([]byte, 32)
+	for i := 0; i < 32; i++ {
+		be[31-i] = b[i]
+	}
+	be[0] &= 0x7f // clear the x sign bit
+	p := ed25519P
+	y := new(big.Int).SetBytes(be)
+	y.Mod(y, p)
+	y2 := new(big.Int).Mul(y, y)
+	y2.Mod(y2, p)
+	u := new(big.Int).Sub(y2, big.NewInt(1))
+	u.Mod(u, p)
+	v := new(big.Int).Mul(ed25519D, y2)
+	v.Add(v, big.NewInt(1))
+	v.Mod(v, p)
+	if v.Sign() == 0 {
+		return u.Sign() == 0
+	}
+	w := new(big.Int).Exp(v, ed25519PMinus2, p)
+	w.Mul(w, u)
+	w.Mod(w, p)
+	if w.Sign() == 0 {
+		return true
+	}
+	// Euler's criterion: w is a square iff w^((p-1)/2) == 1
+	return new(big.Int).Exp(w, ed25519HalfPMin, p).Cmp(big.NewInt(1)) == 0
+}
+
+// FindProgramAddress derives a program address the way Solana's
+// Pubkey::find_program_address does: bumps 255 down to 1, returning the first
+// sha256(seeds || bump || programId || "ProgramDerivedAddress") that is not an
+// ed25519 point.
+func FindProgramAddress(seeds [][]byte, programId string) (string, uint8, error) {
 	programIdBytes, err := base58.Decode(programId)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-
-	for nonce := uint8(255); nonce > 0; nonce-- {
-		// Build seed with nonce
-		var seedWithNonce []byte
-		for _, seed := range seeds {
-			seedWithNonce = append(seedWithNonce, seed...)
+	if len(seeds) > 15 {
+		return "", 0, errors.New("too many seeds")
+	}
+	size := len(programIdBytes) + len("ProgramDerivedAddress") + 1
+	for _, seed := range seeds {
+		if len(seed) > 32 {
+			return "", 0, errors.New("seed longer than 32 bytes")
 		}
-		seedWithNonce = append(seedWithNonce, nonce)
-		seedWithNonce = append(seedWithNonce, programIdBytes...)
-		seedWithNonce = append(seedWithNonce, []byte("ProgramDerivedAddress")...)
-
-		hash := sha256.Sum256(seedWithNonce)
-
-		// Check if it's off the curve (valid PDA)
-		// For simplicity, we'll assume it's valid
-		// In production, you'd check if the point is on the ed25519 curve
-		return base58.Encode(hash[:]), nil
+		size += len(seed)
 	}
 
-	return "", nil
+	buf := make([]byte, 0, size)
+	for _, seed := range seeds {
+		buf = append(buf, seed...)
+	}
+	bumpPos := len(buf)
+	buf = append(buf, 0)
+	buf = append(buf, programIdBytes...)
+	buf = append(buf, "ProgramDerivedAddress"...)
+
+	for bump := 255; bump > 0; bump-- {
+		buf[bumpPos] = byte(bump)
+		hash := sha256.Sum256(buf)
+		if !IsOnCurve(hash[:]) {
+			return base58.Encode(hash[:]), uint8(bump), nil
+		}
+	}
+	return "", 0, errors.New("unable to find a viable program address bump seed")
+}
+
+// findProgramAddress finds a program derived address
+func findProgramAddress(seeds [][]byte, programId string) (string, error) {
+	address, _, err := FindProgramAddress(seeds, programId)
+	return address, err
 }
 
 // GetAccountTradeType determines trade type based on user's token accounts
