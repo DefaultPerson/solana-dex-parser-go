@@ -9,6 +9,7 @@ import (
 
 	"github.com/mr-tron/base58"
 
+	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
@@ -174,3 +175,138 @@ func fmtIdx(outer, inner int) string {
 	}
 	return u64str(uint64(outer)) + "-" + u64str(uint64(inner))
 }
+
+// clmmLiquidityAt returns the RaydiumCL liquidity event of DexParser at idx
+func clmmLiquidityAt(t *testing.T, tx *adapterTx, idx string) *types.PoolEvent {
+	t.Helper()
+	res := dexparser.NewDexParser().ParseAll(tx, nil)
+	var found *types.PoolEvent
+	for i := range res.Liquidities {
+		if res.Liquidities[i].ProgramId == constants.DEX_PROGRAMS.RAYDIUM_CL.ID && res.Liquidities[i].Idx == idx {
+			if found != nil {
+				t.Fatalf("two RaydiumCL events at %s", idx)
+			}
+			found = &res.Liquidities[i]
+		}
+	}
+	return found
+}
+
+// checkCLMMSides checks an event's two sides against the expected mint ->
+// raw amount map, and that token1 is the quote mint (SOL)
+func checkCLMMSides(t *testing.T, name string, ev *types.PoolEvent, want map[string]string) {
+	t.Helper()
+	if ev == nil {
+		t.Errorf("%s: no RaydiumCL liquidity event", name)
+		return
+	}
+	got := map[string]string{ev.Token0Mint: ev.Token0AmountRaw, ev.Token1Mint: ev.Token1AmountRaw}
+	for mint, amount := range want {
+		if got[mint] != amount {
+			t.Errorf("%s: %s %s, want %s (event %s %s:%s / %s:%s)", name, mint, got[mint], amount, ev.Type, ev.Token0Mint, ev.Token0AmountRaw, ev.Token1Mint, ev.Token1AmountRaw)
+		}
+	}
+	decimals := func(d *uint8) int {
+		if d == nil {
+			return -1
+		}
+		return int(*d)
+	}
+	if ev.Token1Mint != solMint || decimals(ev.Token0Decimals) != 6 || decimals(ev.Token1Decimals) != 9 {
+		t.Errorf("%s: token1 %s, decimals %d/%d: want token0 USDC (6), token1 SOL (9)", name, ev.Token1Mint, decimals(ev.Token0Decimals), decimals(ev.Token1Decimals))
+	}
+}
+
+// TestFinalCLMMOneSidedRemove: a decrease_liquidity_v2 of an out-of-range
+// position withdraws one token only; the other side reported the
+// instruction's amount_1_min (a slippage limit) with an empty mint and 0
+// decimals, or put SOL in token0. Truth: the pool vaults' balance changes
+// (vault_0/vault_1 at accounts 5/6, mints at 14/15). amm-2.
+func TestFinalCLMMOneSidedRemove(t *testing.T) {
+	for _, sig := range []string{
+		"25VouSoGsjj7dPr451fPhpNcsCHpyDd99nP5WCuvXgwW3S9deLUz6TkPNPhj29NwjVUihgrPfQkXUst16H1eQDbx", // USDC only
+		"3i2HiLrPv8o8gyw8ezntj1Kg42LxtqiE1tMXXZJu6nkptFT9H7o8t9MLZ4hXVDDGT2NLbpXhniJ1ooMbVJyweHdv", // SOL only
+	} {
+		tx := loadFixture(t, sig)
+		ix := findIx(t, tx, constants.DEX_PROGRAMS.RAYDIUM_CL.ID, constants.DISCRIMINATORS.RAYDIUM_CL.REMOVE_LIQUIDITY.DECREASE_LIQUIDITY_V2)
+		want := map[string]string{}
+		moved := 0
+		for side := 0; side < 2; side++ {
+			vault, mint := ix.accounts[5+side], ix.accounts[14+side]
+			delta := accountTokenDelta(tx, vault, mint)
+			want[mint] = delta.Neg(delta).String()
+			if want[mint] != "0" {
+				moved++
+			}
+		}
+		if moved != 1 {
+			t.Fatalf("%s: %d vaults moved, want a one-sided withdrawal", sig[:8], moved)
+		}
+		checkCLMMSides(t, sig[:8], clmmLiquidityAt(t, tx, fmtIdx(ix.outer, ix.inner)), want)
+	}
+}
+
+// dropInnerTransferTo returns a copy of tx without the inner token transfer
+// into account (as if the program had skipped that side)
+func dropInnerTransferTo(t *testing.T, tx *adapterTx, outer int, account string) *adapterTx {
+	t.Helper()
+	c := cloneTx(t, tx)
+	keys := rawAccountKeys(c)
+	for s := range c.Meta.InnerInstructions {
+		set := &c.Meta.InnerInstructions[s]
+		if set.Index != outer {
+			continue
+		}
+		for j, v := range set.Instructions {
+			m, _ := v.(map[string]interface{})
+			if m == nil || keys[jsonInt(m["programIdIndex"])] != constants.TOKEN_PROGRAM_ID {
+				continue
+			}
+			accounts, _ := m["accounts"].([]interface{})
+			// transferChecked: source, mint, destination, authority
+			if len(accounts) == 4 && keys[jsonInt(accounts[2])] == account {
+				set.Instructions = append(set.Instructions[:j:j], set.Instructions[j+1:]...)
+				return c
+			}
+		}
+	}
+	t.Fatalf("no inner transfer to %s in %d", account, outer)
+	return nil
+}
+
+// TestFinalCLMMOneSidedAdd: a position out of range deposits one token only
+// (raydium-clmm util/token.rs skips a zero transfer). increase_liquidity(_v2)
+// with one token transfer was dropped (ADD needed two transfers), and
+// open_position_with_token22_nft, where the position NFT mintTo counted as
+// the second transfer, reported amount_1_max as the other side's deposit with
+// an empty mint. No real one-sided add is in the corpus: both transactions
+// are built from real two-sided adds (2haSYLTf increase_liquidity_v2, 2A7e9G6Q
+// open_position_with_token22_nft) by removing the transfer into the SOL
+// vault. Truth: the remaining USDC transfer and 0 SOL. amm-6, amm-v1.
+func TestFinalCLMMOneSidedAdd(t *testing.T) {
+	for _, c := range []struct {
+		sig          string
+		disc         []byte
+		vault0, mint int // SOL vault and USDC mint account of the instruction
+		usdcVault    int
+	}{
+		{"2haSYLTfhkEwfiZ4fqnzoq6deznDV5oHBkvxYNFc7JJ8bEjsunjazGWXVjcJ7MUaTVeS4Jq2CXit4Fakub6g8cTD", constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.INCREASE_LIQUIDITY_V2, 9, 14, 10},
+		{"2A7e9G6Qb91Z1kFhgsSr2p2NvZjRBREuziqmZ46RdQ6NGnHUhzVuBnc962AL9QsvpFRxUpaZVSbgK7scmCimRNhb", constants.DISCRIMINATORS.RAYDIUM_CL.ADD_LIQUIDITY.OPEN_POSITION_WITH_TOKEN22, 11, 19, 12},
+	} {
+		tx := loadFixture(t, c.sig)
+		ix := findIx(t, tx, constants.DEX_PROGRAMS.RAYDIUM_CL.ID, c.disc)
+		if ix.accounts[c.mint] != usdcMint || tokenBalanceMint(tx, ix.accounts[c.vault0]) != solMint {
+			t.Fatalf("%s: unexpected pool layout", c.sig[:8])
+		}
+		idx := fmtIdx(ix.outer, ix.inner)
+		usdc := accountTokenDelta(tx, ix.accounts[c.usdcVault], usdcMint).String()
+		sol := accountTokenDelta(tx, ix.accounts[c.vault0], solMint).String()
+
+		// the real two-sided add is unchanged
+		checkCLMMSides(t, c.sig[:8]+" two-sided", clmmLiquidityAt(t, tx, idx), map[string]string{usdcMint: usdc, solMint: sol})
+
+		oneSided := dropInnerTransferTo(t, tx, ix.outer, ix.accounts[c.vault0])
+		checkCLMMSides(t, c.sig[:8]+" one-sided", clmmLiquidityAt(t, oneSided, idx), map[string]string{usdcMint: usdc, solMint: "0"})
+	}
+}
+

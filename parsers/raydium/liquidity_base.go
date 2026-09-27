@@ -2,8 +2,10 @@ package raydium
 
 import (
 	"math/big"
+	"strings"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
@@ -15,6 +17,16 @@ type ParseEventConfig struct {
 	PoolIdIndex        int
 	LpMintIndex        int
 	TokenAmountOffsets *TokenAmountOffsets
+	// VaultIndexes are the accounts of the pool's token vaults [vault_0,
+	// vault_1], nil when not used. With them each token transfer is matched
+	// to its side by vault, a side without a transfer moved nothing (0: a
+	// concentrated position out of range deposits or withdraws one token)
+	// and the instruction data amounts (slippage limits) are not used.
+	VaultIndexes []int
+	// MintIndexes are the accounts of the pool's mints [mint_0, mint_1]
+	// when the instruction names them, nil otherwise (the vaults' mints are
+	// used then)
+	MintIndexes []int
 }
 
 // TokenAmountOffsets holds byte offsets of u64 amounts in the instruction data,
@@ -106,6 +118,9 @@ func (p *RaydiumLiquidityParserBase) parseEvent(
 	transfers []types.TransferData,
 	config *ParseEventConfig,
 ) *types.PoolEvent {
+	if config.VaultIndexes != nil {
+		return p.parseVaultEvent(instruction, outerIndex, innerIndex, data, transfers, config)
+	}
 	if config.EventType == types.PoolEventTypeAdd && len(transfers) < 2 {
 		return nil
 	}
@@ -201,6 +216,131 @@ func (p *RaydiumLiquidityParserBase) parseEvent(
 		event.LpAmountRaw = "0"
 	}
 
+	return event
+}
+
+// parseVaultEvent builds an ADD or REMOVE event from the transfers into or
+// out of the pool's vaults (config.VaultIndexes). A side without a transfer
+// is 0 with the pool's mint of that side. Without any token transfer (no
+// inner instructions) an ADD is not an event and a REMOVE takes the
+// instruction data amounts, its minimum amounts. As with GetLPTransfers,
+// the quote mint (SOL, or a supported token paired with an unsupported one)
+// is token1.
+func (p *RaydiumLiquidityParserBase) parseVaultEvent(
+	instruction interface{},
+	outerIndex int,
+	innerIndex int,
+	data []byte,
+	transfers []types.TransferData,
+	config *ParseEventConfig,
+) *types.PoolEvent {
+	accounts := p.Adapter.GetInstructionAccounts(instruction)
+	account := func(indexes []int, side int) string {
+		if side < len(indexes) && indexes[side] >= 0 && indexes[side] < len(accounts) {
+			return accounts[indexes[side]]
+		}
+		return ""
+	}
+
+	var sides [2]*types.TransferData
+	var lpToken *types.TransferData
+	lpType := "mintTo"
+	if config.EventType == types.PoolEventTypeRemove {
+		lpType = "burn"
+	}
+	for i := range transfers {
+		t := &transfers[i]
+		if t.Type == lpType && lpToken == nil {
+			lpToken = t
+			continue
+		}
+		if !strings.Contains(t.Type, "transfer") {
+			continue
+		}
+		for side := 0; side < 2; side++ {
+			vault := account(config.VaultIndexes, side)
+			if sides[side] == nil && vault != "" && (t.Info.Destination == vault || t.Info.Source == vault) {
+				sides[side] = t
+				break
+			}
+		}
+	}
+	noTransfers := sides[0] == nil && sides[1] == nil
+	if noTransfers && config.EventType == types.PoolEventTypeAdd {
+		return nil
+	}
+
+	var mints [2]string
+	var amounts [2]*types.TokenAmount
+	for side := 0; side < 2; side++ {
+		if t := sides[side]; t != nil {
+			mints[side] = t.Info.Mint
+			amounts[side] = &t.Info.TokenAmount
+			continue
+		}
+		mints[side] = account(config.MintIndexes, side)
+		if mints[side] == "" {
+			mints[side] = p.Adapter.KnownTokenAccountMint(account(config.VaultIndexes, side))
+		}
+		if offsets := config.TokenAmountOffsets; noTransfers && offsets != nil {
+			offset := offsets.Token0
+			if side == 1 {
+				offset = offsets.Token1
+			}
+			if hasU64At(data, offset) {
+				amt := readU64LE(data, offset)
+				ui := types.ConvertToUIAmount(amt, p.Adapter.GetTokenDecimals(mints[side]))
+				amounts[side] = &types.TokenAmount{Amount: amt.String(), UIAmount: &ui}
+			}
+		}
+	}
+	if mints[0] == constants.TOKENS.SOL ||
+		(p.Adapter.IsSupportedToken(mints[0]) && !p.Adapter.IsSupportedToken(mints[1])) {
+		mints[0], mints[1] = mints[1], mints[0]
+		amounts[0], amounts[1] = amounts[1], amounts[0]
+	}
+
+	programId := p.Adapter.GetInstructionProgramId(instruction)
+	base := p.Adapter.GetPoolEventBase(config.EventType, programId)
+	base.Idx = utils.FormatIdx(outerIndex, innerIndex)
+	token0Decimals := p.Adapter.GetTokenDecimals(mints[0])
+	token1Decimals := p.Adapter.GetTokenDecimals(mints[1])
+	event := &types.PoolEvent{
+		PoolEventBase:  base,
+		PoolId:         account([]int{config.PoolIdIndex}, 0),
+		Token0Mint:     mints[0],
+		Token1Mint:     mints[1],
+		Token0Decimals: &token0Decimals,
+		Token1Decimals: &token1Decimals,
+	}
+	setAmount := func(amount *types.TokenAmount, ui **float64, raw *string) {
+		if amount != nil && amount.UIAmount != nil {
+			*ui, *raw = amount.UIAmount, amount.Amount
+			return
+		}
+		zero := float64(0)
+		*ui, *raw = &zero, "0"
+	}
+	setAmount(amounts[0], &event.Token0Amount, &event.Token0AmountRaw)
+	setAmount(amounts[1], &event.Token1Amount, &event.Token1AmountRaw)
+
+	if lpToken != nil {
+		event.PoolLpMint = lpToken.Info.Mint
+	} else if config.LpMintIndex < len(accounts) {
+		event.PoolLpMint = accounts[config.LpMintIndex]
+	}
+	switch {
+	case lpToken != nil && lpToken.Info.TokenAmount.UIAmount != nil:
+		event.LpAmount = lpToken.Info.TokenAmount.UIAmount
+		event.LpAmountRaw = lpToken.Info.TokenAmount.Amount
+	case config.TokenAmountOffsets != nil && hasU64At(data, config.TokenAmountOffsets.Lp):
+		amt := readU64LE(data, config.TokenAmountOffsets.Lp)
+		uiAmt := types.ConvertToUIAmount(amt, 0)
+		event.LpAmount = &uiAmt
+		event.LpAmountRaw = amt.String()
+	default:
+		event.LpAmountRaw = "0"
+	}
 	return event
 }
 

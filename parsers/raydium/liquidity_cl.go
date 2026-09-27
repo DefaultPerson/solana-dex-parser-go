@@ -77,7 +77,12 @@ func (p *RaydiumCLPoolParser) GetPoolAction(data []byte) interface{} {
 //   - decrease_liquidity(_v2): pool_state 3; liquidity u128 @8,
 //     amount_0_min @24, amount_1_min @32
 //
-// The data amounts are limits, used only when the transfers are missing.
+// The token vaults (open_position(_v2) 12/13, open_position_with_token22_nft
+// 11/12, increase_liquidity(_v2) 9/10, decrease_liquidity(_v2) 5/6) and the
+// v2 instructions' vault mints (open_position_v2 20/21, token22_nft 18/19,
+// increase_liquidity_v2 13/14, decrease_liquidity_v2 14/15) give each side
+// its transfer and mint: a position out of range moves one token only. The
+// token data amounts are slippage limits and are not reported.
 func (p *RaydiumCLPoolParser) GetEventConfig(eventType types.PoolEventType, instructionType interface{}) *ParseEventConfig {
 	info, ok := instructionType.(InstructionTypeInfo)
 	if !ok {
@@ -85,31 +90,51 @@ func (p *RaydiumCLPoolParser) GetEventConfig(eventType types.PoolEventType, inst
 	}
 
 	switch info.Name {
-	case "openPosition", "openPositionV2", "openPositionWithToken22Nft":
-		poolIdIndex := 5
-		if info.Name == "openPositionWithToken22Nft" {
-			poolIdIndex = 4
+	case "openPosition", "openPositionV2":
+		config := &ParseEventConfig{
+			EventType:          types.PoolEventTypeAdd,
+			PoolIdIndex:        5,
+			LpMintIndex:        5,
+			TokenAmountOffsets: &TokenAmountOffsets{Token0: 40, Token1: 48, Lp: 24},
+			VaultIndexes:       []int{12, 13},
 		}
+		if info.Name == "openPositionV2" {
+			config.MintIndexes = []int{20, 21}
+		}
+		return config
+	case "openPositionWithToken22Nft":
 		return &ParseEventConfig{
 			EventType:          types.PoolEventTypeAdd,
-			PoolIdIndex:        poolIdIndex,
-			LpMintIndex:        poolIdIndex,
+			PoolIdIndex:        4,
+			LpMintIndex:        4,
 			TokenAmountOffsets: &TokenAmountOffsets{Token0: 40, Token1: 48, Lp: 24},
+			VaultIndexes:       []int{11, 12},
+			MintIndexes:        []int{18, 19},
 		}
 	case "increaseLiquidity", "increaseLiquidityV2":
-		return &ParseEventConfig{
+		config := &ParseEventConfig{
 			EventType:          types.PoolEventTypeAdd,
 			PoolIdIndex:        2,
 			LpMintIndex:        2,
 			TokenAmountOffsets: &TokenAmountOffsets{Token0: 24, Token1: 32, Lp: 8},
+			VaultIndexes:       []int{9, 10},
 		}
+		if info.Name == "increaseLiquidityV2" {
+			config.MintIndexes = []int{13, 14}
+		}
+		return config
 	case "decreaseLiquidity", "decreaseLiquidityV2":
-		return &ParseEventConfig{
+		config := &ParseEventConfig{
 			EventType:          types.PoolEventTypeRemove,
 			PoolIdIndex:        3,
 			LpMintIndex:        3,
 			TokenAmountOffsets: &TokenAmountOffsets{Token0: 24, Token1: 32, Lp: 8},
+			VaultIndexes:       []int{5, 6},
 		}
+		if info.Name == "decreaseLiquidityV2" {
+			config.MintIndexes = []int{14, 15}
+		}
+		return config
 	}
 	return nil
 }
