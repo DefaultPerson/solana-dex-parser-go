@@ -243,8 +243,6 @@ var DISCRIMINATORS = struct {
 			"claimFeeV2":              {112, 191, 101, 171, 28, 144, 127, 187},
 			// lb_clmm 0.12.0
 			"removeLiquidity2": {230, 215, 82, 127, 241, 101, 227, 146},
-			"claimReward":      {149, 95, 181, 242, 94, 90, 158, 162},
-			"claimReward2":     {190, 3, 127, 119, 178, 87, 157, 183},
 		},
 		LIQUIDITY_EVENT: map[string][]byte{
 			"compositionFeeEvent":  {228, 69, 165, 46, 81, 203, 154, 29, 128, 151, 123, 106, 17, 102, 113, 142},
@@ -283,6 +281,11 @@ var DISCRIMINATORS = struct {
 			"withdrawIneligibleReward": {148, 206, 42, 195, 247, 49, 103, 8},
 			"withdrawProtocolFee":      {158, 201, 158, 189, 33, 93, 162, 103},
 			"zapProtocolFee":           {213, 155, 187, 34, 56, 182, 91, 240},
+			// Reward claims pay one reward token to the position owner. Their accounts do not
+			// follow the remove-liquidity layout (no token_x/token_y mints), so they are not
+			// REMOVE_LIQUIDITY.
+			"claimReward":  {149, 95, 181, 242, 94, 90, 158, 162},
+			"claimReward2": {190, 3, 127, 119, 178, 87, 157, 183},
 		},
 	},
 	METEORA_DAMM: MeteoraDAMMDiscriminators{

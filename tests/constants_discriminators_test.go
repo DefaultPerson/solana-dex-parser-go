@@ -10,6 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	gojson "github.com/goccy/go-json"
+	"github.com/mr-tron/base58"
+
+	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 )
@@ -192,8 +196,8 @@ func constAnchorTable() map[string][]byte {
 		"METEORA_DLMM.REMOVE_LIQUIDITY[claimFee]":                          ix("claim_fee"),
 		"METEORA_DLMM.REMOVE_LIQUIDITY[claimFeeV2]":                        ix("claim_fee2"),
 		"METEORA_DLMM.REMOVE_LIQUIDITY[removeLiquidity2]":                  ix("remove_liquidity2"),
-		"METEORA_DLMM.REMOVE_LIQUIDITY[claimReward]":                       ix("claim_reward"),
-		"METEORA_DLMM.REMOVE_LIQUIDITY[claimReward2]":                      ix("claim_reward2"),
+		"METEORA_DLMM.OTHER[claimReward]":                                  ix("claim_reward"),
+		"METEORA_DLMM.OTHER[claimReward2]":                                 ix("claim_reward2"),
 		"METEORA_DLMM.LIQUIDITY_EVENT[compositionFeeEvent]":                cpiEv("CompositionFee"),
 		"METEORA_DLMM.LIQUIDITY_EVENT[addLiquidityEvent]":                  cpiEv("AddLiquidity"),
 		"METEORA_DLMM.LIQUIDITY_EVENT[removeLiquidityEvent]":               cpiEv("RemoveLiquidity"),
@@ -554,5 +558,78 @@ func TestConstantsInstructionTypes(t *testing.T) {
 		if c[0] != c[1] {
 			t.Errorf("%s = %d, want %d", name, c[0], c[1])
 		}
+	}
+}
+
+// constSyntheticDLMMClaimReward2 is a SYNTHETIC transaction: no real claim_reward2 fixture
+// exists, so it is built from the real DLMM transaction h3sGiri... (outer instruction 2 is
+// a router CPI into lb_clmm). The router's inner lb_clmm call is replaced by a claim_reward2
+// instruction with the on-chain lb_clmm IDL account layout [lb_pair, position, sender,
+// reward_vault, reward_mint, user_token_account, token_program, memo_program,
+// event_authority, program] and one reward transferChecked from the reward vault to the
+// user. The later outer instructions are dropped.
+func constSyntheticDLMMClaimReward2(t *testing.T) *adapter.SolanaTransaction {
+	t.Helper()
+	raw, err := readFixture("h3sGiriW4jCGgbnNF8DaEKnsWhjtcH5ZM1dkyZFidgD2fx9aDNatray38yRmkxaWez3g5qFNpyXhE8ho716vjgp", "json")
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	var m map[string]interface{}
+	if err := gojson.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	msg := m["transaction"].(map[string]interface{})["message"].(map[string]interface{})
+	msg["instructions"] = msg["instructions"].([]interface{})[:3]
+	meta := m["meta"].(map[string]interface{})
+	inner := meta["innerInstructions"].([]interface{})[0].(map[string]interface{})
+	if idx := inner["index"].(float64); idx != 2 {
+		t.Fatalf("fixture changed: first inner group index %v", idx)
+	}
+	ixs := inner["instructions"].([]interface{})
+	// Account indexes: 16 lb_pair 6t5fJw..., 2 position, 12 sender, 17 reward vault,
+	// 22 reward mint, 3 user token account, 20 token program (also as memo), 14 event
+	// authority, 15 lb_clmm.
+	data := append(constIxDisc("claim_reward2"), make([]byte, 12)...) // reward_index u64, min/max bin i32 unused here
+	transfer := []byte{12, 1, 0, 0, 0, 0, 0, 0, 0, 6}                 // transferChecked 1 raw unit, 6 decimals
+	inner["instructions"] = []interface{}{
+		ixs[0],
+		map[string]interface{}{"accounts": []interface{}{16, 2, 12, 17, 22, 3, 20, 20, 14, 15}, "data": base58.Encode(data), "programIdIndex": 15, "stackHeight": 3},
+		map[string]interface{}{"accounts": []interface{}{17, 22, 3, 16}, "data": base58.Encode(transfer), "programIdIndex": 20, "stackHeight": 4},
+	}
+	meta["innerInstructions"] = []interface{}{inner}
+	out, err := gojson.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tx adapter.SolanaTransaction
+	if err := gojson.Unmarshal(out, &tx); err != nil {
+		t.Fatal(err)
+	}
+	return &tx
+}
+
+// R2-G1: claim_reward and claim_reward2 pay one reward token and have no token_x/token_y
+// mint accounts (lb_clmm IDL), so they are not REMOVE_LIQUIDITY. While they were in that
+// map, ParseRemoveLiquidityEvent reported the position as the pool and the event authority
+// as token1.
+func TestConstantsDLMMClaimRewardIsNotLiquidity(t *testing.T) {
+	d := constants.DISCRIMINATORS.METEORA_DLMM
+	for _, name := range []string{"claim_reward", "claim_reward2"} {
+		disc := constIxDisc(name)
+		for mapName, m := range map[string]map[string][]byte{"ADD_LIQUIDITY": d.ADD_LIQUIDITY, "REMOVE_LIQUIDITY": d.REMOVE_LIQUIDITY, "SWAP": d.SWAP} {
+			for k, v := range m {
+				if bytes.Equal(v, disc) {
+					t.Errorf("%s is in METEORA_DLMM.%s[%s]", name, mapName, k)
+				}
+			}
+		}
+	}
+
+	res := dexparser.NewDexParser().ParseAll(constSyntheticDLMMClaimReward2(t), nil)
+	for _, l := range res.Liquidities {
+		t.Errorf("claim_reward2 produced a liquidity event: %s pool=%s t0=%s t1=%s idx=%s", l.Type, l.PoolId, l.Token0Mint, l.Token1Mint, l.Idx)
+	}
+	for _, tr := range res.Trades {
+		t.Errorf("claim_reward2 produced a trade: %s %s idx=%s", tr.Type, tr.ProgramId, tr.Idx)
 	}
 }
