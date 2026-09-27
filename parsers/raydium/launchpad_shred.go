@@ -99,13 +99,14 @@ func (p *LaunchpadShredParser) ProcessAll() ([]interface{}, []types.ParsedShredI
 		}
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &LaunchpadShredInstruction{
-			Type:      eventType,
-			Data:      eventData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               eventType,
+			Data:               eventData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 
 		memeEvent.Signature = p.adapter.Signature()
@@ -136,6 +137,10 @@ type LaunchpadShredInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // LaunchpadCreateData contains Raydium LCP create instruction data

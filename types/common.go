@@ -196,6 +196,8 @@ type ParseShredResult struct {
 
 	// Instructions contains parsed instructions grouped by AMM/DEX name
 	// (legacy format). Programs without decoded instructions are omitted.
+	// Like ParsedInstructions, each event sets UnresolvedAccounts when its
+	// instruction uses an unresolved lookup table account.
 	Instructions map[string][]interface{} `json:"instructions"`
 
 	// ParsedInstructions contains typed parsed instructions (new format), in
@@ -285,6 +287,17 @@ type ParsedShredInstruction struct {
 	// UnresolvedAccounts is true when some of the instruction's accounts are
 	// address lookup table entries that could not be resolved (empty strings)
 	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
+}
+
+// HasUnresolvedAccount reports whether an instruction's account list holds
+// an address lookup table entry that could not be resolved (an empty string)
+func HasUnresolvedAccount(accounts []string) bool {
+	for _, account := range accounts {
+		if account == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // EventParser is a generic event parser configuration for single discriminator events

@@ -115,13 +115,14 @@ func (p *JupiterShredParser) ProcessAll() ([]interface{}, []types.ParsedShredIns
 
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &JupiterShredInstruction{
-			Type:      route.name,
-			Data:      routeData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               route.name,
+			Data:               routeData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 
 		inKind, outKind := types.ShredAmountExact, types.ShredAmountQuote
@@ -155,6 +156,10 @@ type JupiterShredInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // JupiterRouteData contains Jupiter route instruction data. The amounts are

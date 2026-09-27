@@ -93,6 +93,7 @@ func (x *ProgramShredParser) ProcessAll() ([]interface{}, []types.ParsedShredIns
 		if transfer == nil {
 			continue
 		}
+		accounts := p.adapter.GetInstructionAccounts(ci.Instruction)
 
 		// Check if it's a fee transfer
 		if constants.IsFeeAccount(transfer.Info.Destination) ||
@@ -107,22 +108,23 @@ func (x *ProgramShredParser) ProcessAll() ([]interface{}, []types.ParsedShredIns
 		}
 
 		events = append(events, &TokenInstruction{
-			Type:        transfer.Type,
-			Data:        transfer,
-			ProgramID:   transfer.ProgramId,
-			ProgramName: getSysProgramName(transfer.ProgramId),
-			Slot:        p.adapter.Slot(),
-			Timestamp:   p.adapter.BlockTime(),
-			Signature:   p.adapter.Signature(),
-			Idx:         idx,
-			Signer:      p.adapter.Signers(),
+			Type:               transfer.Type,
+			Data:               transfer,
+			ProgramID:          transfer.ProgramId,
+			ProgramName:        getSysProgramName(transfer.ProgramId),
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 		typed = append(typed, types.ParsedShredInstruction{
 			ProgramID:   transfer.ProgramId,
 			ProgramName: getSysProgramName(transfer.ProgramId),
 			Action:      transfer.Type,
 			Transfer:    transfer,
-			Accounts:    p.adapter.GetInstructionAccounts(ci.Instruction),
+			Accounts:    accounts,
 			Idx:         idx,
 		})
 	}
@@ -141,6 +143,10 @@ type TokenInstruction struct {
 	Signature   string              `json:"signature"`
 	Idx         string              `json:"idx"`
 	Signer      []string            `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 func formatInstructionIdx(outerIndex int, innerIndex int) string {

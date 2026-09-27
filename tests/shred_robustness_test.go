@@ -16,6 +16,7 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/photon"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/systoken"
+	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
@@ -301,6 +302,94 @@ func TestShredAltExtendReal(t *testing.T) {
 	for i := range got {
 		if got[i] != base58.Encode(ix.data[12+32*i:44+32*i]) {
 			t.Errorf("address %d = %s", i, got[i])
+		}
+	}
+}
+
+// eventUnresolved returns the idx and the UnresolvedAccounts flag of a legacy
+// shred event
+func eventUnresolved(t *testing.T, e interface{}) (string, bool) {
+	t.Helper()
+	switch ev := e.(type) {
+	case *dexparser.PumpfunInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *dexparser.PumpswapInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *jupiter.JupiterShredInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *raydium.RaydiumV4ShredInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *raydium.LaunchpadShredInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *meteora.DBCShredInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *photon.PhotonInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *dflow.DFlowShredInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	case *systoken.TokenInstruction:
+		return ev.Idx, ev.UnresolvedAccounts
+	}
+	t.Fatalf("unknown legacy event type %T", e)
+	return "", false
+}
+
+// TestShredLegacyEventsUnresolvedFlag: only the typed instructions flagged
+// accounts loaded from unresolved lookup tables; the legacy events built
+// from the same instructions carried no flag. Every fixture is parsed
+// without meta: an outer instruction is unresolved exactly when it uses an
+// account index past the static account keys. G3 of the shred verifier
+// (shred-18).
+func TestShredLegacyEventsUnresolvedFlag(t *testing.T) {
+	flagged := map[string]int{}
+	for _, sig := range fixtureSignatures(t, "json") {
+		tx := loadFixture(t, sig)
+		static := len(tx.Transaction.Message.AccountKeys)
+		want := map[string]bool{}
+		for i, v := range tx.Transaction.Message.Instructions {
+			m, _ := v.(map[string]interface{})
+			accounts, _ := m["accounts"].([]interface{})
+			for _, a := range accounts {
+				if jsonInt(a) >= static {
+					want[utils.FormatIdx(i, -1)] = true
+				}
+			}
+		}
+
+		res := parseShred(t, preExec(t, tx), nil)
+		typedFlag := map[string]bool{}
+		for _, ins := range res.ParsedInstructions {
+			typedFlag[ins.Idx] = ins.UnresolvedAccounts
+		}
+		for name, events := range res.Instructions {
+			for _, e := range events {
+				idx, got := eventUnresolved(t, e)
+				if got != want[idx] {
+					t.Errorf("%s %s %s: UnresolvedAccounts=%v, want %v", sig[:8], name, idx, got, want[idx])
+				}
+				if tf, ok := typedFlag[idx]; ok && tf != got {
+					t.Errorf("%s %s %s: legacy flag %v, typed flag %v", sig[:8], name, idx, got, tf)
+				}
+				if got {
+					flagged[name]++
+				}
+			}
+		}
+
+		// With meta every lookup is resolved
+		res = parseShred(t, tx, &types.ParseConfig{IncludeFailedTxs: true})
+		for name, events := range res.Instructions {
+			for _, e := range events {
+				if idx, got := eventUnresolved(t, e); got {
+					t.Errorf("%s %s %s: flagged with meta", sig[:8], name, idx)
+				}
+			}
+		}
+	}
+	t.Logf("flagged legacy events per program: %v", flagged)
+	for _, name := range []string{"Jupiter", "Pumpfun", "Pumpswap", "DFlow", "Photon", "RaydiumV4", "RaydiumLaunchpad", "System", "Token"} {
+		if flagged[name] == 0 {
+			t.Errorf("no flagged %s event among the fixtures", name)
 		}
 	}
 }

@@ -112,13 +112,14 @@ func (p *PhotonShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInst
 		}
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &PhotonInstruction{
-			Type:      eventType,
-			Data:      eventData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               eventType,
+			Data:               eventData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 		ins.ProgramID = constants.DEX_PROGRAMS.PHOTON.ID
 		ins.ProgramName = constants.DEX_PROGRAMS.PHOTON.Name
@@ -139,6 +140,10 @@ type PhotonInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // PhotonSwapData contains Photon PumpSwap swap (pump_amm_swap) instruction

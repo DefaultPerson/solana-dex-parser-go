@@ -92,13 +92,14 @@ func (p *RaydiumV4ShredParser) ProcessAll() ([]interface{}, []types.ParsedShredI
 		}
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &RaydiumV4ShredInstruction{
-			Type:      eventType,
-			Data:      eventData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               eventType,
+			Data:               eventData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 		ins.ProgramID = constants.DEX_PROGRAMS.RAYDIUM_V4.ID
 		ins.ProgramName = constants.DEX_PROGRAMS.RAYDIUM_V4.Name
@@ -131,6 +132,10 @@ type RaydiumV4ShredInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // RaydiumV4SwapData contains Raydium V4 swap instruction data. The amounts

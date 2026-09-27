@@ -191,11 +191,8 @@ func shredParserFor(programId string, a *adapter.TransactionAdapter, ic *classif
 func fillShredContext(a *adapter.TransactionAdapter, instructions []types.ParsedShredInstruction) {
 	for i := range instructions {
 		ins := &instructions[i]
-		for _, acc := range ins.Accounts {
-			if acc == "" {
-				ins.UnresolvedAccounts = true
-				break
-			}
+		if types.HasUnresolvedAccount(ins.Accounts) {
+			ins.UnresolvedAccounts = true
 		}
 		if t := ins.Trade; t != nil {
 			if t.Signature == "" {
@@ -292,6 +289,10 @@ type PumpfunInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // PumpfunBuyData contains buy instruction data. The amounts are instruction
@@ -467,13 +468,14 @@ func (p *PumpfunInstructionParser) ProcessAll() ([]interface{}, []types.ParsedSh
 		}
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &PumpfunInstruction{
-			Type:      eventType,
-			Data:      eventData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               eventType,
+			Data:               eventData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 		if ins != nil {
 			ins.ProgramID = constants.DEX_PROGRAMS.PUMP_FUN.ID
@@ -827,6 +829,10 @@ type PumpswapInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // PumpswapBuyInstructionData contains buy instruction data: BaseAmountOut is
@@ -1043,13 +1049,14 @@ func (p *PumpswapInstructionParser) ProcessAll() ([]interface{}, []types.ParsedS
 		}
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &PumpswapInstruction{
-			Type:      eventType,
-			Data:      eventData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               eventType,
+			Data:               eventData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 		ins.ProgramID = constants.DEX_PROGRAMS.PUMP_SWAP.ID
 		ins.ProgramName = constants.DEX_PROGRAMS.PUMP_SWAP.Name

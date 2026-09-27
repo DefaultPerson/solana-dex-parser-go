@@ -100,13 +100,14 @@ func (p *DBCShredParser) ProcessAll() ([]interface{}, []types.ParsedShredInstruc
 		}
 		idx := utils.FormatIdx(ci.OuterIndex, ci.InnerIndex)
 		events = append(events, &DBCShredInstruction{
-			Type:      eventType,
-			Data:      eventData,
-			Slot:      p.adapter.Slot(),
-			Timestamp: p.adapter.BlockTime(),
-			Signature: p.adapter.Signature(),
-			Idx:       idx,
-			Signer:    p.adapter.Signers(),
+			Type:               eventType,
+			Data:               eventData,
+			Slot:               p.adapter.Slot(),
+			Timestamp:          p.adapter.BlockTime(),
+			Signature:          p.adapter.Signature(),
+			Idx:                idx,
+			Signer:             p.adapter.Signers(),
+			UnresolvedAccounts: types.HasUnresolvedAccount(accounts),
 		})
 
 		memeEvent.Protocol = constants.DEX_PROGRAMS.METEORA_DBC.Name
@@ -138,6 +139,10 @@ type DBCShredInstruction struct {
 	Signature string      `json:"signature"`
 	Idx       string      `json:"idx"`
 	Signer    []string    `json:"signer"`
+	// UnresolvedAccounts is true when some of the instruction's accounts are
+	// address lookup table entries that could not be resolved (empty
+	// strings); the decoded data leaves them empty
+	UnresolvedAccounts bool `json:"unresolvedAccounts,omitempty"`
 }
 
 // DBCSwapData contains Meteora DBC swap instruction data. The amounts are
