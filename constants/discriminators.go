@@ -118,6 +118,9 @@ var DISCRIMINATORS = struct {
 		BUY_EXACT_QUOTE_IN_V2: []byte{194, 171, 28, 70, 104, 77, 91, 47},
 		CREATE_V2:             []byte{214, 144, 76, 236, 95, 139, 49, 180},
 		MIGRATE_V2:            []byte{187, 203, 18, 31, 206, 237, 254, 41},
+
+		// meme WP: pump.json IDL (pump-public-docs 8109141), sha256 checked
+		MIGRATE_BONDING_CURVE_CREATOR: []byte{87, 124, 52, 191, 52, 38, 214, 232}, // global:migrate_bonding_curve_creator
 	},
 	PUMPSWAP: PumpswapDiscriminators{
 		CREATE_POOL:            []byte{233, 146, 209, 142, 207, 104, 64, 188},
@@ -132,6 +135,11 @@ var DISCRIMINATORS = struct {
 		SELL_EVENT:             []byte{228, 69, 165, 46, 81, 203, 154, 29, 62, 47, 55, 10, 165, 3, 220, 42},
 
 		BUY_EXACT_QUOTE_IN: []byte{198, 46, 21, 82, 180, 217, 232, 112},
+
+		// meme WP: pump_amm.json IDL (pump-public-docs 8109141), sha256 checked.
+		// Protocol buy-and-burn of a graduated coin; it also emits a BuyEvent.
+		BOOST_BUY_AND_BURN:       []byte{105, 68, 6, 175, 0, 7, 35, 162},                                       // global:boost_buy_and_burn
+		BOOST_BUY_AND_BURN_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 63, 69, 28, 22, 48, 92, 194, 185}, // event:BoostBuyAndBurnEvent
 	},
 	MOONIT: MoonitDiscriminators{
 		BUY:     []byte{102, 6, 61, 18, 1, 218, 235, 234},
@@ -237,6 +245,11 @@ var DISCRIMINATORS = struct {
 		// LaunchLab IDL v0.2.0 create variants (same accounts 0-7 as initialize)
 		INITIALIZE_V2:              []byte{67, 153, 175, 39, 218, 16, 38, 32},
 		INITIALIZE_WITH_TOKEN_2022: []byte{37, 190, 126, 222, 44, 154, 171, 17},
+
+		// meme WP: raydium_launchpad IDL (raydium-io/raydium-idl), sha256 checked
+		CREATE_EVENT_LOG:     []byte{151, 215, 226, 9, 118, 161, 115, 174},                                     // event:PoolCreateEvent ("Program data:" log form)
+		CLAIM_VESTED_EVENT:   []byte{228, 69, 165, 46, 81, 203, 154, 29, 21, 194, 114, 87, 120, 211, 226, 32},  // event:ClaimVestedEvent
+		CREATE_VESTING_EVENT: []byte{228, 69, 165, 46, 81, 203, 154, 29, 150, 152, 11, 179, 52, 210, 191, 125}, // event:CreateVestingEvent
 	},
 	METEORA_DLMM: MeteoraDLMMDiscriminators{
 		ADD_LIQUIDITY: map[string][]byte{
@@ -608,6 +621,8 @@ type PumpfunDiscriminators struct {
 	BUY_EXACT_QUOTE_IN_V2 []byte
 	CREATE_V2             []byte
 	MIGRATE_V2            []byte
+
+	MIGRATE_BONDING_CURVE_CREATOR []byte
 }
 
 type PumpswapDiscriminators struct {
@@ -623,6 +638,9 @@ type PumpswapDiscriminators struct {
 	SELL_EVENT             []byte
 
 	BUY_EXACT_QUOTE_IN []byte
+
+	BOOST_BUY_AND_BURN       []byte
+	BOOST_BUY_AND_BURN_EVENT []byte
 }
 
 type MoonitDiscriminators struct {
@@ -725,6 +743,10 @@ type RaydiumLCPDiscriminators struct {
 
 	INITIALIZE_V2              []byte
 	INITIALIZE_WITH_TOKEN_2022 []byte
+
+	CREATE_EVENT_LOG     []byte
+	CLAIM_VESTED_EVENT   []byte
+	CREATE_VESTING_EVENT []byte
 }
 
 type MeteoraDLMMDiscriminators struct {
