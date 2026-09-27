@@ -189,18 +189,17 @@ func swapKey(ci types.ClassifiedInstruction) dflowSwapKey {
 }
 
 // swapEvents groups the SwapEvent self-CPIs of an executed transaction by the
-// swap instruction that emitted them: the nearest preceding DFlow swap of the
-// same outer instruction
+// swap instruction that emitted them (utils.FindEventEmitter: the event's
+// parent, or without stack heights the nearest preceding DFlow swap of the
+// same outer instruction)
 func (p *DFlowShredParser) swapEvents(instructions []types.ClassifiedInstruction) map[dflowSwapKey][]dflowSwapEvent {
 	legs := make(map[dflowSwapKey][]dflowSwapEvent)
-	swaps := make(map[int][]int) // outer index -> inner indexes of swaps (-1 = outer)
-	for _, ci := range instructions {
-		data := p.adapter.GetInstructionData(ci.Instruction)
-		if len(data) >= 8 {
-			if _, ok := dflowSwapLayoutFor(data[:8]); ok {
-				swaps[ci.OuterIndex] = append(swaps[ci.OuterIndex], ci.InnerIndex)
-			}
+	isSwap := func(data []byte, _ []string) bool {
+		if len(data) < 8 {
+			return false
 		}
+		_, ok := dflowSwapLayoutFor(data[:8])
+		return ok
 	}
 	for _, ci := range instructions {
 		if ci.InnerIndex < 0 {
@@ -211,17 +210,12 @@ func (p *DFlowShredParser) swapEvents(instructions []types.ClassifiedInstruction
 		if len(data) < 16+32+32+8+32+8 || !bytes.Equal(data[:16], constants.DISCRIMINATORS.DFLOW.SWAP_EVENT) {
 			continue
 		}
-		owner, found := -2, false
-		for _, inner := range swaps[ci.OuterIndex] {
-			if inner < ci.InnerIndex && (!found || inner > owner) {
-				owner, found = inner, true
-			}
-		}
-		if !found {
+		swap := utils.FindEventEmitter(p.adapter, instructions, ci, isSwap)
+		if swap == nil {
 			continue
 		}
 		body := data[16:]
-		key := dflowSwapKey{ci.OuterIndex, owner}
+		key := swapKey(*swap)
 		legs[key] = append(legs[key], dflowSwapEvent{
 			inputMint:  base58.Encode(body[32:64]),
 			outputMint: base58.Encode(body[72:104]),

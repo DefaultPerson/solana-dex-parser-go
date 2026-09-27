@@ -10,9 +10,6 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
 
-// dbcEventPrefix is the 8-byte prefix of Anchor self-CPI event instructions
-var dbcEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
-
 // DBC trade directions (EvtSwap trade_direction)
 const (
 	dbcBaseToQuote = 0 // sell
@@ -76,7 +73,7 @@ func (p *MeteoraDBCEventParser) ParseInstructions(instructions []types.Classifie
 		disc := data[:8]
 
 		switch {
-		case bytes.Equal(disc, dbcEventPrefix):
+		case bytes.Equal(disc, constants.ANCHOR_EVENT_PREFIX):
 			if len(data) >= 16 && (bytes.Equal(data[:16], constants.DISCRIMINATORS.METEORA_DBC.EVT_CURVE_COMPLETE) ||
 				bytes.Equal(data[:16], constants.DISCRIMINATORS.METEORA_DBC.EVT_CURVE_COMPLETE_WITH_TRANSFER_HOOK)) {
 				event = p.decodeCurveCompleteEvent(data[16:], ordered, pos)
@@ -109,17 +106,13 @@ func (p *MeteoraDBCEventParser) ParseInstructions(instructions []types.Classifie
 }
 
 // swapEventFor returns the swap event emitted by the swap instruction at
-// position pos: the EvtSwap2 (or its transfer-hook variant) that follows it in
-// the same outer group before the next DBC instruction, else the legacy
-// EvtSwap. Both are emitted by current program versions.
+// position pos (utils.EmittedEvents): the EvtSwap2 (or its transfer-hook
+// variant), else the legacy EvtSwap. Both are emitted by current program
+// versions.
 func (p *MeteoraDBCEventParser) swapEventFor(ordered []types.ClassifiedInstruction, pos int, pool string) *dbcSwapEvent {
 	var legacy *dbcSwapEvent
-	outer := ordered[pos].OuterIndex
-	for j := pos + 1; j < len(ordered) && ordered[j].OuterIndex == outer; j++ {
-		data := p.adapter.GetInstructionData(ordered[j].Instruction)
-		if len(data) < 16 || !bytes.Equal(data[:8], dbcEventPrefix) {
-			break // the next DBC instruction
-		}
+	for _, e := range utils.EmittedEvents(p.adapter, ordered, ordered[pos]) {
+		data := p.adapter.GetInstructionData(e.Instruction)
 		var evt *dbcSwapEvent
 		switch {
 		case bytes.Equal(data[:16], constants.DISCRIMINATORS.METEORA_DBC.EVT_SWAP2),
@@ -297,7 +290,7 @@ func (p *MeteoraDBCEventParser) fees(mint string, evt *dbcSwapEvent) []types.Fee
 
 // decodeCurveCompleteEvent decodes EvtCurveComplete (and its transfer-hook
 // variant): pool, config, base_reserve, quote_reserve. The mints come from
-// the swap instruction on the same pool before it in the outer group.
+// the swap instruction on the same pool that emitted it.
 func (p *MeteoraDBCEventParser) decodeCurveCompleteEvent(data []byte, ordered []types.ClassifiedInstruction, pos int) *types.MemeEvent {
 	reader := utils.GetBinaryReader(data)
 	defer reader.Release()
@@ -318,16 +311,14 @@ func (p *MeteoraDBCEventParser) decodeCurveCompleteEvent(data []byte, ordered []
 		RealBaseReserves:  baseReserve.String(),
 		RealQuoteReserves: quoteReserve.String(),
 	}
-	outer := ordered[pos].OuterIndex
-	for j := pos - 1; j >= 0 && ordered[j].OuterIndex == outer; j-- {
-		accounts := p.adapter.GetInstructionAccounts(ordered[j].Instruction)
-		data := p.adapter.GetInstructionData(ordered[j].Instruction)
-		if len(data) >= 8 && !bytes.Equal(data[:8], dbcEventPrefix) && len(accounts) >= 10 && accounts[2] == pool {
-			event.BaseMint = accounts[7]
-			event.QuoteMint = accounts[8]
-			event.User = accounts[9]
-			break
-		}
+	emitter := utils.FindEventEmitter(p.adapter, ordered, ordered[pos], func(data []byte, accounts []string) bool {
+		return len(data) >= 8 && len(accounts) >= 10 && accounts[2] == pool
+	})
+	if emitter != nil {
+		accounts := p.adapter.GetInstructionAccounts(emitter.Instruction)
+		event.BaseMint = accounts[7]
+		event.QuoteMint = accounts[8]
+		event.User = accounts[9]
 	}
 	return event
 }

@@ -1154,3 +1154,15 @@ func MatchAnyDiscriminator(data []byte, discriminators map[string][]byte) (strin
 	}
 	return "", false
 }
+
+// ANCHOR_EVENT_PREFIX starts the data of every Anchor self-CPI event
+// instruction (emit_cpi!): Anchor's EVENT_IX_TAG 0x1d9acb512ea545e4,
+// little-endian. The event's own 8-byte discriminator,
+// sha256("event:<Name>")[:8], follows it.
+var ANCHOR_EVENT_PREFIX = []byte{228, 69, 165, 46, 81, 203, 154, 29}
+
+// IsAnchorEvent reports whether instruction data is an Anchor self-CPI event:
+// ANCHOR_EVENT_PREFIX followed by an event discriminator
+func IsAnchorEvent(data []byte) bool {
+	return len(data) >= 16 && MatchDiscriminator(data, ANCHOR_EVENT_PREFIX)
+}

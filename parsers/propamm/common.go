@@ -187,10 +187,10 @@ func (p *VenueParser) cpiTransfers(ci types.ClassifiedInstruction) []types.Trans
 }
 
 // cpiGroup returns the inner instructions of the CPI group of ci, with their
-// inner indexes: the inner instructions after ci with a higher stack height,
-// up to the next instruction at its own height or above. When the
-// transaction carries no stack heights, the group ends at the next
-// instruction of the same program.
+// inner indexes: the inner instructions after ci with a higher stack height
+// (adapter.GetInstructionStackHeight), up to the next instruction at its own
+// height or above. When the transaction carries no
+// stack heights, the group ends at the next instruction of the same program.
 func cpiGroup(a *adapter.TransactionAdapter, ci types.ClassifiedInstruction) (indexes []int, instructions []interface{}) {
 	var set []interface{}
 	for _, inner := range a.InnerInstructions() {
@@ -203,14 +203,10 @@ func cpiGroup(a *adapter.TransactionAdapter, ci types.ClassifiedInstruction) (in
 		return nil, nil
 	}
 
-	height, heightKnown := 1, true // outer instructions run at stack height 1
-	if ci.InnerIndex >= 0 {
-		height, heightKnown = stackHeight(set[ci.InnerIndex])
-	}
-
+	height := a.GetInstructionStackHeight(ci.OuterIndex, ci.InnerIndex)
 	for j := ci.InnerIndex + 1; j < len(set); j++ {
 		ix := set[j]
-		if h, ok := stackHeight(ix); heightKnown && ok {
+		if h := adapter.InstructionStackHeight(ix); height > 0 && h > 0 {
 			if h <= height {
 				break
 			}
@@ -240,27 +236,4 @@ func groupTransfers(a *adapter.TransactionAdapter, tu *utils.TransactionUtils, c
 		}
 	}
 	return transfers
-}
-
-// stackHeight returns the stackHeight of an inner instruction given as a
-// decoded JSON object (RPC "json" or "jsonParsed" encoding)
-func stackHeight(ix interface{}) (int, bool) {
-	m, ok := ix.(map[string]interface{})
-	if !ok {
-		return 0, false
-	}
-	switch n := m["stackHeight"].(type) {
-	case interface{ Int64() (int64, error) }: // json.Number
-		v, err := n.Int64()
-		return int(v), err == nil
-	case float64:
-		return int(n), true
-	case int:
-		return n, true
-	case int64:
-		return int(n), true
-	case uint64:
-		return int(n), true
-	}
-	return 0, false
 }

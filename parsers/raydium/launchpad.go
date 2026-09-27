@@ -106,9 +106,6 @@ func NewRaydiumLaunchpadEventParser(
 	}
 }
 
-// lcpEventPrefix is the 8-byte prefix of Anchor self-CPI event instructions
-var lcpEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
-
 // lcpTradeIxNames maps the trade instruction discriminators to their names
 var lcpTradeIxNames = []struct {
 	disc []byte
@@ -154,7 +151,7 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 		disc := data[:8]
 
 		switch {
-		case bytes.Equal(disc, lcpEventPrefix):
+		case bytes.Equal(disc, constants.ANCHOR_EVENT_PREFIX):
 			if len(data) >= 16 && bytes.Equal(data[:16], constants.DISCRIMINATORS.RAYDIUM_LCP.CREATE_EVENT) {
 				event = p.decodeCreateEvent(data[16:], ordered, pos)
 			}
@@ -183,16 +180,11 @@ func (p *RaydiumLaunchpadEventParser) ParseInstructions(instructions []types.Cla
 }
 
 // followingEvent returns the data (after the 16-byte discriminator) of the
-// first event with discriminator disc that follows position pos in the same
-// outer group, before the next non-event LaunchLab instruction
+// first event with discriminator disc that the instruction at position pos
+// emitted (utils.EmittedEvents)
 func (p *RaydiumLaunchpadEventParser) followingEvent(ordered []types.ClassifiedInstruction, pos int, disc []byte) []byte {
-	outer := ordered[pos].OuterIndex
-	for j := pos + 1; j < len(ordered) && ordered[j].OuterIndex == outer; j++ {
-		data := p.adapter.GetInstructionData(ordered[j].Instruction)
-		if len(data) < 16 || !bytes.Equal(data[:8], lcpEventPrefix) {
-			break
-		}
-		if bytes.Equal(data[:16], disc) {
+	for _, e := range utils.EmittedEvents(p.adapter, ordered, ordered[pos]) {
+		if data := p.adapter.GetInstructionData(e.Instruction); bytes.Equal(data[:16], disc) {
 			return data[16:]
 		}
 	}
@@ -305,9 +297,8 @@ func uiAmountPtr(val *big.Int, decimals uint8) *float64 {
 }
 
 // decodeCreateEvent decodes a PoolCreateEvent. The mints are accounts 6 and
-// 7 of the initialize* instruction that emitted it (the nearest preceding
-// LaunchLab instruction in the same outer group), which is not necessarily
-// the outer instruction.
+// 7 of the initialize* instruction of the pool that emitted it
+// (utils.FindEventEmitter), which is not necessarily the outer instruction.
 func (p *RaydiumLaunchpadEventParser) decodeCreateEvent(data []byte, ordered []types.ClassifiedInstruction, pos int) *types.MemeEvent {
 	layout, err := ParsePoolCreateEventLayout(data)
 	if err != nil {
@@ -316,21 +307,22 @@ func (p *RaydiumLaunchpadEventParser) decodeCreateEvent(data []byte, ordered []t
 	evt := layout.ToObject()
 
 	var platformConfig string
-	outer := ordered[pos].OuterIndex
-	for j := pos - 1; j >= 0 && ordered[j].OuterIndex == outer; j-- {
-		ixData := p.adapter.GetInstructionData(ordered[j].Instruction)
-		if len(ixData) < 8 || bytes.Equal(ixData[:8], lcpEventPrefix) {
-			continue
+	emitter := utils.FindEventEmitter(p.adapter, ordered, ordered[pos], func(ixData []byte, accounts []string) bool {
+		if len(accounts) < 8 || accounts[5] != evt.PoolState {
+			return false
 		}
-		accounts := p.adapter.GetInstructionAccounts(ordered[j].Instruction)
 		for _, disc := range lcpInitializeDiscs {
-			if bytes.Equal(ixData[:8], disc) && len(accounts) >= 8 && accounts[5] == evt.PoolState {
-				platformConfig = accounts[3]
-				evt.BaseMint = accounts[6]
-				evt.QuoteMint = accounts[7]
+			if constants.MatchDiscriminator(ixData, disc) {
+				return true
 			}
 		}
-		break
+		return false
+	})
+	if emitter != nil {
+		accounts := p.adapter.GetInstructionAccounts(emitter.Instruction)
+		platformConfig = accounts[3]
+		evt.BaseMint = accounts[6]
+		evt.QuoteMint = accounts[7]
 	}
 	if evt.BaseMint == "" {
 		return nil

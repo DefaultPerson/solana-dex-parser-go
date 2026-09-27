@@ -1,7 +1,6 @@
 package pumpfun
 
 import (
-	"bytes"
 	"math/big"
 
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
@@ -9,9 +8,6 @@ import (
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 	"github.com/DefaultPerson/solana-dex-parser-go/utils"
 )
-
-// anchorEventPrefix is the 8-byte prefix of Anchor self-CPI event instructions
-var anchorEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
 
 // defaultPubkey is Pubkey::default() in base58; Pump.fun events use it for
 // "no quote mint" (SOL-paired coins)
@@ -109,7 +105,7 @@ func (t *tailReader) skipVec(elemSize int) {
 
 // isEventData reports whether data is an Anchor self-CPI event
 func isEventData(data []byte) bool {
-	return len(data) >= 16 && bytes.Equal(data[:8], anchorEventPrefix)
+	return constants.IsAnchorEvent(data)
 }
 
 // executionOrder returns a copy of instructions sorted in execution order: an
@@ -121,10 +117,11 @@ func executionOrder(instructions []types.ClassifiedInstruction) []types.Classifi
 	return ordered
 }
 
-// findParentInstruction returns the instruction that emitted the event at
-// position pos of ordered (execution order): the nearest preceding
-// instruction of programId in the same outer group that is not itself an
-// event and for which match returns true. It returns nil when there is none.
+// findParentInstruction returns the instruction of programId that emitted
+// the event at position pos of ordered and for which match returns true (see
+// utils.FindEventEmitter: the event's parent when stack heights are known,
+// else the nearest preceding matching instruction in the same outer group),
+// or nil
 func findParentInstruction(
 	a *adapter.TransactionAdapter,
 	ordered []types.ClassifiedInstruction,
@@ -132,24 +129,10 @@ func findParentInstruction(
 	programId string,
 	match func(data []byte, accounts []string) bool,
 ) *types.ClassifiedInstruction {
-	if pos < 0 || pos >= len(ordered) {
+	if pos < 0 || pos >= len(ordered) || ordered[pos].ProgramId != programId {
 		return nil
 	}
-	outer := ordered[pos].OuterIndex
-	for j := pos - 1; j >= 0 && ordered[j].OuterIndex == outer; j-- {
-		ci := &ordered[j]
-		if ci.ProgramId != programId {
-			continue
-		}
-		data := a.GetInstructionData(ci.Instruction)
-		if isEventData(data) {
-			continue
-		}
-		if match(data, a.GetInstructionAccounts(ci.Instruction)) {
-			return ci
-		}
-	}
-	return nil
+	return utils.FindEventEmitter(a, ordered, ordered[pos], match)
 }
 
 // tokenDecimals returns the decimals of mint known to the transaction (token

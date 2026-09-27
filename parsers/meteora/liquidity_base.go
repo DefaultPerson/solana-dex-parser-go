@@ -1,8 +1,6 @@
 package meteora
 
 import (
-	"bytes"
-
 	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers"
@@ -86,32 +84,12 @@ func (p *MeteoraLiquidityParserBase) ParseInstruction(
 	return event
 }
 
-// anchorEventPrefix starts the data of an Anchor self-CPI event instruction:
-// Anchor's EVENT_IX_TAG 0x1d9acb512ea545e4, little-endian
-var anchorEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
-
-// isAnchorEvent reports whether instruction data is an Anchor self-CPI event
-func isAnchorEvent(data []byte) bool {
-	return len(data) >= 16 && bytes.Equal(data[:8], anchorEventPrefix)
-}
-
 // followingEvents returns the self-CPI events the instruction of programId
-// at (outerIndex, innerIndex) emitted: the program's event instructions
-// that follow it in the same outer instruction, up to the program's next
-// non-event instruction. instructions are in classifier order (a program's
-// inner instructions in execution order).
+// at (outerIndex, innerIndex) emitted (utils.EmittedEvents: the event's
+// parent instruction when stack heights are known, else the program's event
+// instructions that follow it up to its next non-event instruction)
 func followingEvents(adapt *adapter.TransactionAdapter, instructions []types.ClassifiedInstruction, programId string, outerIndex, innerIndex int) []types.ClassifiedInstruction {
-	var events []types.ClassifiedInstruction
-	for _, ci := range instructions {
-		if ci.ProgramId != programId || ci.OuterIndex != outerIndex || ci.InnerIndex <= innerIndex {
-			continue
-		}
-		if !isAnchorEvent(adapt.GetInstructionData(ci.Instruction)) {
-			break
-		}
-		events = append(events, ci)
-	}
-	return events
+	return utils.EmittedEvents(adapt, instructions, types.ClassifiedInstruction{ProgramId: programId, OuterIndex: outerIndex, InnerIndex: innerIndex})
 }
 
 // findEvent returns the data of the first of events with discriminator

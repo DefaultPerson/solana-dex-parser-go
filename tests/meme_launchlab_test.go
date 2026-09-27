@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/parsers/raydium"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
@@ -143,7 +144,17 @@ func TestMemeLaunchLabCreateViaCPI(t *testing.T) {
 	}
 	// wrapper: the ATA program's index, other accounts, no data meaning
 	msg.Instructions[0] = map[string]interface{}{"programIdIndex": msg.Instructions[1].(map[string]interface{})["programIdIndex"], "accounts": reversed, "data": "2"}
+	// initialize now runs at stack height 2, the instructions it invoked one
+	// level deeper
 	set := &tx.Meta.InnerInstructions[0]
+	for _, ix := range set.Instructions {
+		if m, ok := ix.(map[string]interface{}); ok {
+			if h := adapter.InstructionStackHeight(m); h > 0 {
+				m["stackHeight"] = float64(h + 1)
+			}
+		}
+	}
+	initCopy["stackHeight"] = float64(2)
 	set.Instructions = append([]interface{}{initCopy}, set.Instructions...)
 
 	r := dexparserParse(tx)

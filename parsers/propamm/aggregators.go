@@ -61,14 +61,11 @@ func newAggregatorParser(
 // that ci invokes directly (its hops)
 func (p *aggregatorParser) hopVenues(ci types.ClassifiedInstruction) []string {
 	_, instructions := cpiGroup(p.adapter, ci)
-	parentHeight := 1
-	if ci.InnerIndex >= 0 {
-		parentHeight, _ = stackHeight(p.adapter.GetInnerInstruction(ci.OuterIndex, ci.InnerIndex))
-	}
+	height := p.adapter.GetInstructionStackHeight(ci.OuterIndex, ci.InnerIndex)
 	var names []string
 	for _, ix := range instructions {
-		if h, ok := stackHeight(ix); ok && h != parentHeight+1 {
-			continue
+		if h := adapter.InstructionStackHeight(ix); h > 0 && height > 0 && h != height+1 {
+			continue // not invoked by ci itself
 		}
 		programId := p.adapter.GetInstructionProgramId(ix)
 		if programId == ci.ProgramId {
@@ -270,9 +267,6 @@ func NewOKXV2Parser(
 	return &OKXV2Parser{newAggregatorParser(adapter, dexInfo, transferActions, classifiedInstructions)}
 }
 
-// okxEventPrefix is the Anchor event-instruction tag of emit_cpi
-var okxEventPrefix = []byte{228, 69, 165, 46, 81, 203, 154, 29}
-
 // okxEvent is the common part of the OKX V2 swap events
 type okxEvent struct {
 	sourceMint, destinationMint, user string
@@ -336,7 +330,7 @@ func (p *OKXV2Parser) ProcessTrades() []types.TradeInfo {
 
 	for _, ci := range p.classifiedInstructions {
 		if ci.ProgramId != constants.DEX_PROGRAMS.OKX_DEX_V2.ID ||
-			bytes.HasPrefix(p.adapter.GetInstructionData(ci.Instruction), okxEventPrefix) {
+			constants.IsAnchorEvent(p.adapter.GetInstructionData(ci.Instruction)) {
 			continue
 		}
 		_, instructions := cpiGroup(p.adapter, ci)

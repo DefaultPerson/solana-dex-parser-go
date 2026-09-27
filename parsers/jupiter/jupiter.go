@@ -171,7 +171,7 @@ func (p *JupiterParser) hopIndexes(ci types.ClassifiedInstruction, events []*Jup
 	// (outer when no Jupiter instruction precedes the event in this set)
 	cursor := 0
 	for j := end - 1; j >= 0; j-- {
-		if p.Adapter.GetInstructionProgramId(inner[j]) == constants.DEX_PROGRAMS.JUPITER.ID && !isAnchorEvent(p.Adapter.GetInstructionData(inner[j])) {
+		if p.Adapter.GetInstructionProgramId(inner[j]) == constants.DEX_PROGRAMS.JUPITER.ID && !constants.IsAnchorEvent(p.Adapter.GetInstructionData(inner[j])) {
 			cursor = j + 1
 			break
 		}
@@ -284,16 +284,6 @@ func adjustTokenAmount(token *types.TokenInfo, delta *big.Int) {
 	}
 	token.AmountRaw = amount.String()
 	token.Amount = types.ConvertToUIAmount(amount, token.Decimals)
-}
-
-// anchorEventPrefix is the first 8 bytes of every Anchor self-CPI event:
-// Anchor's EVENT_IX_TAG 0x1d9acb512ea545e4 (sha256("anchor:event")[:8] read as
-// a big-endian u64) in little-endian order. It is the same for all programs.
-var anchorEventPrefix = []byte{0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d}
-
-// isAnchorEvent reports whether instruction data is an Anchor self-CPI event
-func isAnchorEvent(data []byte) bool {
-	return len(data) >= 16 && bytes.Equal(data[:8], anchorEventPrefix)
 }
 
 // outerIndexOf returns the outer instruction index of an idx ("5" or "5-3"),
@@ -484,22 +474,7 @@ func (p *JupiterParser) containsDCAProgram() bool {
 }
 
 // findEmittingInstruction returns the instruction of event's program that
-// emitted the Anchor self-CPI event: the last non-event instruction of that
-// program before the event in the same outer instruction (the outer
-// instruction when the program is called directly), or nil.
+// emitted the Anchor self-CPI event (see utils.FindEventEmitter), or nil
 func findEmittingInstruction(a *adapter.TransactionAdapter, instructions []types.ClassifiedInstruction, event types.ClassifiedInstruction) *types.ClassifiedInstruction {
-	var found *types.ClassifiedInstruction
-	for i := range instructions {
-		ci := &instructions[i]
-		if ci.ProgramId != event.ProgramId || ci.OuterIndex != event.OuterIndex || ci.InnerIndex >= event.InnerIndex {
-			continue
-		}
-		if isAnchorEvent(a.GetInstructionData(ci.Instruction)) {
-			continue
-		}
-		if found == nil || ci.InnerIndex > found.InnerIndex {
-			found = ci
-		}
-	}
-	return found
+	return utils.FindEventEmitter(a, instructions, event, nil)
 }
