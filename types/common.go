@@ -137,6 +137,11 @@ type ParseResult struct {
 	// Msg contains optional error or status message
 	Msg string `json:"msg,omitempty"`
 
+	// Warnings lists non-fatal problems that make the result incomplete, such
+	// as ALTsFetcher / TokenAccountsFetcher errors or unresolved address lookup
+	// table accounts. State is not affected.
+	Warnings []string `json:"warnings,omitempty"`
+
 	// Extras contains additional parser-specific data
 	Extras interface{} `json:"extras,omitempty"`
 }

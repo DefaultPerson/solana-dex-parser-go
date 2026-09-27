@@ -505,6 +505,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 	result.Signer = adapt.Signers()
 	result.ComputeUnits = adapt.ComputeUnits()
 	result.TxStatus = adapt.TxStatus()
+	result.Warnings = adapt.Warnings()
 
 	// Check program ID filter
 	if len(config.ProgramIds) > 0 {

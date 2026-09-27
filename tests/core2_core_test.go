@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -60,4 +61,46 @@ func TestCore2BalanceChangesNotAliased(t *testing.T) {
 			t.Errorf("TokenBalanceChange[%s] aliases the adapter cache", mint)
 		}
 	}
+}
+
+// TestCore2FetcherErrorsSurfaced: ALTsFetcher and TokenAccountsFetcher errors
+// were dropped without a trace, and unresolved lookup accounts were only
+// visible on the adapter. They are now listed in ParseResult.Warnings; State
+// is unchanged.
+func TestCore2FetcherErrorsSurfaced(t *testing.T) {
+	p := dexparser.NewDexParser()
+	if r := p.ParseAll(loadFixture(t, sigTwoLookups), nil); len(r.Warnings) != 0 {
+		t.Errorf("complete tx: Warnings = %v", r.Warnings)
+	}
+
+	stripped := cloneTx(t, loadFixture(t, sigTwoLookups))
+	stripped.Meta.LoadedAddresses = nil
+	cfg := types.DefaultParseConfig()
+	cfg.ALTsFetcher = types.NewALTsFetcher(types.FetchFilterAll, func([]types.AddressTableLookup) (map[string]*types.LoadedAddresses, error) {
+		return nil, errors.New("rpc down")
+	})
+	r := p.ParseAll(stripped, &cfg)
+	if !r.State || !hasWarning(r.Warnings, "ALTsFetcher: rpc down") || !hasWarning(r.Warnings, "unresolved address lookup table accounts") {
+		t.Errorf("ALTsFetcher error: State=%v Warnings=%v", r.State, r.Warnings)
+	}
+
+	const dest = "4EHZFwbbVsHzsCN2QxoKgrqSHr41z5LCYxGhMeZ9mdXo"
+	hidden := hideTokenAccount(t, loadFixture(t, sigT22Fee), dest)
+	cfg = types.DefaultParseConfig()
+	cfg.TokenAccountsFetcher = types.NewTokenAccountsFetcher(types.FetchFilterAll, func([]string) ([]*types.TokenAccountInfo, error) {
+		return nil, errors.New("timeout")
+	})
+	r = p.ParseAll(hidden, &cfg)
+	if !r.State || !hasWarning(r.Warnings, "TokenAccountsFetcher: timeout") {
+		t.Errorf("TokenAccountsFetcher error: State=%v Warnings=%v", r.State, r.Warnings)
+	}
+}
+
+func hasWarning(warnings []string, want string) bool {
+	for _, w := range warnings {
+		if w == want {
+			return true
+		}
+	}
+	return false
 }

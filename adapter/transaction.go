@@ -200,6 +200,9 @@ type TransactionAdapter struct {
 	// guessedTokenAccounts marks SPLTokenMap entries whose mint was not known
 	// and defaulted to SOL
 	guessedTokenAccounts map[string]bool
+	// warnings collects non-fatal problems (fetcher errors, unresolved
+	// lookup table accounts)
+	warnings []string
 
 	// lookup tables built once per transaction
 	instructions   []interface{}
@@ -244,6 +247,14 @@ func NewTransactionAdapter(tx *SolanaTransaction, config *types.ParseConfig) *Tr
 // entries are empty strings.
 func (a *TransactionAdapter) HasUnresolvedAccounts() bool {
 	return a.unresolvedLookups
+}
+
+// Warnings returns non-fatal problems met while building the adapter: errors
+// returned by ParseConfig.ALTsFetcher or ParseConfig.TokenAccountsFetcher, and
+// address lookup table accounts that stayed unresolved. The data affected by
+// them is incomplete (empty account keys, token accounts guessed as SOL).
+func (a *TransactionAdapter) Warnings() []string {
+	return append([]string(nil), a.warnings...)
 }
 
 // buildIndexes builds the account index and token balance lookups
@@ -519,6 +530,8 @@ func (a *TransactionAdapter) resolveLookups(lookups []AddressTableLookup, static
 		if len(missing) > 0 {
 			if res, err := fetcher.Fetch(missing); err == nil {
 				fetched = res
+			} else {
+				a.warnings = append(a.warnings, "ALTsFetcher: "+err.Error())
 			}
 		}
 	}
@@ -552,6 +565,9 @@ func (a *TransactionAdapter) resolveLookups(lookups []AddressTableLookup, static
 	}
 	for _, l := range lookups {
 		readonly = append(readonly, resolve(l, l.ReadonlyIndexes, func(la *types.LoadedAddresses) []string { return la.Readonly })...)
+	}
+	if a.unresolvedLookups {
+		a.warnings = append(a.warnings, "unresolved address lookup table accounts")
 	}
 	return writable, readonly
 }
@@ -1158,6 +1174,7 @@ func (a *TransactionAdapter) fetchTokenAccounts() {
 	sort.Strings(keys)
 	infos, err := a.Config.TokenAccountsFetcher.Fetch(keys)
 	if err != nil {
+		a.warnings = append(a.warnings, "TokenAccountsFetcher: "+err.Error())
 		return
 	}
 	for i, info := range infos {
