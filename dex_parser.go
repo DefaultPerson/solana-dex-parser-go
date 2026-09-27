@@ -106,6 +106,9 @@ func (dp *DexParser) registerDefaultParsers() {
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.JUPITER_LIMIT_ORDER_V2.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
 		return jupiter.NewJupiterLimitOrderV2Parser(a, d, t, c)
 	}
+	dp.tradeParserFactories[constants.DEX_PROGRAMS.JUPITER_Z.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
+		return jupiter.NewJupiterZParser(a, d, t, c)
+	}
 	dp.tradeParserFactories[constants.DEX_PROGRAMS.PUMP_FUN.ID] = func(a *adapter.TransactionAdapter, d types.DexInfo, t map[string][]types.TransferData, c []types.ClassifiedInstruction) parsers.TradeParser {
 		return pumpfun.NewPumpfunParser(a, d, t, c)
 	}
