@@ -248,9 +248,10 @@ func TestDocsExamplesMatch(t *testing.T) {
 	}
 }
 
-// docsStringSliceRe finds constant-bound slicing such as name[:8], which
-// panics on shorter strings (program names such as "Jupiter", empty mints)
-var docsStringSliceRe = regexp.MustCompile(`\w\[:\d+\]`)
+// docsStringSliceRe finds slicing with a constant end, such as name[:8],
+// mint[0:8], call()[:8] or x[i][:8], which panics on shorter strings (program
+// names such as "Jupiter", empty mints)
+var docsStringSliceRe = regexp.MustCompile(`\[\s*\w*\s*:\s*\d+\s*(:\s*\d+\s*)?\]`)
 
 // docsTxVersionRe finds the maxSupportedTransactionVersion argument
 var docsTxVersionRe = regexp.MustCompile(`maxSupportedTransactionVersion\\?"?\s*:\s*(\d+)`)
@@ -273,6 +274,27 @@ func TestDocsSnippetRules(t *testing.T) {
 			for _, m := range docsStringSliceRe.FindAllString(b.code, -1) {
 				t.Errorf("%s:%d: %q slices with a constant bound and panics on shorter values", b.file, b.line, m)
 			}
+		}
+	}
+}
+
+// TestDocsSnippetSliceRule checks that the slicing rule of
+// TestDocsSnippetRules catches every form of a constant end, not only
+// name[:8] (docs-v1-4), and leaves variable bounds alone
+func TestDocsSnippetSliceRule(t *testing.T) {
+	for _, code := range []string{
+		"name[:8]", "mint[0:8]", "mint[ 0 : 8 ]", "string(b)[:8]", "call()[:8]",
+		"x[i][:8]", "trade.Pool[0][:8]", "s[i:8]", "b[0:8:8]",
+	} {
+		if !docsStringSliceRe.MatchString(code) {
+			t.Errorf("%q is not caught", code)
+		}
+	}
+	for _, code := range []string{
+		"s[:n]", "s[i:j]", "s[i:]", "s[i]", "map[string]int{}", "[]string{\"a:1\"}", "s[:len(s)-1]",
+	} {
+		if docsStringSliceRe.MatchString(code) {
+			t.Errorf("%q is caught but has no constant end", code)
 		}
 	}
 }

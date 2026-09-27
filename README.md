@@ -237,7 +237,7 @@ for _, ins := range result.ParsedInstructions {
 | **Raydium LaunchLab** | buy/sell exact in/out, initialize (v2, Token-2022), migrate_to_amm, migrate_to_cpswap | MemeEvent |
 | **Meteora DBC** | swap, swap2 (with transfer hook), pool initializers, DAMM migrations | MemeEvent |
 | **DFlow** | swap, swap2 and the `*_with_destination(_native)` forms | Trade |
-| **Photon** | Pump.fun (v2), PumpSwap and Moonit swaps, collect_fee | Trade |
+| **Photon** | Pump.fun (v1, v2), PumpSwap and Moonit swaps, hop_two_swap, collect_fee | Trade |
 | **System, Token, Token-2022** | transfers | Transfer |
 
 See [ShredParser](https://defaultperson.github.io/solana-dex-parser-go/shred-parser/) for the full description and the gRPC and ShredStream examples.

@@ -112,7 +112,7 @@ The buy asks for exactly 67062499999999 tokens and allows at most 2020000000 lam
 | **Raydium LaunchLab** | buy/sell exact in and out, initialize (v2, Token-2022), migrate_to_amm, migrate_to_cpswap | MemeEvent |
 | **Meteora DBC** | swap, swap2 (with transfer hook), pool initializers, DAMM migrations | MemeEvent |
 | **DFlow** | swap, swap2 and their `_with_destination` and `_native` forms | Trade |
-| **Photon** | Pump.fun (v1, v2), PumpSwap and Moonit swaps, collect_fee | Trade |
+| **Photon** | Pump.fun (v1, v2), PumpSwap and Moonit swaps, hop_two_swap, collect_fee | Trade |
 | **System, Token, Token-2022** | transfers | Transfer |
 
 ## gRPC input
