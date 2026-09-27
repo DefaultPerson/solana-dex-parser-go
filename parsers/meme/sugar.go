@@ -130,6 +130,8 @@ func (p *SugarEventParser) ParseInstructions(instructions []types.ClassifiedInst
 			event = p.decodeTradeEvent(data[8:], ci, types.TradeTypeSell)
 		case bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.CREATE):
 			event = p.decodeCreateEvent(data[8:], ci.Instruction)
+		case bytes.Equal(disc, constants.DISCRIMINATORS.SUGAR.MIGRATE_TO_RADIUM):
+			event = p.decodeMigrateEvent(ci.Instruction)
 		}
 
 		if event != nil {
@@ -194,9 +196,12 @@ func (p *SugarEventParser) decodeTradeEvent(data []byte, ci types.ClassifiedInst
 	}
 }
 
+// decodeCreateEvent decodes create. Accounts (checked on mainnet 3nFeuZaT,
+// as in upstream): 1 metadata, 2 pool, 3 base mint, 6 creator; the args are
+// name, symbol, uri.
 func (p *SugarEventParser) decodeCreateEvent(data []byte, instruction interface{}) *types.MemeEvent {
 	accounts := p.adapter.GetInstructionAccounts(instruction)
-	if len(accounts) < 8 {
+	if len(accounts) < 7 {
 		return nil
 	}
 
@@ -216,19 +221,53 @@ func (p *SugarEventParser) decodeCreateEvent(data []byte, instruction interface{
 		return nil
 	}
 
-	return &types.MemeEvent{
+	pool := accounts[2]
+	baseMint := accounts[3]
+	creator := accounts[6]
+	event := &types.MemeEvent{
 		Protocol:     constants.DEX_PROGRAMS.SUGAR.Name,
 		Type:         types.TradeTypeCreate,
 		Timestamp:    p.adapter.BlockTime(),
-		User:         accounts[0],
-		BaseMint:     accounts[6],
+		User:         creator,
+		BaseMint:     baseMint,
 		QuoteMint:    constants.TOKENS.SOL,
 		Name:         name,
 		Symbol:       symbol,
 		URI:          uri,
-		BondingCurve: accounts[1],
-		Creator:      accounts[0],
+		BondingCurve: pool,
+		Pool:         pool,
+		Creator:      creator,
 	}
+	if d, ok := p.adapter.SPLDecimalsMap[baseMint]; ok {
+		event.Decimals = &d
+	}
+	return event
+}
+
+// decodeMigrateEvent decodes migrate_to_radium. Accounts (checked on mainnet
+// 2kWg1Xif and 67JQpQfx, as in upstream): 1 base mint, 2 quote mint of the
+// new pool (pSOL), 3 bonding curve, 11 Raydium CPMM program, 12 migrator,
+// 15 CPMM pool.
+func (p *SugarEventParser) decodeMigrateEvent(instruction interface{}) *types.MemeEvent {
+	accounts := p.adapter.GetInstructionAccounts(instruction)
+	if len(accounts) < 16 {
+		return nil
+	}
+
+	event := &types.MemeEvent{
+		Protocol:     constants.DEX_PROGRAMS.SUGAR.Name,
+		Type:         types.TradeTypeMigrate,
+		Timestamp:    p.adapter.BlockTime(),
+		User:         accounts[12],
+		BaseMint:     accounts[1],
+		QuoteMint:    accounts[2],
+		BondingCurve: accounts[3],
+		Pool:         accounts[15],
+	}
+	if accounts[11] == constants.DEX_PROGRAMS.RAYDIUM_CPMM.ID {
+		event.PoolDex = constants.DEX_PROGRAMS.RAYDIUM_CPMM.Name
+	}
+	return event
 }
 
 // ProcessEvents implements the EventParser interface

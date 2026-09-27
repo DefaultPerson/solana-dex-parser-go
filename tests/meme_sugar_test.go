@@ -1,8 +1,10 @@
 package tests
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
 
@@ -56,5 +58,64 @@ func TestMemeSugarTrades(t *testing.T) {
 		if e := memeEventAt(t, r, c.idx); e.BaseMint != base || e.Pool != pool || e.User != user {
 			t.Errorf("%.8s: meme event %+v", c.sig, e)
 		}
+	}
+}
+
+const (
+	sigSugarCreate  = "3nFeuZaTBjCVkcTMYN57THW59ZBCewjM3cey1qEEVSaC2F4tvm1fvmF6DWweJxzBR72Jre7kHW7nqSwW1JStXMwx"
+	sigSugarMigrate = "2kWg1XifH9P7JYinGhgPNL7EaaKb2K8KBzipRDjhfDwyhasmY9hKzsqNwiDPCB8ALbYioDpPziCztZqsUoBLi4yR"
+)
+
+// meme-18: the Sugar create read the user from account 0 (the global
+// config), the base mint from account 6 (the creator) and the bonding curve
+// from account 1 (the metadata account). In the real create at outer 3 the
+// mint is the one initialised at outer 1 and named in the Metaplex create at
+// 3-2, and the pool is account 2 of the buy of the same token at outer 5.
+func TestMemeSugarCreate(t *testing.T) {
+	raw := loadMemeRaw(t, sigSugarCreate)
+	mint := raw.accounts(1, -1)[0] // InitializeMint2
+	metaplex := raw.accounts(3, 2) // metadata, mint, mint authority, payer
+	pool := raw.accounts(5, -1)[2] // buy_exact_in pool
+	creator := raw.keys[0]         // signer and fee payer
+	if metaplex[1] != mint || !bytes.Contains(raw.data(3, 2), []byte("AI TROLL LEVEL 9000")) {
+		t.Fatalf("fixture: metaplex create %v", metaplex)
+	}
+
+	r := memeParse(t, sigSugarCreate)
+	e := memeEventAt(t, r, "3")
+	if e.Type != types.TradeTypeCreate || e.BaseMint != mint || e.Pool != pool || e.BondingCurve != pool ||
+		e.User != creator || e.Creator != creator || e.QuoteMint != solMint || e.Name != "AI TROLL LEVEL 9000" {
+		t.Errorf("create %+v, want mint %s pool %s creator %s", e, mint, pool, creator)
+	}
+	if e.Decimals == nil || *e.Decimals != raw.decimals[mint] {
+		t.Errorf("create decimals %v, want %d", e.Decimals, raw.decimals[mint])
+	}
+	if buy := memeEventAt(t, r, "5"); buy.BaseMint != mint || buy.Pool != e.Pool {
+		t.Errorf("buy %+v does not trade the created token", buy)
+	}
+}
+
+// meme-18: migrate_to_radium was not decoded. In the real migration at outer
+// 2 the program creates a Raydium CPMM pool (inner 2-4: creator, config,
+// authority, pool state, token 0 mint, token 1 mint) and the bonding curve
+// authorises the transfer of the remaining tokens (inner 2-2).
+func TestMemeSugarMigrate(t *testing.T) {
+	raw := loadMemeRaw(t, sigSugarMigrate)
+	if raw.program(2, 4) != constants.DEX_PROGRAMS.RAYDIUM_CPMM.ID {
+		t.Fatalf("fixture: inner 2-4 is %s", raw.program(2, 4))
+	}
+	cpmm := raw.accounts(2, 4)
+	creator, cpmmPool, quote, base := cpmm[0], cpmm[3], cpmm[4], cpmm[5]
+	var curve string
+	for _, tr := range raw.transfers(2) {
+		if tr.Inner == 2 {
+			curve = tr.Authority
+		}
+	}
+
+	e := memeEventAt(t, memeParse(t, sigSugarMigrate), "2")
+	if e.Type != types.TradeTypeMigrate || e.BaseMint != base || e.QuoteMint != quote || e.BondingCurve != curve ||
+		e.Pool != cpmmPool || e.User != creator || e.PoolDex != constants.DEX_PROGRAMS.RAYDIUM_CPMM.Name {
+		t.Errorf("migrate %+v, want base %s quote %s curve %s pool %s user %s", e, base, quote, curve, cpmmPool, creator)
 	}
 }
