@@ -35,6 +35,13 @@ SDP_FETCH_FIXTURES=1 go test ./tests -run TestName
 
 Fixtures are fetched with `"maxSupportedTransactionVersion": 1`.
 
+`TestGolden` compares the `DexParser.ParseAll` and `ShredParser.ParseAll` output of every fixture with `testdata/golden` (canonical JSON, gzip).
+After a change of output, check the reported diff, then rewrite the files that changed (this also adds the files of new fixtures):
+
+```bash
+go test ./tests -run TestGolden -update
+```
+
 ### Documentation checks
 
 - `example_test.go` holds the examples shown in README.md and docs/; `go test .` checks their output.
@@ -86,6 +93,7 @@ solana-dex-parser-go/
 │   ├── systoken/          # System and Token transfers (ShredParser)
 │   └── alt/               # Address Lookup Table events
 ├── testdata/tx/           # stored mainnet transactions
+├── testdata/golden/       # expected ParseAll output per stored transaction (TestGolden)
 └── tests/                 # tests (package tests)
 ```
 
