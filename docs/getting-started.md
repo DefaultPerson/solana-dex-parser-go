@@ -155,8 +155,8 @@ func main() {
 | `ParseTrades(tx, config)` | the individual trades (`[]types.TradeInfo`) |
 | `ParseLiquidity(tx, config)` | the liquidity events (`[]types.PoolEvent`) |
 | `ParseTransfers(tx, config)` | the transfers (`[]types.TransferData`) |
-| `ParseBatch(txs, config, maxWorkers)` | one result per transaction, in input order; `maxWorkers > 1` parses concurrently |
-| `ParseBatchWithCallback(txs, config, maxWorkers, callback)` | as `ParseBatch`, calling `callback` per result; returning false stops early |
+| `ParseBatch(txs, config, maxWorkers)` | one result per transaction, in input order, never nil; `maxWorkers > 1` parses with that many goroutines |
+| `ParseBatchWithCallback(txs, config, maxWorkers, callback)` | as `ParseBatch`, calling `callback` per result; returning false stops early, and the transactions left unparsed get `State=false` with `Msg` `dexparser.BatchSkippedMsg` |
 | `RegisterTradeParser`, `RegisterLiquidityParser`, `RegisterTransferParser`, `RegisterMemeEventParser` | add or replace the parser of a program ID |
 | `RegisterRouteParser` | add or replace the route parser of an aggregator program whose swaps run by CPI through venues (Titan and OKX DEX Router V2 by default): its trades are not added to `Trades`, which keeps the venue hops, but replace those hops in `AggregateTrade` |
 
@@ -170,7 +170,7 @@ A panic inside a parser is recovered into `State=false` and a `Msg` with the sig
 | Field | Zero value | Meaning |
 |-------|-----------|---------|
 | `ParseType` | unset: parse everything except the aggregate | which result kinds to produce (see below) |
-| `TryUnknownDEX` | false | parse programs without a parser from their transfers (a SOL or stablecoin leg is required) |
+| `TryUnknownDEX` | false | parse programs without a parser from their transfers (a SOL or stablecoin leg is required, and a party that sends one token and receives the other) |
 | `ProgramIds` | all | only these programs are parsed; a transaction with none of them gives `State=false`, `Msg="No matching program ids"` |
 | `IgnoreProgramIds` | none | these programs are skipped by every parser, Jupiter included |
 | `AccountInclude` | none | skip the transaction (`State=false`) unless one of these accounts is in it |
@@ -237,11 +237,11 @@ aggregate: BUY 2020000000 -> 67062499999999
 | `AltEvents` | Address Lookup Table program events |
 | `SolBalanceChange`, `TokenBalanceChange` | the signer's balance changes (independent copies) |
 | `Tip` | lamports paid by System transfers to known tip accounts (`constants.TIP_ACCOUNTS`); nil when none |
-| `Warnings` | why a result may be incomplete or doubtful: fetcher errors (URLs cut to scheme and host), unresolved lookup-table accounts, and Jupiter hops whose venue parser reports other amounts than the route event |
+| `Warnings` | why a result may be incomplete or doubtful: fetcher errors and panics (URLs cut to scheme and host, secret-like query values such as `api-key` blanked), unresolved lookup-table accounts, and Jupiter hops whose venue parser reports other amounts than the route event |
 
 In a `types.TradeInfo`:
 
-- `InputToken` / `OutputToken`: `Mint`, `AmountRaw` (exact integer string), `Amount` (float, for display), `Decimals`, and the token accounts and balances involved. Amounts are what the user sent and received where the program reports it (events, `ray_log`), otherwise the transfers.
+- `InputToken` / `OutputToken`: `Mint`, `AmountRaw` (exact integer string), `Amount` (float, for display), `Decimals`, and the token accounts and balances involved. Amounts are what the user sent and received where the program reports it (events, `ray_log`), otherwise the transfers. For Token-2022 mints with a transfer fee that is the user's side (sent before, received after the fee), with the withheld amount as a `transferFee` entry in `Fees`.
 - `Type`: `BUY` or `SELL` relative to SOL or a stablecoin, `SWAP` otherwise.
 - `Fee` and `Fees`: only fees reported by the protocol (events) or paid by transfers flagged as fees; each `FeeInfo` has `Type` (for example `protocol`, `coinCreator`, `platform`, `commission`, `transferFee`), `Dex` and `Recipient`. `AggregateTrade.Fees` lists each fee once.
 - Jupiter hops: `AMM` is the hop venue, and `Pool`, `Type` and the venue's fees come from the venue's own parser; the amounts are the route event's.
@@ -284,7 +284,7 @@ fmt.Println("unresolved accounts:", result.HasUnresolvedAccounts)
 
 Accounts that stay unresolved are empty strings: parsers never guess them, `ParseShredResult.HasUnresolvedAccounts` is set, and `DexParser` adds a warning.
 `TokenAccountsFetcher` works the same way for token accounts whose mint and owner the transaction does not show.
-Fetcher errors go to `ParseResult.Warnings`.
+Fetcher errors, and panics of a fetcher, go to `ParseResult.Warnings`.
 
 ## Bots and tips
 

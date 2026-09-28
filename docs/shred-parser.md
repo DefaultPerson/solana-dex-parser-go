@@ -74,7 +74,7 @@ The buy asks for exactly 67062499999999 tokens and allows at most 2020000000 lam
 | Field | Content |
 |-------|---------|
 | `ParsedInstructions` | typed instructions of every program, in execution order |
-| `Instructions` | the older per-program format: program name (`"Pumpfun"`, `"Jupiter"`, `"System"`, `"Token"`, …) -> decoded events. Programs without decoded instructions are left out |
+| `Instructions` | the older per-program format: program name (`"Pumpfun"`, `"Jupiter"`, `"System"`, `"Token"`, …) -> decoded events, each program's in execution order. Programs without decoded instructions are left out |
 | `TxStatus` | `unknown` without meta, else `success` or `failed` |
 | `HasUnresolvedAccounts` | some lookup-table accounts could not be resolved |
 | `Warnings` | why the result may be incomplete: `ALTsFetcher` / `TokenAccountsFetcher` errors and unresolved lookup-table accounts |
@@ -96,7 +96,7 @@ The buy asks for exactly 67062499999999 tokens and allows at most 2020000000 lam
 
 - **Mints are never guessed.** A mint the transaction does not reveal is `""`, with decimals 0.
 - **Decimals** come from the transaction's token balances or `constants.TOKEN_DECIMALS`, else 0 (unknown). Pump.fun bonding-curve tokens always have 6.
-- **Trade type** is `SWAP` when the direction cannot be determined: for Jupiter and DFlow routes whenever a mint is unknown or both are the same (circular arbitrage). Raydium V4 trades with one known mint are `BUY` for WSOL in and `SELL` for WSOL out.
+- **Trade type** is `SWAP` when the direction cannot be determined: for Jupiter and DFlow routes whenever a mint is unknown or both are the same (circular arbitrage). Raydium V4 trades with one known mint are `BUY` for WSOL in and `SELL` for WSOL out. PumpSwap trades follow the SOL/stablecoin rule too, not the instruction name: a `buy` in a pool whose base is WSOL and whose quote is a token is `SELL`.
 - **Lookup tables**: v0 accounts resolve from `meta.loadedAddresses`, `ParseConfig.AddressLookupTables` or an `ALTsFetcher` (see [Getting Started](getting-started.md#address-lookup-tables-and-fetchers)). Unresolved accounts are `""`, and `UnresolvedAccounts` is set on the instruction (and `unresolvedAccounts` on the older events).
 - **Failed transactions** (meta.err set) give no instructions and `Msg="transaction failed"` unless `IncludeFailedTxs` is set.
 - **Idx** is `"N"` for outer and `"N-M"` for inner instructions.

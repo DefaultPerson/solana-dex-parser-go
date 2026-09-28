@@ -120,7 +120,7 @@ Fetch transactions with `"encoding": "json"` and `"maxSupportedTransactionVersio
 - Jupiter hops take `Pool`, `Type` and venue fees from the venue's own parser run on the hop's instruction; the amounts stay the route event's, and a venue that reports other amounts adds a line to `Warnings`.
 - Program events (Anchor self-CPI events, `Program data` logs) belong to the instruction that emitted them: its stack-height parent, or the nearest preceding matching instruction when the transaction has no stack heights.
 - `Idx` is `"N"` for an outer instruction and `"N-M"` for inner instruction M of outer instruction N; every list is sorted numerically by it.
-- With `TryUnknownDEX` (on for a nil config), programs without a dedicated parser, known or not, are parsed from their transfers when one leg is SOL or a stablecoin; their AMM is the program name or `"Unknown"`.
+- With `TryUnknownDEX` (on for a nil config), programs without a dedicated parser, known or not, are parsed from their transfers when one leg is SOL or a stablecoin and one party (a signer if possible) sends one token and receives the other; payments, deposits and mints nobody answers are not trades. Their AMM is the program name or `"Unknown"`.
 - `ParseResult.Warnings` (and `ParseShredResult.Warnings`) list what made a result incomplete or doubtful (fetcher errors, unresolved lookup-table accounts, Jupiter hop amounts the venue disagrees with); `State` is not affected.
 
 Full reference: [Getting Started](https://defaultperson.github.io/solana-dex-parser-go/getting-started/).
@@ -189,7 +189,7 @@ Legacy entries are kept so historical transactions still parse.
 
 ### Transfer types
 
-These programs report typed transfers (`TransferData.Type`) through `ParseTransfers`, and in `ParseAll` when the transaction has no trades or liquidity events:
+These programs report typed transfers (`TransferData.Type`) through `ParseTransfers`, and in `ParseAll` when the transaction has no trades or liquidity events, wherever they run in the transaction (also after another router):
 
 | Program | Types |
 |---------|-------|
