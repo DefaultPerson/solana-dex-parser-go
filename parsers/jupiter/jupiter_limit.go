@@ -198,7 +198,7 @@ func (p *JupiterLimitOrderParser) ProcessTransfers() []types.TransferData {
 		seen := make(map[string]bool)
 		var unique []types.TransferData
 		for _, t := range transfers {
-			key := fmt.Sprintf("%s-%s=%v", t.Idx, t.Signature, t.IsFee)
+			key := fmt.Sprintf("%s-%s-%s=%v", t.Idx, t.Signature, t.Info.Mint, t.IsFee)
 			if !seen[key] {
 				seen[key] = true
 				unique = append(unique, t)
@@ -348,6 +348,9 @@ func (p *JupiterLimitOrderParser) parseCancelOrder(instruction interface{}, prog
 		}
 	}
 
+	// The returned tokens: the instruction's transfer, else the lamports of
+	// a SOL order's closed order and WSOL reserve accounts, else (no inner
+	// instructions) the maker's balance change when it is a credit
 	decimals := uint8(0)
 	tokenAmount := balance.Change.Amount
 	if transfer != nil {
@@ -355,6 +358,12 @@ func (p *JupiterLimitOrderParser) parseCancelOrder(instruction interface{}, prog
 		tokenAmount = transfer.Info.TokenAmount.Amount
 	} else {
 		decimals = p.Adapter.GetTokenDecimals(mint)
+		if mint == constants.TOKENS.SOL {
+			tokenAmount = closedAccountsLamports(p.Adapter, accounts[0], accounts[1]).String()
+		}
+		if change, ok := new(big.Int).SetString(tokenAmount, 10); !ok || change.Sign() <= 0 {
+			tokenAmount = ""
+		}
 	}
 
 	uiAmount := types.ConvertToUIAmount(new(big.Int).SetUint64(0), decimals)
@@ -380,32 +389,35 @@ func (p *JupiterLimitOrderParser) parseCancelOrder(instruction interface{}, prog
 		}
 	}
 
-	transfers = append(transfers, types.TransferData{
-		Type:      "cancelOrder",
-		ProgramId: programId,
-		Info: types.TransferDataInfo{
-			Authority:             authorityStr,
-			Source:                sourceStr,
-			Destination:           destinationStr,
-			DestinationOwner:      p.Adapter.GetTokenAccountOwner(destination),
-			Mint:                  mint,
-			TokenAmount:           types.TokenAmount{Amount: tokenAmount, UIAmount: &uiAmount, Decimals: decimals},
-			DestinationBalance:    balance.Post.Copy(),
-			DestinationPreBalance: balance.Pre.Copy(),
-		},
-		Idx:       idx,
-		Timestamp: p.Adapter.BlockTime(),
-		Signature: p.Adapter.Signature(),
-	})
+	if tokenAmount != "" {
+		transfers = append(transfers, types.TransferData{
+			Type:      "cancelOrder",
+			ProgramId: programId,
+			Info: types.TransferDataInfo{
+				Authority:             authorityStr,
+				Source:                sourceStr,
+				Destination:           destinationStr,
+				DestinationOwner:      p.Adapter.GetTokenAccountOwner(destination),
+				Mint:                  mint,
+				TokenAmount:           types.TokenAmount{Amount: tokenAmount, UIAmount: &uiAmount, Decimals: decimals},
+				DestinationBalance:    balance.Post.Copy(),
+				DestinationPreBalance: balance.Pre.Copy(),
+			},
+			Idx:       idx,
+			Timestamp: p.Adapter.BlockTime(),
+			Signature: p.Adapter.Signature(),
+		})
+	}
 
-	// Add SOL balance change if not SOL order
+	// A token order's closed order and reserve accounts return their rent
+	// to the maker: a refund of this instruction, not a fee
 	if mint != constants.TOKENS.SOL {
-		solBalanceChanges := p.Adapter.GetAccountSolBalanceChanges(false)
-		if solBalance, ok := solBalanceChanges[user]; ok && solBalance != nil {
-			solUIAmount := float64(0)
-			if solBalance.Change.UIAmount != nil {
-				solUIAmount = *solBalance.Change.UIAmount
+		if refund := closedAccountsLamports(p.Adapter, accounts[0], accounts[1]); refund.Sign() > 0 {
+			var post, pre *types.TokenAmount
+			if solBalance := p.Adapter.GetAccountSolBalanceChanges(false)[user]; solBalance != nil {
+				post, pre = solBalance.Post.Copy(), solBalance.Pre.Copy()
 			}
+			solUIAmount := types.ConvertToUIAmount(refund, 9)
 			transfers = append(transfers, types.TransferData{
 				Type:      "cancelOrder",
 				ProgramId: programId,
@@ -414,17 +426,35 @@ func (p *JupiterLimitOrderParser) parseCancelOrder(instruction interface{}, prog
 					Source:                sourceStr,
 					Destination:           user,
 					Mint:                  constants.TOKENS.SOL,
-					TokenAmount:           types.TokenAmount{Amount: solBalance.Change.Amount, UIAmount: &solUIAmount, Decimals: solBalance.Change.Decimals},
-					DestinationBalance:    solBalance.Post.Copy(),
-					DestinationPreBalance: solBalance.Pre.Copy(),
+					TokenAmount:           types.TokenAmount{Amount: refund.String(), UIAmount: &solUIAmount, Decimals: 9},
+					DestinationBalance:    post,
+					DestinationPreBalance: pre,
 				},
 				Idx:       idx,
 				Timestamp: p.Adapter.BlockTime(),
 				Signature: p.Adapter.Signature(),
-				IsFee:     true,
 			})
 		}
 	}
 
 	return transfers
+}
+
+// closedAccountsLamports returns the lamports that the given accounts held
+// before the transaction and no longer hold at its end (rent released by
+// closing them), 0 when none was closed or balances are unknown
+func closedAccountsLamports(a *adapter.TransactionAdapter, accounts ...string) *big.Int {
+	total := new(big.Int)
+	pre, post := a.GetAccountPreBalance(accounts), a.GetAccountBalance(accounts)
+	for i := range accounts {
+		if pre[i] == nil || post[i] == nil {
+			continue
+		}
+		before, ok1 := new(big.Int).SetString(pre[i].Amount, 10)
+		after, ok2 := new(big.Int).SetString(post[i].Amount, 10)
+		if ok1 && ok2 && before.Cmp(after) > 0 {
+			total.Add(total, before.Sub(before, after))
+		}
+	}
+	return total
 }
