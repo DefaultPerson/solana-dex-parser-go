@@ -153,25 +153,26 @@ func TestIntegTitanFeeIsTitansOwnTransfer(t *testing.T) {
 // A program with a registered route parser is not read by the unknown-DEX
 // fallback: its transfer groups hold the user's transfers to and from the
 // aggregator, not a swap. Shown with a program the fallback turns into a
-// trade (satRush in 47CbsEer..., "Unknown" 2-4) and a route parser that
-// reports nothing.
+// trade (Deriverse in 5awNRRvd..., which has no trade parser; satRush in
+// 47CbsEer... was used before, whose group the fallback no longer takes for
+// a swap) and a route parser that reports nothing.
 func TestIntegRouteProgramSkipsUnknownDEX(t *testing.T) {
-	const sig = "47CbsEeriB5JtFmSVU61NS1thpD1HabJ7AGzzwxiViQqUNQJxrJXtaBU1EeBCLWtbQE7whvKVBjxXa2ELCMc16wp"
-	const satRush = "satRushGBRY2vgapeTAkoxz26vL2cYqyPi6CnBj7Tco"
+	const sig = "5awNRRvdTmtvQfkzSWeBi4FNd47p9CgvmFZNQ4M56j9myAcw9io3pZJYkoF5V3gG2gyFZwbBwzmdUVoBHy3tw8d2"
+	const deriverse = "DRVSpZ2YUYYKgZP8XtLhAGtT1zYSCKzeHfb4DgRnrgqD"
 	count := func(p *dexparser.DexParser) int {
 		n := 0
 		for _, tr := range p.ParseAll(loadFixture(t, sig), nil).Trades {
-			if tr.ProgramId == satRush {
+			if tr.ProgramId == deriverse {
 				n++
 			}
 		}
 		return n
 	}
 	if count(dexparser.NewDexParser()) == 0 {
-		t.Fatal("fixture: no unknown-DEX trade of satRush")
+		t.Fatal("fixture: no unknown-DEX trade of Deriverse")
 	}
 	p := dexparser.NewDexParser()
-	p.RegisterRouteParser(satRush, func(*adapter.TransactionAdapter, types.DexInfo, map[string][]types.TransferData, []types.ClassifiedInstruction) parsers.TradeParser {
+	p.RegisterRouteParser(deriverse, func(*adapter.TransactionAdapter, types.DexInfo, map[string][]types.TransferData, []types.ClassifiedInstruction) parsers.TradeParser {
 		return noTrades{}
 	})
 	if n := count(p); n != 0 {

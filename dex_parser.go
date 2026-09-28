@@ -777,7 +777,7 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 					if !hasSupported {
 						continue
 					}
-					trade := txUtils.ProcessSwapData(transfers, dexInfoFor(programId), true)
+					trade := txUtils.ProcessUnknownSwap(transfers, dexInfoFor(programId))
 					if trade != nil {
 						trades = append(trades, *txUtils.AttachTokenTransferInfo(trade, transferActions))
 					}

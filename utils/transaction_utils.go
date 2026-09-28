@@ -225,6 +225,164 @@ func (tu *TransactionUtils) ProcessSwapData(transfers []types.TransferData, dexI
 	return trade
 }
 
+// ProcessUnknownSwap builds the trade of a transfer group of a program
+// without a trade parser (DexParser's unknown-DEX fallback). A group is a
+// swap only when one party both sends a token (the input) and receives
+// another one (the output), so payments, deposits, fee transfers and mints
+// that nobody answers are not trades. The party sends by signing the
+// transfer (its authority, else the owner of the source account) and
+// receives into an account it owns; a transaction signer is preferred. The
+// amounts are the party's input transfers and output transfers of the two
+// mints (less the input that came back to the party). A party that sends
+// the output mint before receiving it (a two-token deposit with refunds) is
+// not swapping.
+// Native SOL transfers, tips, mints and burns are not legs, nor is an output
+// of 1 unit of a mint with 0 decimals (an NFT). The trade's User is the
+// party when it signed the transaction, else the swap signer.
+func (tu *TransactionUtils) ProcessUnknownSwap(transfers []types.TransferData, dexInfo types.DexInfo) *types.TradeInfo {
+	var legs []*types.TransferData
+	var feeTransfer *types.TransferData
+	for i := range transfers {
+		t := &transfers[i]
+		if t.ProgramId == constants.SYSTEM_PROGRAM_ID || isTipTransfer(t) || !strings.Contains(t.Type, "transfer") || t.Info.Mint == "" {
+			continue
+		}
+		if constants.IsTradeFeeAccount(t.Info.Destination) || constants.IsTradeFeeAccount(t.Info.DestinationOwner) {
+			if feeTransfer == nil {
+				feeTransfer = t
+			}
+			continue
+		}
+		legs = append(legs, t)
+	}
+	sender := func(t *types.TransferData) string {
+		if t.Info.Authority != "" {
+			return t.Info.Authority
+		}
+		return tu.adapter.GetTokenAccountOwner(t.Info.Source)
+	}
+	receiver := func(t *types.TransferData) string {
+		if t.Info.DestinationOwner != "" {
+			return t.Info.DestinationOwner
+		}
+		if owner := tu.adapter.GetTokenAccountOwner(t.Info.Destination); owner != "" {
+			return owner
+		}
+		return t.Info.Destination
+	}
+	isNFT := func(t *types.TransferData) bool {
+		return t.Info.TokenAmount.Amount == "1" && t.Info.TokenAmount.Decimals == 0
+	}
+	signers := tu.adapter.Signers()
+	isSigner := func(account string) bool {
+		for _, s := range signers {
+			if s == account {
+				return true
+			}
+		}
+		return false
+	}
+
+	// sendsFirst reports whether party sends mint before it receives any
+	// (a deposit of that token), rather than forwarding what it received
+	sendsFirst := func(party, mint string) bool {
+		for _, t := range legs {
+			if t.Info.Mint != mint {
+				continue
+			}
+			if receiver(t) == party {
+				return false
+			}
+			if sender(t) == party {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A party that deposits the output mint too (a deposit of two tokens
+	// with partial refunds) is not swapping
+	var party, inputMint, outputMint string
+	for _, in := range legs {
+		from := sender(in)
+		if from == "" {
+			continue
+		}
+		for _, out := range legs {
+			if out.Info.Mint == in.Info.Mint || isNFT(out) || receiver(out) != from || sendsFirst(from, out.Info.Mint) {
+				continue
+			}
+			if party == "" || (!isSigner(party) && isSigner(from)) {
+				party, inputMint, outputMint = from, in.Info.Mint, out.Info.Mint
+			}
+			break
+		}
+	}
+	if party == "" {
+		return nil
+	}
+
+	// The input is what the party sent less what came back to it (a
+	// refund of unused input)
+	inputAmount, outputAmount := new(big.Int), new(big.Int)
+	var input, output *types.TransferData
+	for _, t := range legs {
+		switch {
+		case t.Info.Mint == inputMint && sender(t) == party:
+			inputAmount.Add(inputAmount, parseAmount(t.Info.TokenAmount.Amount))
+			if input == nil {
+				input = t
+			}
+		case t.Info.Mint == inputMint && receiver(t) == party:
+			inputAmount.Sub(inputAmount, parseAmount(t.Info.TokenAmount.Amount))
+		case t.Info.Mint == outputMint && receiver(t) == party:
+			outputAmount.Add(outputAmount, parseAmount(t.Info.TokenAmount.Amount))
+			if output == nil {
+				output = t
+			}
+		}
+	}
+	if inputAmount.Sign() <= 0 || outputAmount.Sign() <= 0 {
+		return nil
+	}
+	inputToken, outputToken := tu.GetTransferTokenInfo(input), tu.GetTransferTokenInfo(output)
+	inputToken.AmountRaw = inputAmount.String()
+	inputToken.Amount = types.ConvertToUIAmount(inputAmount, inputToken.Decimals)
+	outputToken.AmountRaw = outputAmount.String()
+	outputToken.Amount = types.ConvertToUIAmount(outputAmount, outputToken.Decimals)
+
+	user := tu.getSwapSigner()
+	if isSigner(party) {
+		user = party
+	}
+	trade := &types.TradeInfo{
+		Type:        GetTradeType(inputMint, outputMint),
+		InputToken:  *inputToken,
+		OutputToken: *outputToken,
+		User:        user,
+		ProgramId:   dexInfo.ProgramId,
+		AMM:         dexInfo.AMM,
+		Route:       dexInfo.Route,
+		Slot:        tu.adapter.Slot(),
+		Timestamp:   tu.adapter.BlockTime(),
+		Signature:   tu.adapter.Signature(),
+		Idx:         transfers[0].Idx,
+	}
+	if feeTransfer != nil {
+		feeUIAmount := float64(0)
+		if feeTransfer.Info.TokenAmount.UIAmount != nil {
+			feeUIAmount = *feeTransfer.Info.TokenAmount.UIAmount
+		}
+		trade.Fee = &types.FeeInfo{
+			Mint:      feeTransfer.Info.Mint,
+			Amount:    feeUIAmount,
+			AmountRaw: feeTransfer.Info.TokenAmount.Amount,
+			Decimals:  feeTransfer.Info.TokenAmount.Decimals,
+		}
+	}
+	return trade
+}
+
 // getSwapSigner gets the signer for swap transaction
 func (tu *TransactionUtils) getSwapSigner() string {
 	defaultSigner := tu.adapter.Signer()

@@ -17,7 +17,7 @@ import (
 const (
 	solMint  = "So11111111111111111111111111111111111111112"
 	usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-	usdtMint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY9cpmHk6Kt6Qy5M"
+	usdtMint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
 )
 
 // cloneTx deep-copies a transaction through JSON.
