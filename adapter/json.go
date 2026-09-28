@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/goccy/go-json"
@@ -338,13 +339,19 @@ func bytesToInts(b []byte) []int {
 func intFromValue(v interface{}) (int, bool) {
 	switch n := v.(type) {
 	case json.Number:
-		i, err := strconv.ParseInt(string(n), 10, 64)
-		return int(i), err == nil
+		i, err := strconv.Atoi(string(n))
+		return i, err == nil
 	case float64:
-		return int(n), n == float64(int(n))
+		if n != math.Trunc(n) || n < float64(math.MinInt) || n >= float64(math.MaxInt) {
+			return 0, false
+		}
+		return int(n), true
 	case int:
 		return n, true
 	case int64:
+		if n < math.MinInt || n > math.MaxInt {
+			return 0, false
+		}
 		return int(n), true
 	case int32:
 		return int(n), true
@@ -353,8 +360,14 @@ func intFromValue(v interface{}) (int, bool) {
 	case uint16:
 		return int(n), true
 	case uint32:
+		if uint64(n) > math.MaxInt {
+			return 0, false
+		}
 		return int(n), true
 	case uint64:
+		if n > math.MaxInt {
+			return 0, false
+		}
 		return int(n), true
 	}
 	return 0, false
