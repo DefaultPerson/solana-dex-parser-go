@@ -227,6 +227,10 @@ func TestFinalCLMMOneSidedRemove(t *testing.T) {
 	for _, sig := range []string{
 		"25VouSoGsjj7dPr451fPhpNcsCHpyDd99nP5WCuvXgwW3S9deLUz6TkPNPhj29NwjVUihgrPfQkXUst16H1eQDbx", // USDC only
 		"3i2HiLrPv8o8gyw8ezntj1Kg42LxtqiE1tMXXZJu6nkptFT9H7o8t9MLZ4hXVDDGT2NLbpXhniJ1ooMbVJyweHdv", // SOL only
+		"2ZgfezkRMjr8epjCFwtLYoaiZo1Yw7pagoSyYmwj8ZgaYJmtHkb6FpU1BV24ESGB7DXiML9iRzBLuwUEzfi63SAz", // USDC only
+		"3Fr5qCBXjovEjD7khAB96x9DaMmJSYSk1SJatcoubmM7rqEx1NLGxAgTAcrKVDXD4af1TMzGeFtA7H6b2ShnZnvX", // USDC only
+		"3WhctPxTjeN77uHfv7QCCwtUmKFmQvtxj1cK7BdDbnujNLHjoULbrxxAbasiafuaB9bYwo5DC4HQXG3zfYQ7Q3ja", // USDC only
+		"47XBQbz5QmKypDrMfBFeB1m3jSiwDnjRfTuATNnqNXGKwsaYJbaSLhGqf62zgBhzyHUX5dnpQin95y9kNjECGQxm", // USDC only
 	} {
 		tx := loadFixture(t, sig)
 		ix := findIx(t, tx, constants.DEX_PROGRAMS.RAYDIUM_CL.ID, constants.DISCRIMINATORS.RAYDIUM_CL.REMOVE_LIQUIDITY.DECREASE_LIQUIDITY_V2)

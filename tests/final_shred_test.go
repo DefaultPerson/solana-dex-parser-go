@@ -229,7 +229,7 @@ func TestFinalShredDBCPartialFillKinds(t *testing.T) {
 			}
 			ins := oneTypedAt(t, res, constants.DEX_PROGRAMS.METEORA_DBC.ID, utils.FormatIdx(ix.outer, ix.inner))
 			if ins.InputAmountKind != wantIn || ins.OutputAmountKind != wantOut {
-				t.Errorf("%s %d-%d swap_mode %d: kinds %s/%s, want %s/%s", sig[:8], ix.outer, ix.inner, mode, ins.InputAmountKind, ins.OutputAmountKind, wantIn, wantOut)
+				t.Errorf("%s %s swap_mode %d: kinds %s/%s, want %s/%s", sig[:8], utils.FormatIdx(ix.outer, ix.inner), mode, ins.InputAmountKind, ins.OutputAmountKind, wantIn, wantOut)
 			}
 			seen[mode]++
 		}
