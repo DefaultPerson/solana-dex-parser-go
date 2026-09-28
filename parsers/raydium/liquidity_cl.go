@@ -82,7 +82,9 @@ func (p *RaydiumCLPoolParser) GetPoolAction(data []byte) interface{} {
 // v2 instructions' vault mints (open_position_v2 20/21, token22_nft 18/19,
 // increase_liquidity_v2 13/14, decrease_liquidity_v2 14/15) give each side
 // its transfer and mint: a position out of range moves one token only. The
-// token data amounts are slippage limits and are not reported.
+// token data amounts are slippage limits: they are reported only for a
+// decrease without any token transfer (no inner instructions), as its
+// minimum amounts (see parseVaultEvent).
 func (p *RaydiumCLPoolParser) GetEventConfig(eventType types.PoolEventType, instructionType interface{}) *ParseEventConfig {
 	info, ok := instructionType.(InstructionTypeInfo)
 	if !ok {

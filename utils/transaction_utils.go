@@ -210,16 +210,7 @@ func (tu *TransactionUtils) ProcessSwapData(transfers []types.TransferData, dexI
 	}
 
 	if feeTransfer != nil {
-		feeUIAmount := float64(0)
-		if feeTransfer.Info.TokenAmount.UIAmount != nil {
-			feeUIAmount = *feeTransfer.Info.TokenAmount.UIAmount
-		}
-		trade.Fee = &types.FeeInfo{
-			Mint:      feeTransfer.Info.Mint,
-			Amount:    feeUIAmount,
-			AmountRaw: feeTransfer.Info.TokenAmount.Amount,
-			Decimals:  feeTransfer.Info.TokenAmount.Decimals,
-		}
+		trade.Fee = feeInfoFromTransfer(feeTransfer)
 	}
 
 	return trade
@@ -369,18 +360,23 @@ func (tu *TransactionUtils) ProcessUnknownSwap(transfers []types.TransferData, d
 		Idx:         transfers[0].Idx,
 	}
 	if feeTransfer != nil {
-		feeUIAmount := float64(0)
-		if feeTransfer.Info.TokenAmount.UIAmount != nil {
-			feeUIAmount = *feeTransfer.Info.TokenAmount.UIAmount
-		}
-		trade.Fee = &types.FeeInfo{
-			Mint:      feeTransfer.Info.Mint,
-			Amount:    feeUIAmount,
-			AmountRaw: feeTransfer.Info.TokenAmount.Amount,
-			Decimals:  feeTransfer.Info.TokenAmount.Decimals,
-		}
+		trade.Fee = feeInfoFromTransfer(feeTransfer)
 	}
 	return trade
+}
+
+// feeInfoFromTransfer converts a fee transfer into the trade's FeeInfo
+func feeInfoFromTransfer(t *types.TransferData) *types.FeeInfo {
+	feeUIAmount := float64(0)
+	if t.Info.TokenAmount.UIAmount != nil {
+		feeUIAmount = *t.Info.TokenAmount.UIAmount
+	}
+	return &types.FeeInfo{
+		Mint:      t.Info.Mint,
+		Amount:    feeUIAmount,
+		AmountRaw: t.Info.TokenAmount.Amount,
+		Decimals:  t.Info.TokenAmount.Decimals,
+	}
 }
 
 // getSwapSigner gets the signer for swap transaction
@@ -978,8 +974,8 @@ func (tu *TransactionUtils) ApplyToken2022TransferFee(trade *types.TradeInfo, tr
 // transfer must come from the user (authority or source owner), be its
 // destination's only credit, and the destination must be credited exactly
 // the trade's input; the withheld amount is reported in Fees with Type
-// "transferFee". A trade that already reports what the user sent is left
-// unchanged.
+// "transferFee". When the trade already reports what the user sent (a
+// Jupiter hop), only the withheld amount is added to Fees, once per mint.
 func (tu *TransactionUtils) ApplyToken2022InputTransferFee(trade *types.TradeInfo, transfers []types.TransferData) {
 	if trade == nil || trade.InputToken.Mint == "" || trade.InputToken.Mint == constants.TOKENS.SOL {
 		return
@@ -996,7 +992,7 @@ func (tu *TransactionUtils) ApplyToken2022InputTransferFee(trade *types.TradeInf
 			continue
 		}
 		sent := parseAmount(t.Info.TokenAmount.Amount)
-		if sent.Cmp(input) <= 0 {
+		if sent.Cmp(input) < 0 {
 			continue
 		}
 		dest := t.Info.Destination
@@ -1027,11 +1023,18 @@ func (tu *TransactionUtils) ApplyToken2022InputTransferFee(trade *types.TradeInf
 		// credited = post - pre + outgoing
 		credited := new(big.Int).Sub(parseAmount(post.Amount), preAmount)
 		credited.Add(credited, outgoing)
-		if credited.Cmp(input) != 0 {
+		userSide := sent.Cmp(input) == 0
+		if userSide {
+			// The input already is what the user sent (e.g. a Jupiter hop
+			// amount): only the withheld fee is missing
+			if credited.Sign() <= 0 || credited.Cmp(sent) >= 0 || hasTransferFee(trade, mint) {
+				continue
+			}
+		} else if credited.Cmp(input) != 0 {
 			continue
 		}
 
-		withheld := new(big.Int).Sub(sent, input)
+		withheld := new(big.Int).Sub(sent, credited)
 		decimals := trade.InputToken.Decimals
 		trade.InputToken.AmountRaw = sent.String()
 		trade.InputToken.Amount = types.ConvertToUIAmount(sent, decimals)
@@ -1044,6 +1047,16 @@ func (tu *TransactionUtils) ApplyToken2022InputTransferFee(trade *types.TradeInf
 		})
 		return
 	}
+}
+
+// hasTransferFee reports whether trade already lists a transferFee in mint
+func hasTransferFee(trade *types.TradeInfo, mint string) bool {
+	for _, f := range trade.Fees {
+		if f.Type == "transferFee" && f.Mint == mint {
+			return true
+		}
+	}
+	return false
 }
 
 // SortedTransferKeys returns the keys of transferActions in execution order of
