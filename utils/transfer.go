@@ -572,9 +572,6 @@ func ProcessCompiledExtraAction(ix *adapter.UnifiedInstruction, idx string, adap
 	}
 }
 
-// Helper to get string from map. JSON numbers (json.Number, float64) and Go
-// integers are formatted as exact decimal strings, so numeric fields such as
-// jsonParsed system transfer lamports are read as well.
 // parsedAuthority returns the signing authority of a jsonParsed token
 // instruction: the first of keys that is set. The RPC names a multisig
 // authority "multisigAuthority" ("multisigMintAuthority" for mints) with its
@@ -590,6 +587,9 @@ func parsedAuthority(info map[string]interface{}, keys ...string) string {
 	return ""
 }
 
+// Helper to get string from map. JSON numbers (json.Number, float64) and Go
+// integers are formatted as exact decimal strings, so numeric fields such as
+// jsonParsed system transfer lamports are read as well.
 func getStringFromMap(m map[string]interface{}, key string) string {
 	v, ok := m[key]
 	if !ok {
