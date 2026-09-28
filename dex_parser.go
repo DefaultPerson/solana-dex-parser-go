@@ -847,15 +847,29 @@ func (dp *DexParser) parseWithClassifier(tx *adapter.SolanaTransaction, config *
 		}
 	}
 
-	// Process transfers if no trades and no liquidity
+	// Process transfers if no trades and no liquidity: the typed transfers
+	// of every program with a transfer parser (order programs, limit orders,
+	// fee claims), wherever it runs in the transaction, else all transfers
 	if len(trades) == 0 && len(result.Liquidities) == 0 && shouldParseTransfers {
-		if dexInfo.ProgramId != "" && programAllowed(dexInfo.ProgramId) {
-			if factory, ok := dp.transferParserFactories[dexInfo.ProgramId]; ok {
-				classifiedInstructions := instrClassifier.GetInstructions(dexInfo.ProgramId)
-				parser := factory(adapt, dexInfo, transferActions, classifiedInstructions)
-				result.Transfers = append(result.Transfers, parser.ProcessTransfers()...)
+		seen := make(map[string]bool)
+		for _, programId := range allProgramIds {
+			factory, ok := dp.transferParserFactories[programId]
+			if !ok || !programAllowed(programId) {
+				continue
+			}
+			parser := factory(adapt, dexInfo, transferActions, instrClassifier.GetInstructions(programId))
+			for _, t := range parser.ProcessTransfers() {
+				// a parser may cover several programs (Pump.fun and PumpSwap
+				// fee claims): keep each transfer once
+				key := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%v", t.Idx, t.Type, t.ProgramId, t.Info.Mint,
+					t.Info.TokenAmount.Amount, t.Info.Source, t.Info.Destination, t.IsFee)
+				if !seen[key] {
+					seen[key] = true
+					result.Transfers = append(result.Transfers, t)
+				}
 			}
 		}
+		sortByIdx(result.Transfers, func(t types.TransferData) string { return t.Idx })
 		if len(result.Transfers) == 0 {
 			// Add all transfers, in execution order, except those grouped
 			// under a program excluded by ProgramIds/IgnoreProgramIds

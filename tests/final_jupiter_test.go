@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
+	"github.com/DefaultPerson/solana-dex-parser-go/adapter"
 	"github.com/DefaultPerson/solana-dex-parser-go/constants"
 	"github.com/DefaultPerson/solana-dex-parser-go/types"
 )
@@ -118,4 +119,46 @@ func TestFinalLimitCancelSolLegNotNegative(t *testing.T) {
 
 	v1 := loadFixture(t, "4gjGYCX2t4dvjr1C6Nh4kbphhf8SptBfwJ5Jxe7296taktxuKG1USHTEQ8KUiaC2LTWN5Kddf13LNppi8V85moer")
 	checkCancelSolLegs(t, "4gjGYCX2", v1, dexparser.NewDexParser().ParseAll(v1, nil).Transfers)
+}
+
+// TestFinalTypedTransfersUnderRouter: ParseAll ran a transfer parser only for
+// the first known DEX program of the transaction (DexInfo), so a Limit
+// order cancel, DCA or fee claim that runs after another router got the
+// untyped transfer list. No such real transaction is in the corpus (3102
+// cached transactions give the same output either way): the transaction is
+// the real Limit v2 cancel 3CbJs3hE with its first outer instruction (an
+// idempotent ATA create without inner instructions) made an instruction of
+// the legacy OKX router (OKX_DEX), a known DEX program without a transfer
+// parser that now comes first. Truth: the same typed cancelOrder transfers
+// as the unmodified transaction. E2 of the final brief.
+func TestFinalTypedTransfersUnderRouter(t *testing.T) {
+	real := loadFixture(t, "3CbJs3hEW1h27bicr2YUo7CeKrb9Nx3jnwNoMProwsByoTSSRJqpKieE68YiHKqbPCTQ7HRRngU26Uo61Zhm2Xys")
+	want := dexparser.NewDexParser().ParseAll(real, nil).Transfers
+	if len(want) == 0 || want[0].Type != "cancelOrder" {
+		t.Fatalf("fixture: transfers %+v", want)
+	}
+
+	tx := cloneTx(t, real)
+	for _, set := range tx.Meta.InnerInstructions {
+		if set.Index == 0 {
+			t.Fatal("fixture: outer 0 has inner instructions")
+		}
+	}
+	tx.Transaction.Message.AccountKeys = append(tx.Transaction.Message.AccountKeys, adapter.AccountKey{Pubkey: constants.DEX_PROGRAMS.OKX_DEX.ID})
+	tx.Transaction.Message.Instructions[0].(map[string]interface{})["programIdIndex"] = float64(len(tx.Transaction.Message.AccountKeys) - 1)
+
+	res := dexparser.NewDexParser().ParseAll(tx, nil)
+	ctx := newParseContext(tx, nil)
+	if ctx.DexInfo.ProgramId != constants.DEX_PROGRAMS.OKX_DEX.ID {
+		t.Fatalf("DexInfo %+v, want the OKX router program first", ctx.DexInfo)
+	}
+	if len(res.Transfers) != len(want) {
+		t.Fatalf("%d transfers %+v, want the %d typed cancelOrder transfers", len(res.Transfers), res.Transfers, len(want))
+	}
+	for i := range want {
+		g, w := res.Transfers[i], want[i]
+		if g.Type != w.Type || g.Idx != w.Idx || g.Info.Mint != w.Info.Mint || g.Info.TokenAmount.Amount != w.Info.TokenAmount.Amount {
+			t.Errorf("transfer %d: %s %s %s %s, want %s %s %s %s", i, g.Type, g.Idx, g.Info.TokenAmount.Amount, g.Info.Mint, w.Type, w.Idx, w.Info.TokenAmount.Amount, w.Info.Mint)
+		}
+	}
 }
