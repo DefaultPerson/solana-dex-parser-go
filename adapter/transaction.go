@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/big"
 	"reflect"
 	"regexp"
@@ -265,14 +266,45 @@ func (a *TransactionAdapter) Warnings() []string {
 // urlPattern matches a URL, also with JSON-escaped slashes (https:\/\/...);
 // group 1 is the scheme, group 2 the host. The user info runs to the last
 // '@' of the authority, so a password containing '@' is not taken for the
-// host.
-var urlPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*):(?:\\?/){2}(?:[^\s/\\?#"'<>]*@)?([^\s/\\?#"'<>@]+)[^\s"'<>]*`)
+// host. The rest runs to a space, quote or angle bracket, except that a
+// quoted value right after '=' (?key='...') is part of it.
+var urlPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*):(?:\\?/){2}(?:[^\s/\\?#"'<>]*@)?([^\s/\\?#"'<>@]+)(?:='[^\s'<>]*'?|="[^\s"<>]*"?|[^\s"'<>])*`)
+
+// encodedURLPattern matches a percent-encoded URL (https%3A%2F%2Fhost%2F...);
+// group 1 is the scheme, group 2 the host
+var encodedURLPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*)%3A%2F%2F([^\s%/?#"'<>]+)[^\s"'<>]*`)
+
+// secretParamPattern matches a query parameter that commonly holds a secret
+// (api-key, apikey, key, token, secret, password, auth), also percent-encoded
+// and without a URL scheme; group 1 is the name with its '='
+var secretParamPattern = regexp.MustCompile(`(?i)\b((?:api[-_]?key|access[-_]?token|token|key|secret|password|auth)(?:=|%3D))(?:'[^\s'<>]*'?|"[^\s"<>]*"?|[^\s&"'<>]*)`)
+
+// redactURLs cuts every URL in s to scheme and host and blanks the values
+// of query parameters that commonly hold a secret
+func redactURLs(s string) string {
+	s = urlPattern.ReplaceAllString(s, "${1}://${2}")
+	s = encodedURLPattern.ReplaceAllString(s, "${1}://${2}")
+	return secretParamPattern.ReplaceAllString(s, "${1}[redacted]")
+}
 
 // fetcherWarning formats a fetcher error for Warnings. RPC client errors often
 // quote the endpoint URL, whose path, query or user info may hold an API key,
-// so every URL is cut to scheme and host.
+// so every URL is cut to scheme and host (redactURLs).
 func fetcherWarning(fetcher string, err error) string {
-	return fetcher + ": " + urlPattern.ReplaceAllString(err.Error(), "${1}://${2}")
+	return fetcher + ": " + redactURLs(err.Error())
+}
+
+// callFetcher calls a user fetcher, turning a panic into an error so that
+// the failure becomes a redacted warning like a returned error instead of a
+// failed parse whose message quotes the panic unredacted
+func callFetcher[T any](fetch func() (T, error)) (result T, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var zero T
+			result, err = zero, fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return fetch()
 }
 
 // buildIndexes builds the account index and token balance lookups
@@ -546,7 +578,7 @@ func (a *TransactionAdapter) resolveLookups(lookups []AddressTableLookup, static
 			}
 		}
 		if len(missing) > 0 {
-			if res, err := fetcher.Fetch(missing); err == nil {
+			if res, err := callFetcher(func() (map[string]*types.LoadedAddresses, error) { return fetcher.Fetch(missing) }); err == nil {
 				fetched = res
 			} else {
 				a.warnings = append(a.warnings, fetcherWarning("ALTsFetcher", err))
@@ -1211,7 +1243,7 @@ func (a *TransactionAdapter) fetchTokenAccounts() {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	infos, err := a.Config.TokenAccountsFetcher.Fetch(keys)
+	infos, err := callFetcher(func() ([]*types.TokenAccountInfo, error) { return a.Config.TokenAccountsFetcher.Fetch(keys) })
 	if err != nil {
 		a.warnings = append(a.warnings, fetcherWarning("TokenAccountsFetcher", err))
 		return

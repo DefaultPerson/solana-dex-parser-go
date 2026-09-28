@@ -1,7 +1,10 @@
 package tests
 
 import (
+	"errors"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	dexparser "github.com/DefaultPerson/solana-dex-parser-go"
@@ -108,4 +111,46 @@ func TestFinalBatchEarlyStopResults(t *testing.T) {
 			t.Errorf("workers=%d: %d parsed, %d skipped of %d", workers, parsed, skipped, len(txs))
 		}
 	}
+}
+
+// TestFinalFetcherRedaction: fetcher failures reach ParseResult.Warnings with
+// URLs cut to scheme and host, but some URL forms leaked their secret (a
+// quoted query value, a URL without scheme, a percent-encoded URL, a url.URL
+// dump), and a fetcher that panicked failed the whole parse with the panic
+// text, URL included, in Msg. Truth: no warning or message contains the
+// secret, and a panicking fetcher is a warning, not a failed parse. robust-3.
+func TestFinalFetcherRedaction(t *testing.T) {
+	const secret = "SECRETXYZ"
+	stripped := cloneTx(t, loadFixture(t, sigTwoLookups))
+	stripped.Meta.LoadedAddresses = nil
+	check := func(name string, fetch func([]types.AddressTableLookup) (map[string]*types.LoadedAddresses, error)) {
+		t.Helper()
+		cfg := types.DefaultParseConfig()
+		cfg.ALTsFetcher = types.NewALTsFetcher(types.FetchFilterAll, fetch)
+		dex := dexparser.NewDexParser().ParseAll(stripped, &cfg)
+		shred := dexparser.NewShredParser().ParseAll(stripped, &cfg)
+		for parser, r := range map[string][]string{
+			"DexParser":   append([]string{strconv.FormatBool(dex.State), dex.Msg}, dex.Warnings...),
+			"ShredParser": append([]string{strconv.FormatBool(shred.State), shred.Msg}, shred.Warnings...),
+		} {
+			text := strings.Join(r[1:], " ")
+			if r[0] != "true" || strings.Contains(text, secret) || !strings.Contains(text, "ALTsFetcher: ") {
+				t.Errorf("%s %s: State=%s Msg and Warnings %q", name, parser, r[0], r[1:])
+			}
+		}
+	}
+	for name, msg := range map[string]string{
+		"quoted value":   "get https://host.example/?key='" + secret + "'",
+		"no scheme":      "request to rpc.example/?api-key=" + secret + " failed",
+		"percent-encode": "bad url https%3A%2F%2Frpc.example%2F%3Fapi-key%3D" + secret,
+		"url dump":       `&url.URL{Scheme:"https", Host:"rpc.example", RawQuery:"api-key=` + secret + `"}`,
+	} {
+		msg := msg
+		check(name, func([]types.AddressTableLookup) (map[string]*types.LoadedAddresses, error) {
+			return nil, errors.New(msg)
+		})
+	}
+	check("panic", func([]types.AddressTableLookup) (map[string]*types.LoadedAddresses, error) {
+		panic(`Post "https://mainnet.helius-rpc.com/?api-key=` + secret + `": EOF`)
+	})
 }
