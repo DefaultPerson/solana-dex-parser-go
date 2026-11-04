@@ -375,7 +375,7 @@ func TestDocsSnippetsCompile(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	goMod := fmt.Sprintf("module docsnippets\n\ngo 1.23\n\nrequire github.com/DefaultPerson/solana-dex-parser-go v0.0.0\n\nreplace github.com/DefaultPerson/solana-dex-parser-go => %s\n", root)
+	goMod := fmt.Sprintf("module docsnippets\n\ngo 1.23.0\n\nrequire github.com/DefaultPerson/solana-dex-parser-go v0.0.0\n\nreplace github.com/DefaultPerson/solana-dex-parser-go => %s\n", root)
 	writeFile(t, filepath.Join(dir, "go.mod"), goMod)
 	writeFile(t, filepath.Join(dir, "go.sum"), string(goSum))
 
