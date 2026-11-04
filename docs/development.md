@@ -5,6 +5,8 @@
 - Go 1.23+ (the floor in go.mod; CI also tests the two current Go releases)
 - Git
 
+Development commands automatically select the Go 1.27.3 toolchain via go.mod; library consumers still need only Go 1.23.0+.
+
 ## Setup
 
 ```bash
