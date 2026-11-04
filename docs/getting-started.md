@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.22 or higher
+- Go 1.23 or higher
 
 ## Installation
 

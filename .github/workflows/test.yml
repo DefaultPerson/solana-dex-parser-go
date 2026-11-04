@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.22 is the floor declared in go.mod
-        go: ['1.22', 'oldstable', 'stable']
+        # 1.23 is the floor declared in go.mod
+        go: ['1.23', 'oldstable', 'stable']
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -62,9 +62,9 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      # staticcheck 2026.2.1; bump together with the Go release it supports
+      # staticcheck 2026.2.2; bump together with the Go release it supports
       - name: staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
