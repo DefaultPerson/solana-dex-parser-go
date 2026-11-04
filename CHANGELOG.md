@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Update go-json to v0.12.0; the minimum supported Go version is now 1.23.
+- Update Staticcheck to 2026.2.2 (v0.8.2) for Go 1.27.2+ export data.
+
 All notable changes to this project will be documented in this file.
 
 ## [1.3.0] - 2026-09-28

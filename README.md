@@ -1,6 +1,6 @@
 # Solana DEX Parser (Go)
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/DefaultPerson/solana-dex-parser-go/actions/workflows/test.yml/badge.svg)](https://github.com/DefaultPerson/solana-dex-parser-go/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://defaultperson.github.io/solana-dex-parser-go/)
@@ -18,7 +18,7 @@ These numbers are computed from the code by `TestDocsReadmeCounts` (tests/docs_c
 go get github.com/DefaultPerson/solana-dex-parser-go
 ```
 
-Requires Go 1.22 or newer.
+Requires Go 1.23 or newer.
 
 ## Quick Start
 

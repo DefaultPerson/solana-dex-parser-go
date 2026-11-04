@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.22+ (the floor in go.mod; CI also tests the two current Go releases)
+- Go 1.23+ (the floor in go.mod; CI also tests the two current Go releases)
 - Git
 
 ## Setup
@@ -61,11 +61,11 @@ CI runs these on the stable Go release:
 ```bash
 gofmt -l .                     # must print nothing
 go vet ./...
-go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 ```
 
-staticcheck v0.8.1 (2026.2.1) and govulncheck v1.8.0 need Go 1.26 or newer.
+staticcheck v0.8.2 (2026.2.2) and govulncheck v1.8.0 need Go 1.26 or newer.
 
 ## Project Structure
 
